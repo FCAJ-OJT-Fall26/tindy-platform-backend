@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Tindy.Api/Tindy.Api.csproj" />
+    <Project Path="src/Tindy.Application/Tindy.Application.csproj" />
+    <Project Path="src/Tindy.Infrastructure/Tindy.Infrastructure.csproj" />
+  </Folder>
+</Solution>
