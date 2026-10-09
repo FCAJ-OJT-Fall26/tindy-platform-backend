@@ -1,0 +1,45 @@
+using Microsoft.EntityFrameworkCore;
+using Tindy.Application.Entities;
+
+namespace Tindy.Infrastructure.Persistence;
+
+public class TindyDbContext : DbContext
+{
+    public TindyDbContext(
+        DbContextOptions<TindyDbContext> options)
+        : base(options)
+    {
+    }
+
+    public DbSet<User> Users => Set<User>();
+
+    public DbSet<UserProfile> UserProfiles
+        => Set<UserProfile>();
+
+    public DbSet<Role> Roles
+        => Set<Role>();
+
+    public DbSet<Permission> Permissions
+        => Set<Permission>();
+
+    public DbSet<UserRole> UserRoles
+        => Set<UserRole>();
+
+    public DbSet<RolePermission> RolePermissions
+        => Set<RolePermission>();
+
+    public DbSet<UserCredential> UserCredentials
+        => Set<UserCredential>();
+
+    public DbSet<ExternalAuthAccount> ExternalAuthAccounts
+        => Set<ExternalAuthAccount>();
+
+    protected override void OnModelCreating(
+        ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        modelBuilder.ApplyConfigurationsFromAssembly(
+            typeof(TindyDbContext).Assembly);
+    }
+}
