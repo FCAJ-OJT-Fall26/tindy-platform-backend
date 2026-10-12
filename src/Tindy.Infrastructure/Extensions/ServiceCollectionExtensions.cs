@@ -53,6 +53,11 @@ public static class ServicesCollectionExtensions
         // ===================================
         services.AddScoped<IAuthRepository, AuthRepository>();
 
+        // ===================================
+        // JWT ACCESS TOKEN SERVICE
+        // ===================================
+        services.AddScoped<IJwtTokenService, JwtTokenService>();
+
         return services;
     }
 }
