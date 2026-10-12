@@ -29,47 +29,47 @@ public static class ServiceCollectionExtensions
             });
 
 
-services.Configure<ApiBehaviorOptions>(options =>
-{
-    options.InvalidModelStateResponseFactory = context =>
-    {
-        var errors = context.ModelState
-            .Where(entry =>
-                entry.Value is { Errors.Count: > 0 })
-            .ToDictionary(
-                entry => JsonNamingPolicy.SnakeCaseLower
-                    .ConvertName(entry.Key),
-                entry => entry.Value!.Errors
-                    .Select(error =>
-                        string.IsNullOrWhiteSpace(
-                            error.ErrorMessage)
-                            ? "Invalid value."
-                            : error.ErrorMessage)
-                    .ToArray()
-            );
-
-        var problem = new ValidationProblemDetails(errors)
+        services.Configure<ApiBehaviorOptions>(options =>
         {
-            Status = StatusCodes.Status400BadRequest,
-            Title = "Bad Request",
-            Detail = "Dữ liệu đầu vào không hợp lệ.",
-            Instance = context.HttpContext.Request.Path
-        };
+            options.InvalidModelStateResponseFactory = context =>
+            {
+                var errors = context.ModelState
+                    .Where(entry =>
+                        entry.Value is { Errors.Count: > 0 })
+                    .ToDictionary(
+                        entry => JsonNamingPolicy.SnakeCaseLower
+                            .ConvertName(entry.Key),
+                        entry => entry.Value!.Errors
+                            .Select(error =>
+                                string.IsNullOrWhiteSpace(
+                                    error.ErrorMessage)
+                                    ? "Invalid value."
+                                    : error.ErrorMessage)
+                            .ToArray()
+                    );
 
-        problem.Extensions["error_code"] =
-            "VALIDATION_FAILED";
+                var problem = new ValidationProblemDetails(errors)
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = "Bad Request",
+                    Detail = "Dữ liệu đầu vào không hợp lệ.",
+                    Instance = context.HttpContext.Request.Path
+                };
 
-        problem.Extensions["traceId"] =
-            context.HttpContext.TraceIdentifier;
+                problem.Extensions["error_code"] =
+                    "VALIDATION_FAILED";
 
-        var result = new BadRequestObjectResult(problem);
+                problem.Extensions["traceId"] =
+                    context.HttpContext.TraceIdentifier;
 
-        result.ContentTypes.Add(
-            "application/problem+json");
+                var result = new BadRequestObjectResult(problem);
 
-        return result;
-    };
-});
+                result.ContentTypes.Add(
+                    "application/problem+json");
+
+                return result;
+            };
+        });
 
 
         services.AddOpenApi("tindy");
