@@ -10,7 +10,7 @@ public class UserProfile
     public string? Location { get; set; }
     public string? AvatarUrl { get; set; }
     public string? CoverImageUrl { get; set; }
-    public string? CareerGoal { get; set; }
+    public string? University { get; set; }
     public string? CurrentRole { get; set; }
     public string? PublicEmail { get; set; }
     public string? GithubUrl { get; set; }
