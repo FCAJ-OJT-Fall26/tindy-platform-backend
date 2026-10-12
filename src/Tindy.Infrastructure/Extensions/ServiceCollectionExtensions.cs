@@ -5,6 +5,8 @@ using Tindy.Infrastructure.Persistence;
 using Tindy.Infrastructure.Persistence.Seeding;
 using Tindy.Application.Interfaces.Services;
 using Tindy.Infrastructure.Services;
+using Tindy.Application.Interfaces.Repositories;
+using Tindy.Infrastructure.Repositories;
 
 namespace Tindy.Infrastructure.Extensions;
 
@@ -45,7 +47,12 @@ public static class ServicesCollectionExtensions
         // PASSWORD HASHING
         // ===================================
         services.AddScoped<IPasswordHasher, PasswordHasher>();
-        
+
+        // ===================================
+        // AUTHENTICATION REPOSITORY
+        // ===================================
+        services.AddScoped<IAuthRepository, AuthRepository>();
+
         return services;
     }
 }
