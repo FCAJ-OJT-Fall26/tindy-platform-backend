@@ -30,6 +30,11 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasMaxLength(30)
             .IsRequired();
 
+        builder.Property(x => x.IsOnboardingCompleted)
+            .HasColumnName("is_onboarding_completed")
+            .HasDefaultValue(false)
+            .IsRequired();
+
         builder.Property(x => x.CreatedAt)
             .HasColumnName("created_at")
             .IsRequired();

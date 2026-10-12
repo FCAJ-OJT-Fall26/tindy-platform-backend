@@ -9,7 +9,14 @@ public class UserProfileConfiguration
 {
     public void Configure(EntityTypeBuilder<UserProfile> builder)
     {
-        builder.ToTable("user_profiles");
+        builder.ToTable("user_profiles", table =>
+        {
+            table.HasCheckConstraint(
+                "ck_user_profiles_available_hours_per_week",
+                "available_hours_per_week IS NULL OR " +
+                "available_hours_per_week BETWEEN 1 AND 40"
+            );
+        });
 
         builder.HasKey(x => x.UserId);
 
@@ -52,6 +59,10 @@ public class UserProfileConfiguration
         builder.Property(x => x.University)
             .HasColumnName("university")
             .HasMaxLength(255)
+            .IsRequired(false);
+
+        builder.Property(x => x.AvailableHoursPerWeek)
+            .HasColumnName("available_hours_per_week")
             .IsRequired(false);
 
         builder.Property(x => x.PublicEmail)

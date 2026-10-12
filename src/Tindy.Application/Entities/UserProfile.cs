@@ -11,6 +11,7 @@ public class UserProfile
     public string? AvatarUrl { get; set; }
     public string? CoverImageUrl { get; set; }
     public string? University { get; set; }
+    public int? AvailableHoursPerWeek { get; set; }
     public string? CurrentRole { get; set; }
     public string? PublicEmail { get; set; }
     public string? GithubUrl { get; set; }

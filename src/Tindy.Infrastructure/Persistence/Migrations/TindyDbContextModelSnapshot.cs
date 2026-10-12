@@ -152,6 +152,12 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("deleted_at");
 
+                    b.Property<bool>("IsOnboardingCompleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_onboarding_completed");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(30)
@@ -254,6 +260,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("user_id");
 
+                    b.Property<int?>("AvailableHoursPerWeek")
+                        .HasColumnType("integer")
+                        .HasColumnName("available_hours_per_week");
+
                     b.Property<string>("AvatarUrl")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)")
@@ -340,7 +350,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
                     b.HasKey("UserId");
 
-                    b.ToTable("user_profiles", (string)null);
+                    b.ToTable("user_profiles", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_user_profiles_available_hours_per_week", "available_hours_per_week IS NULL OR available_hours_per_week BETWEEN 1 AND 40");
+                        });
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.UserRole", b =>
