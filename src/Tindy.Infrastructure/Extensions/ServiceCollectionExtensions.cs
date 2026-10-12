@@ -3,6 +3,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Tindy.Infrastructure.Persistence;
 using Tindy.Infrastructure.Persistence.Seeding;
+using Tindy.Application.Interfaces.Services;
+using Tindy.Infrastructure.Services;
 
 namespace Tindy.Infrastructure.Extensions;
 
@@ -39,7 +41,11 @@ public static class ServicesCollectionExtensions
                 });
         });
 
-
+        // ===================================
+        // PASSWORD HASHING
+        // ===================================
+        services.AddScoped<IPasswordHasher, PasswordHasher>();
+        
         return services;
     }
 }
