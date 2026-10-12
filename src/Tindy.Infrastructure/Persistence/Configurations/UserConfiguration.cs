@@ -18,12 +18,12 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(x => x.Username)
             .HasColumnName("username")
             .HasMaxLength(50)
-            .IsRequired();        
+            .IsRequired(false);        
 
         builder.Property(x => x.UsernameNormalized)
             .HasColumnName("username_normalized")
             .HasMaxLength(50)
-            .IsRequired();
+            .IsRequired(false);
 
         builder.Property(x => x.Status)
             .HasColumnName("status")

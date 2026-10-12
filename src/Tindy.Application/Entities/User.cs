@@ -3,8 +3,8 @@ namespace Tindy.Application.Entities;
 public class User
 {
     public Guid UserId {get; set;}
-    public string Username {get; set;} = null!;
-    public string UsernameNormalized {get; set;} = null!;
+    public string? Username {get; set;}
+    public string? UsernameNormalized {get; set;}
     public string Status {get; set;} = null!;
     public DateTime CreatedAt {get; set;} 
     public DateTime? UpdatedAt {get;set;}

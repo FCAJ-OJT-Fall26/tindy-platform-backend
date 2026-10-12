@@ -163,13 +163,11 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnName("updated_at");
 
                     b.Property<string>("Username")
-                        .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
                         .HasColumnName("username");
 
                     b.Property<string>("UsernameNormalized")
-                        .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
                         .HasColumnName("username_normalized");
@@ -265,11 +263,6 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("bio");
 
-                    b.Property<string>("CareerGoal")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
-                        .HasColumnName("career_goal");
-
                     b.Property<string>("CoverImageUrl")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)")
@@ -335,6 +328,11 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)")
                         .HasColumnName("resume_url");
+
+                    b.Property<string>("University")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("university");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")

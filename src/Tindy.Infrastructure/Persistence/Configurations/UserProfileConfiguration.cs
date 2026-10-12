@@ -45,13 +45,14 @@ public class UserProfileConfiguration
             .HasColumnName("cover_image_url")
             .HasMaxLength(1000);
 
-        builder.Property(x => x.CareerGoal)
-            .HasColumnName("career_goal")
-            .HasMaxLength(500);
-
         builder.Property(x => x.CurrentRole)
             .HasColumnName("current_role")
             .HasMaxLength(255);
+
+        builder.Property(x => x.University)
+            .HasColumnName("university")
+            .HasMaxLength(255)
+            .IsRequired(false);
 
         builder.Property(x => x.PublicEmail)
             .HasColumnName("public_email")
