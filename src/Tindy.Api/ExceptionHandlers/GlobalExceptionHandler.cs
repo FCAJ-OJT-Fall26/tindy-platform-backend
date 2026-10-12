@@ -73,12 +73,34 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
             Instance = httpContext.Request.Path
         };
 
+        problemDetails.Extensions["error_code"] =
+            exception switch
+            {
+                EmailAlreadyExistsException =>
+                    "AUTH_EMAIL_ALREADY_EXISTS",
+
+                ConflictException =>
+                    "CONFLICT",
+
+                NotFoundException =>
+                    "NOT_FOUND",
+
+                BusinessRuleException =>
+                    "BUSINESS_RULE_VIOLATION",
+
+                _ =>
+                    "INTERNAL_SERVER_ERROR"
+            };
+
         // 4. Include TraceId
         problemDetails.Extensions["traceId"] =
             httpContext.TraceIdentifier;
 
         // 5. Set HTTP status and write response
         httpContext.Response.StatusCode = statusCode;
+
+        httpContext.Response.ContentType =
+            "application/problem+json";
 
         await httpContext.Response.WriteAsJsonAsync(
             problemDetails,

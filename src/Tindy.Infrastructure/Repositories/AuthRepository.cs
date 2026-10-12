@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using Tindy.Application.Entities;
 using Tindy.Application.Interfaces.Repositories;
 using Tindy.Infrastructure.Persistence;
+using Npgsql;
+using Tindy.Application.Exceptions;
 
 namespace Tindy.Infrastructure.Repositories;
 
@@ -128,10 +130,25 @@ public sealed class AuthRepository : IAuthRepository
     // ===================================
     // 8. SAVE CHANGES
     // ===================================
+
     public async Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default)
     {
-        return await _context.SaveChangesAsync(
-            cancellationToken);
+        try
+        {
+            return await _context.SaveChangesAsync(
+                cancellationToken);
+        }
+        catch (DbUpdateException ex)
+            when (ex.InnerException is PostgresException
+            {
+                SqlState: PostgresErrorCodes.UniqueViolation,
+                ConstraintName:
+                    "ux_user_credentials_email_normalized"
+            })
+        {
+            throw new EmailAlreadyExistsException(ex);
+        }
     }
+
 }

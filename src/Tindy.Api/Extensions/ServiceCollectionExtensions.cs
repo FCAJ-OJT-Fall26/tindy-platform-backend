@@ -1,9 +1,11 @@
-
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using Tindy.Infrastructure.Authentication;
+using Tindy.Application.Interfaces.Services;
+using Tindy.Application.Services;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
 
 namespace Tindy.Api.Extensions;
 
@@ -16,7 +18,59 @@ public static class ServiceCollectionExtensions
         // ===================================
         // 1. CONTROLLERS & OPENAPI
         // ===================================
-        services.AddControllers();
+        services.AddControllers()
+            .AddJsonOptions(options =>
+            {
+                options.JsonSerializerOptions.PropertyNamingPolicy =
+                    JsonNamingPolicy.SnakeCaseLower;
+
+                options.JsonSerializerOptions.DictionaryKeyPolicy =
+                    JsonNamingPolicy.SnakeCaseLower;
+            });
+
+
+services.Configure<ApiBehaviorOptions>(options =>
+{
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var errors = context.ModelState
+            .Where(entry =>
+                entry.Value is { Errors.Count: > 0 })
+            .ToDictionary(
+                entry => JsonNamingPolicy.SnakeCaseLower
+                    .ConvertName(entry.Key),
+                entry => entry.Value!.Errors
+                    .Select(error =>
+                        string.IsNullOrWhiteSpace(
+                            error.ErrorMessage)
+                            ? "Invalid value."
+                            : error.ErrorMessage)
+                    .ToArray()
+            );
+
+        var problem = new ValidationProblemDetails(errors)
+        {
+            Status = StatusCodes.Status400BadRequest,
+            Title = "Bad Request",
+            Detail = "Dữ liệu đầu vào không hợp lệ.",
+            Instance = context.HttpContext.Request.Path
+        };
+
+        problem.Extensions["error_code"] =
+            "VALIDATION_FAILED";
+
+        problem.Extensions["traceId"] =
+            context.HttpContext.TraceIdentifier;
+
+        var result = new BadRequestObjectResult(problem);
+
+        result.ContentTypes.Add(
+            "application/problem+json");
+
+        return result;
+    };
+});
+
 
         services.AddOpenApi("tindy");
 
@@ -151,6 +205,11 @@ public static class ServiceCollectionExtensions
         // 6. AUTHORIZATION
         // ===================================
         services.AddAuthorization();
+
+        // ===================================
+        // AUTHENTICATION APPLICATION SERVICE
+        // ===================================
+        services.AddScoped<IAuthService, AuthService>();
 
         return services;
     }
