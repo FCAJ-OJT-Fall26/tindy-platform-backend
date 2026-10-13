@@ -1,4 +1,7 @@
 
+using Microsoft.AspNetCore.Authorization;
+using Tindy.Api.Authorization;
+
 namespace Tindy.Api.Extensions;
 
 public static class WebApplicationExtensions
@@ -11,7 +14,7 @@ public static class WebApplicationExtensions
         // ===================================
         if (app.Environment.IsDevelopment())
         {
-            app.MapOpenApi();
+            app.MapOpenApi().AllowAnonymous();
 
             app.UseSwaggerUI(options =>
             {
@@ -45,12 +48,18 @@ public static class WebApplicationExtensions
         // ===================================
         if (app.Environment.IsDevelopment())
         {
+            // Keep the JWT-only smoke test working for new users.
             app.MapGet(
                 "/api/v1/dev/auth-check",
-                () => Results.Ok(new
-                {
-                    message = "Authenticated"
-                }))
+                () => Results.Ok(new { message = "Authenticated" }))
+                .RequireAuthorization(OnboardingPolicies.AuthenticatedOnly)
+                .ExcludeFromDescription();
+
+            // DEV-only test for the full onboarding gate.
+            // This endpoint uses DefaultPolicy (JWT + completed onboarding).
+            app.MapGet(
+                "/api/v1/dev/onboarding-gate-check",
+                () => Results.Ok(new { message = "Onboarding gate passed" }))
                 .RequireAuthorization()
                 .ExcludeFromDescription();
         }

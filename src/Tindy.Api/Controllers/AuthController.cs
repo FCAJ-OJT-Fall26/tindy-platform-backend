@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Tindy.Application.DTOs.Authentication;
 using Tindy.Application.Interfaces.Services;
 using Microsoft.AspNetCore.RateLimiting;
+using Tindy.Api.Authorization;
 
 namespace Tindy.Api.Controllers;
 
@@ -80,7 +81,7 @@ public sealed class AuthController : ControllerBase
     // POST /api/v1/auth/logout
     // ===================================
     [HttpPost("logout")]
-    [Authorize]
+    [Authorize(Policy = OnboardingPolicies.AuthenticatedOnly)]
     [ProducesResponseType(
         StatusCodes.Status200OK)]
     [ProducesResponseType(

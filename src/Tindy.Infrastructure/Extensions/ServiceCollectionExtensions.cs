@@ -56,6 +56,9 @@ public static class ServicesCollectionExtensions
         // Onboarding repository
         services.AddScoped<IOnboardingRepository, OnboardingRepository>();
 
+        // Lightweight read-only check for protected business APIs
+        services.AddScoped<IOnboardingAccessReader, OnboardingAccessReader>();
+
         // ===================================
         // JWT ACCESS TOKEN SERVICE
         // ===================================

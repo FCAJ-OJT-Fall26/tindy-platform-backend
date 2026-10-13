@@ -1,13 +1,14 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Tindy.Application.DTOs.Onboarding;
+using Tindy.Api.Authorization;
 using Tindy.Application.Exceptions;
 using Tindy.Application.Interfaces.Services;
 
 namespace Tindy.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Policy = OnboardingPolicies.AuthenticatedOnly)]
 [Route("api/v1/me")]
 public sealed class MeController : ControllerBase
 {

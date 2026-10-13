@@ -1,4 +1,8 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Policy;
+using Microsoft.Extensions.DependencyInjection;
+using Tindy.Api.Authorization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
@@ -206,7 +210,34 @@ public static class ServiceCollectionExtensions
         // ===================================
         // 6. AUTHORIZATION
         // ===================================
-        services.AddAuthorization();
+        // Every API is protected by default, including future business APIs.
+        // Explicitly exempt only authenticated setup endpoints and public endpoints.
+        services.AddAuthorization(options =>
+        {
+            var completedOnboardingPolicy = new AuthorizationPolicyBuilder(
+                    JwtBearerDefaults.AuthenticationScheme)
+                .RequireAuthenticatedUser()
+                .AddRequirements(new OnboardingCompletedRequirement())
+                .Build();
+
+            // Plain [Authorize] uses this policy.
+            options.DefaultPolicy = completedOnboardingPolicy;
+
+            // Routes without any [Authorize] also require onboarding unless
+            // explicitly decorated with [AllowAnonymous] or an exception policy.
+            options.FallbackPolicy = completedOnboardingPolicy;
+
+            // Limited access for /me, onboarding and logout.
+            options.AddPolicy(
+                OnboardingPolicies.AuthenticatedOnly,
+                new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme)
+                    .RequireAuthenticatedUser()
+                    .Build());
+        });
+
+        services.AddScoped<IAuthorizationHandler, OnboardingCompletedHandler>();
+        services.AddSingleton<IAuthorizationMiddlewareResultHandler,
+            OnboardingAuthorizationResultHandler>();
 
         // ===================================
         // AUTHENTICATION APPLICATION SERVICE
