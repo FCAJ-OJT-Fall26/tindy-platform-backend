@@ -75,4 +75,24 @@ public sealed class AuthController : ControllerBase
             data = result
         });
     }
+
+    // ===================================
+    // POST /api/v1/auth/logout
+    // ===================================
+    [HttpPost("logout")]
+    [Authorize]
+    [ProducesResponseType(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(
+        StatusCodes.Status401Unauthorized)]
+    public IActionResult Logout()
+    {
+        return Ok(new
+        {
+            success = true,
+            message = "Đăng xuất thành công",
+            data = (object?)null
+        });
+    }
+
 }
