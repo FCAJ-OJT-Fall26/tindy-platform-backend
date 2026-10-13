@@ -137,6 +137,33 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.ToTable("role_permissions", (string)null);
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.Skill", b =>
+                {
+                    b.Property<Guid>("SkillId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("skill_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("NameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name_normalized");
+
+                    b.HasKey("SkillId");
+
+                    b.HasIndex("NameNormalized")
+                        .IsUnique()
+                        .HasDatabaseName("ux_skills_name_normalized");
+
+                    b.ToTable("skills", (string)null);
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.User", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -254,6 +281,28 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.ToTable("user_credentials", (string)null);
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.UserOnboardingStep", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("StepNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("step_number");
+
+                    b.Property<DateTime>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.HasKey("UserId", "StepNumber");
+
+                    b.ToTable("user_onboarding_steps", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_user_onboarding_steps_step_number", "step_number BETWEEN 1 AND 7");
+                        });
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.UserProfile", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -309,6 +358,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasDefaultValue(true)
                         .HasColumnName("is_public");
 
+                    b.Property<string>("LearningGoals")
+                        .HasColumnType("text")
+                        .HasColumnName("learning_goals");
+
                     b.Property<string>("LinkedinUrl")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)")
@@ -329,6 +382,19 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("phone_number");
 
+                    b.Property<string>("PreferredRole")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("preferred_role");
+
+                    b.Property<string>("PreviousProjectsAndContribution")
+                        .HasColumnType("text")
+                        .HasColumnName("previous_projects_and_contribution");
+
+                    b.Property<string>("ProfessionalInterests")
+                        .HasColumnType("text")
+                        .HasColumnName("professional_interests");
+
                     b.Property<string>("PublicEmail")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -338,6 +404,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)")
                         .HasColumnName("resume_url");
+
+                    b.Property<string>("TechnologiesToLearn")
+                        .HasColumnType("text")
+                        .HasColumnName("technologies_to_learn");
 
                     b.Property<string>("University")
                         .HasMaxLength(255)
@@ -372,6 +442,24 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_user_roles_role_id");
 
                     b.ToTable("user_roles", (string)null);
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.UserSkill", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<Guid>("SkillId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("skill_id");
+
+                    b.HasKey("UserId", "SkillId");
+
+                    b.HasIndex("SkillId")
+                        .HasDatabaseName("ix_user_skills_skill_id");
+
+                    b.ToTable("user_skills", (string)null);
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.ExternalAuthAccount", b =>
@@ -415,6 +503,17 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.UserOnboardingStep", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.User", "User")
+                        .WithMany("OnboardingSteps")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.UserProfile", b =>
                 {
                     b.HasOne("Tindy.Application.Entities.User", "User")
@@ -445,6 +544,25 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.UserSkill", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.Skill", "Skill")
+                        .WithMany("UserSkills")
+                        .HasForeignKey("SkillId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Tindy.Application.Entities.UserProfile", "UserProfile")
+                        .WithMany("UserSkills")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Skill");
+
+                    b.Navigation("UserProfile");
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.Permission", b =>
                 {
                     b.Navigation("RolePermissions");
@@ -457,15 +575,27 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("UserRoles");
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.Skill", b =>
+                {
+                    b.Navigation("UserSkills");
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.User", b =>
                 {
                     b.Navigation("Credential");
 
                     b.Navigation("ExternalAuthAccounts");
 
+                    b.Navigation("OnboardingSteps");
+
                     b.Navigation("Profile");
 
                     b.Navigation("UserRoles");
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.UserProfile", b =>
+                {
+                    b.Navigation("UserSkills");
                 });
 #pragma warning restore 612, 618
         }

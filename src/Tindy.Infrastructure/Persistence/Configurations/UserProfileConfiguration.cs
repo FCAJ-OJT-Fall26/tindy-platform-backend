@@ -97,6 +97,28 @@ public class UserProfileConfiguration
         builder.Property(x => x.UpdatedAt)
             .HasColumnName("updated_at");
 
+
+        builder.Property(x => x.PreferredRole)
+            .HasColumnName("preferred_role")
+            .HasMaxLength(100);
+
+        builder.Property(x => x.ProfessionalInterests)
+            .HasColumnName("professional_interests")
+            .HasColumnType("text");
+
+        builder.Property(x => x.LearningGoals)
+            .HasColumnName("learning_goals")
+            .HasColumnType("text");
+
+        builder.Property(x => x.PreviousProjectsAndContribution)
+            .HasColumnName("previous_projects_and_contribution")
+            .HasColumnType("text");
+
+        builder.Property(x => x.TechnologiesToLearn)
+            .HasColumnName("technologies_to_learn")
+            .HasColumnType("text");
+
+
         builder.HasOne(x => x.User)
             .WithOne(x => x.Profile)
             .HasForeignKey<UserProfile>(x => x.UserId)

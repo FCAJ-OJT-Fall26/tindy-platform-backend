@@ -16,4 +16,6 @@ public class User
     = new List<UserRole>();
     public ICollection<ExternalAuthAccount> ExternalAuthAccounts { get; set; }
     = new List<ExternalAuthAccount>();   
+    public ICollection<UserOnboardingStep> OnboardingSteps
+    { get; set; } = new List<UserOnboardingStep>();
 }

@@ -34,6 +34,16 @@ public class TindyDbContext : DbContext
     public DbSet<ExternalAuthAccount> ExternalAuthAccounts
         => Set<ExternalAuthAccount>();
 
+
+    public DbSet<Skill> Skills
+        => Set<Skill>();
+
+    public DbSet<UserSkill> UserSkills
+        => Set<UserSkill>();
+
+    public DbSet<UserOnboardingStep> UserOnboardingSteps
+        => Set<UserOnboardingStep>();
+
     protected override void OnModelCreating(
         ModelBuilder modelBuilder)
     {
