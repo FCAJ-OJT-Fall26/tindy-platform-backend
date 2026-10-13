@@ -40,3 +40,6 @@ app.UseExceptionHandler(new ExceptionHandlerOptions
 app.UseApiPipeline();
 
 app.Run();
+
+// Makes the API entry point accessible to WebApplicationFactory integration tests.
+public partial class Program { }

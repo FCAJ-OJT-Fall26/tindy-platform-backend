@@ -4,4 +4,7 @@
     <Project Path="src/Tindy.Application/Tindy.Application.csproj" />
     <Project Path="src/Tindy.Infrastructure/Tindy.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Tindy.Tests/Tindy.Tests.csproj" />
+  </Folder>
 </Solution>
