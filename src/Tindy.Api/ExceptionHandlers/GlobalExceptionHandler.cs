@@ -86,6 +86,12 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 EmailAlreadyExistsException =>
                     "AUTH_EMAIL_ALREADY_EXISTS",
 
+                UsernameAlreadyExistsException =>
+                    "USERNAME_ALREADY_EXISTS",
+
+                OnboardingIncompleteException =>
+                    "ONBOARDING_INCOMPLETE",
+
                 ConflictException =>
                     "CONFLICT",
 
@@ -98,6 +104,11 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 _ =>
                     "INTERNAL_SERVER_ERROR"
             };
+
+        if (exception is OnboardingIncompleteException incomplete)
+        {
+            problemDetails.Extensions["missing_steps"] = incomplete.MissingSteps;
+        }
 
         // 4. Include TraceId
         problemDetails.Extensions["traceId"] =

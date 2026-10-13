@@ -53,6 +53,9 @@ public static class ServicesCollectionExtensions
         // ===================================
         services.AddScoped<IAuthRepository, AuthRepository>();
 
+        // Onboarding repository
+        services.AddScoped<IOnboardingRepository, OnboardingRepository>();
+
         // ===================================
         // JWT ACCESS TOKEN SERVICE
         // ===================================

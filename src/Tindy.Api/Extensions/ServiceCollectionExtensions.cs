@@ -213,6 +213,9 @@ public static class ServiceCollectionExtensions
         // ===================================
         services.AddScoped<IAuthService, AuthService>();
 
+        // Onboarding application service
+        services.AddScoped<IOnboardingService, OnboardingService>();
+
 
 
 
