@@ -16,12 +16,8 @@ public static class TindySeedRunner
     // ===================================
     // 2. ASYNCHRONOUS SEEDING
     // ===================================
-    public static async Task SeedAsync(
-        DbContext context,
-        CancellationToken cancellationToken = default)
+    public static async Task SeedAsync(DbContext context, CancellationToken cancellationToken = default)
     {
-        await RoleSeeder.SeedAsync(
-            context,
-            cancellationToken);
+        await RoleSeeder.SeedAsync(context, cancellationToken);
     }
 }

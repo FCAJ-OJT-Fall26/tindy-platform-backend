@@ -5,8 +5,7 @@ namespace Tindy.Infrastructure.Persistence;
 
 public class TindyDbContext : DbContext
 {
-    public TindyDbContext(
-        DbContextOptions<TindyDbContext> options)
+    public TindyDbContext(DbContextOptions<TindyDbContext> options)
         : base(options)
     {
     }
@@ -44,12 +43,10 @@ public class TindyDbContext : DbContext
     public DbSet<UserOnboardingStep> UserOnboardingSteps
         => Set<UserOnboardingStep>();
 
-    protected override void OnModelCreating(
-        ModelBuilder modelBuilder)
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.ApplyConfigurationsFromAssembly(
-            typeof(TindyDbContext).Assembly);
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(TindyDbContext).Assembly);
     }
 }

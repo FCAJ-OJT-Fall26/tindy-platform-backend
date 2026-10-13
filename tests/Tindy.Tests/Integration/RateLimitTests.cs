@@ -18,7 +18,7 @@ public sealed class RateLimitTests : IClassFixture<TindyApiFactory>
 
         for (var i = 0; i < 12; i++)
         {
-            var response = await client.PostAsJsonAsync("/api/v1/auth/login", new
+            var response = await client.PostAsJsonAsync("/api/auth/login", new
             {
                 identifier = "absent@example.com",
                 password = "Password123!"

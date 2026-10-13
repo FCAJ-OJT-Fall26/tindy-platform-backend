@@ -12,8 +12,7 @@ public sealed class LoginRequest : IValidatableObject
     [Required]
     public string? Password { get; set; }
 
-    public IEnumerable<ValidationResult> Validate(
-        ValidationContext validationContext)
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         // ===================================
         // 1. IDENTIFIER VALIDATION
@@ -22,9 +21,7 @@ public sealed class LoginRequest : IValidatableObject
             (string.IsNullOrWhiteSpace(Identifier) ||
              Identifier.Trim().Length > 255))
         {
-            yield return new ValidationResult(
-                "Identifier must contain 1–255 characters.",
-                new[] { nameof(Identifier) });
+            yield return new ValidationResult("Identifier must contain 1–255 characters.", new[] { nameof(Identifier) });
         }
 
         // ===================================
@@ -34,9 +31,7 @@ public sealed class LoginRequest : IValidatableObject
             (string.IsNullOrWhiteSpace(Password) ||
              Encoding.UTF8.GetByteCount(Password) > 72))
         {
-            yield return new ValidationResult(
-                "Password is invalid.",
-                new[] { nameof(Password) });
+            yield return new ValidationResult("Password is invalid.", new[] { nameof(Password) });
         }
     }
 }

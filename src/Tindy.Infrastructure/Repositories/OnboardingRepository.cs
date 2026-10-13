@@ -25,17 +25,10 @@ public sealed class OnboardingRepository : IOnboardingRepository
             .AsSplitQuery()
             .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
 
-    public Task<bool> UsernameExistsAsync(
-        Guid exceptUserId, string usernameNormalized,
-        CancellationToken cancellationToken = default) =>
-        _context.Users.AsNoTracking().AnyAsync(
-            x => x.UserId != exceptUserId &&
-                 x.UsernameNormalized == usernameNormalized,
-            cancellationToken);
+    public Task<bool> UsernameExistsAsync(Guid exceptUserId, string usernameNormalized, CancellationToken cancellationToken = default) =>
+        _context.Users.AsNoTracking().AnyAsync(x => x.UserId != exceptUserId && x.UsernameNormalized == usernameNormalized, cancellationToken);
 
-    public async Task<IReadOnlyList<Skill>> GetOrCreateSkillsAsync(
-        IReadOnlyCollection<string> skillNames,
-        CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Skill>> GetOrCreateSkillsAsync(IReadOnlyCollection<string> skillNames, CancellationToken cancellationToken = default)
     {
         var result = new List<Skill>(skillNames.Count);
 
@@ -50,8 +43,7 @@ public sealed class OnboardingRepository : IOnboardingRepository
                 INSERT INTO skills (skill_id, name, name_normalized)
                 VALUES ({Guid.NewGuid()}, {name}, {normalized})
                 ON CONFLICT (name_normalized) DO NOTHING
-                """,
-                cancellationToken);
+                """, cancellationToken);
 
             var skill = await _context.Skills
                 .SingleAsync(x => x.NameNormalized == normalized, cancellationToken);
@@ -94,18 +86,13 @@ public sealed class OnboardingRepository : IOnboardingRepository
         }
     }
 
-    public async Task<T> ExecuteInTransactionAsync<T>(
-        Guid userId,
-        Func<CancellationToken, Task<T>> operation,
-        CancellationToken cancellationToken = default)
+    public async Task<T> ExecuteInTransactionAsync<T>(Guid userId, Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
     {
         await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
 
         // Row lock: serialize step writes / completion for this user.
         // Lock is held until COMMIT/ROLLBACK; prevents concurrent duplicate progress markers.
-        await _context.Database.ExecuteSqlInterpolatedAsync(
-            $"SELECT 1 FROM users WHERE user_id = {userId} FOR UPDATE",
-            cancellationToken);
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM users WHERE user_id = {userId} FOR UPDATE", cancellationToken);
 
         var result = await operation(cancellationToken);
         await transaction.CommitAsync(cancellationToken);

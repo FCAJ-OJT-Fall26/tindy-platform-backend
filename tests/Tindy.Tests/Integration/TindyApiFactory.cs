@@ -50,8 +50,7 @@ public sealed class TindyApiFactory : WebApplicationFactory<Program>, IAsyncLife
         {
             services.RemoveAll<DbContextOptions<TindyDbContext>>();
             services.RemoveAll<TindyDbContext>();
-            services.AddDbContext<TindyDbContext>(options =>
-                options.UseNpgsql(_postgres.GetConnectionString()));
+            services.AddDbContext<TindyDbContext>(options => options.UseNpgsql(_postgres.GetConnectionString()));
         });
     }
 

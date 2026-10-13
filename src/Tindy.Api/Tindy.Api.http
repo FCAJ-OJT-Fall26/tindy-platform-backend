@@ -1,6 +1,113 @@
 @Tindy.Api_HostAddress = http://localhost:5217
+@accessToken = paste-your-access-token
 
-GET {{Tindy.Api_HostAddress}}/weatherforecast/
+### Health check
+GET {{Tindy.Api_HostAddress}}/api/health
 Accept: application/json
 
-###
+### Register a local account
+POST {{Tindy.Api_HostAddress}}/api/auth/register
+Content-Type: application/json
+
+{
+  "display_name": "Tindy Test",
+  "university": "FPT University",
+  "email": "tindy-test@example.com",
+  "password": "Password123!",
+  "accept_terms": true
+}
+
+### Log in, then copy data.access_token into accessToken above
+POST {{Tindy.Api_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+  "identifier": "tindy-test@example.com",
+  "password": "Password123!"
+}
+
+### Current account
+GET {{Tindy.Api_HostAddress}}/api/me
+Authorization: Bearer {{accessToken}}
+
+### Onboarding draft
+GET {{Tindy.Api_HostAddress}}/api/me/onboarding
+Authorization: Bearer {{accessToken}}
+
+### Step 1: Basic information
+PUT {{Tindy.Api_HostAddress}}/api/me/onboarding/1
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "username": "tindy_test_01",
+  "display_name": "Tindy Test",
+  "university": "FPT University"
+}
+
+### Step 2: Skills
+PUT {{Tindy.Api_HostAddress}}/api/me/onboarding/2
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"skills": [".NET", "AWS", "PostgreSQL"]}
+
+### Step 3: Preferred role
+PUT {{Tindy.Api_HostAddress}}/api/me/onboarding/3
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"preferred_role": "Backend Developer"}
+
+### Step 4: Interests and goals
+PUT {{Tindy.Api_HostAddress}}/api/me/onboarding/4
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "professional_interests": "Cloud computing",
+  "learning_goals": "Build production-ready APIs"
+}
+
+### Step 5: Availability
+PUT {{Tindy.Api_HostAddress}}/api/me/onboarding/5
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"available_hours_per_week": 10}
+
+### Step 6: Project experience
+PUT {{Tindy.Api_HostAddress}}/api/me/onboarding/6
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "previous_projects_and_contribution": "Built an API",
+  "technologies_to_learn": "Docker"
+}
+
+### Step 7: Optional links
+PUT {{Tindy.Api_HostAddress}}/api/me/onboarding/7
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"github_url": null, "personal_website_url": null}
+
+### Step 8: Confirm profile completion; bio is optional
+POST {{Tindy.Api_HostAddress}}/api/me/onboarding/complete
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"confirmed": true}
+
+### Development only: JWT authentication check
+GET {{Tindy.Api_HostAddress}}/api/dev/auth-check
+Authorization: Bearer {{accessToken}}
+
+### Development only: Completed onboarding check
+GET {{Tindy.Api_HostAddress}}/api/dev/onboarding-gate-check
+Authorization: Bearer {{accessToken}}
+
+### Log out
+POST {{Tindy.Api_HostAddress}}/api/auth/logout
+Authorization: Bearer {{accessToken}}

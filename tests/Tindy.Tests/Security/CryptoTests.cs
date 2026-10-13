@@ -74,7 +74,6 @@ public sealed class CryptoTests
         Assert.True(principal.IsInRole("member"));
 
         parameters.ValidIssuer = "DifferentIssuer";
-        Assert.Throws<SecurityTokenInvalidIssuerException>(() =>
-            handler.ValidateToken(result.AccessToken, parameters, out _));
+        Assert.Throws<SecurityTokenInvalidIssuerException>(() => handler.ValidateToken(result.AccessToken, parameters, out _));
     }
 }

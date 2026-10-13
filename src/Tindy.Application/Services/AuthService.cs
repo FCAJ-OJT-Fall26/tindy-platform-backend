@@ -17,10 +17,7 @@ public sealed class AuthService : IAuthService
     // ===================================
     // 1. CONSTRUCTOR
     // ===================================
-    public AuthService(
-        IAuthRepository authRepository,
-        IPasswordHasher passwordHasher,
-        IJwtTokenService jwtTokenService)
+    public AuthService(IAuthRepository authRepository, IPasswordHasher passwordHasher, IJwtTokenService jwtTokenService)
     {
         _authRepository = authRepository;
         _passwordHasher = passwordHasher;
@@ -30,9 +27,7 @@ public sealed class AuthService : IAuthService
     // ===================================
     // 2. LOCAL REGISTER
     // ===================================
-    public async Task<RegisterResponse> RegisterAsync(
-        RegisterRequest request,
-        CancellationToken cancellationToken = default)
+    public async Task<RegisterResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -48,9 +43,7 @@ public sealed class AuthService : IAuthService
         // 3. CHECK DUPLICATE EMAIL
         // ===================================
         var emailExists =
-            await _authRepository.EmailExistsAsync(
-                emailNormalized,
-                cancellationToken);
+            await _authRepository.EmailExistsAsync(emailNormalized, cancellationToken);
 
         if (emailExists)
         {
@@ -61,22 +54,17 @@ public sealed class AuthService : IAuthService
         // 4. FIND DEFAULT MEMBER ROLE
         // ===================================
         var memberRole =
-            await _authRepository.GetRoleByNameAsync(
-                RoleNames.Member,
-                cancellationToken);
+            await _authRepository.GetRoleByNameAsync(RoleNames.Member, cancellationToken);
 
         if (memberRole is null)
         {
-            throw new InvalidOperationException(
-                "Default member role was not found. " +
-                "Run database seeding before registration.");
+            throw new InvalidOperationException("Default member role was not found. " + "Run database seeding before registration.");
         }
 
         // ===================================
         // 5. HASH PASSWORD
         // ===================================
-        var passwordHash = _passwordHasher.HashPassword(
-            request.Password!);
+        var passwordHash = _passwordHasher.HashPassword(request.Password!);
 
         // ===================================
         // 6. PREPARE ENTITY VALUES
@@ -148,49 +136,25 @@ public sealed class AuthService : IAuthService
         // ===================================
         // 8. SAVE USER AGGREGATE
         // ===================================
-        await _authRepository.AddUserAsync(
-            user,
-            cancellationToken);
+        await _authRepository.AddUserAsync(user, cancellationToken);
 
-        await _authRepository.SaveChangesAsync(
-            cancellationToken);
+        await _authRepository.SaveChangesAsync(cancellationToken);
 
         // ===================================
         // 9. ISSUE JWT ACCESS TOKEN
         // ===================================
         var roles = new[] { RoleNames.Member };
 
-        var token = _jwtTokenService.GenerateAccessToken(
-            userId,
-            roles);
+        var token = _jwtTokenService.GenerateAccessToken(userId, roles);
 
         // ===================================
         // 10. BUILD REGISTER RESPONSE
         // ===================================
-        return new RegisterResponse(
-            AccessToken: token.AccessToken,
-            TokenType: token.TokenType,
-            ExpiresIn: token.ExpiresIn,
-
-            User: new RegisterUserResponse(
-                UserId: userId,
-                DisplayName: displayName,
-                University: university,
-                Email: email,
-                Username: null,
-                Status: "active",
-                Roles: roles,
-                IsOnboardingCompleted: false
-            ),
-
-            RedirectTo: "/onboarding"
-        );
+        return new RegisterResponse(AccessToken: token.AccessToken, TokenType: token.TokenType, ExpiresIn: token.ExpiresIn, User: new RegisterUserResponse(UserId: userId, DisplayName: displayName, University: university, Email: email, Username: null, Status: "active", Roles: roles, IsOnboardingCompleted: false), RedirectTo: "/onboarding");
     }
 
 
-    public async Task<LoginResponse> LoginAsync(
-        LoginRequest request,
-        CancellationToken cancellationToken = default)
+    public async Task<LoginResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -210,16 +174,12 @@ public sealed class AuthService : IAuthService
         if (normalizedIdentifier.Contains('@'))
         {
             // Login with email
-            user = await _authRepository.GetByEmailAsync(
-                normalizedIdentifier,
-                cancellationToken);
+            user = await _authRepository.GetByEmailAsync(normalizedIdentifier, cancellationToken);
         }
         else
         {
             // Login with username
-            user = await _authRepository.GetByUsernameAsync(
-                normalizedIdentifier,
-                cancellationToken);
+            user = await _authRepository.GetByUsernameAsync(normalizedIdentifier, cancellationToken);
         }
 
         // ===================================
@@ -230,9 +190,7 @@ public sealed class AuthService : IAuthService
             throw new InvalidCredentialsException();
         }
 
-        var isPasswordValid = _passwordHasher.VerifyPassword(
-            request.Password!,
-            user.Credential.PasswordHash);
+        var isPasswordValid = _passwordHasher.VerifyPassword(request.Password!, user.Credential.PasswordHash);
 
         if (!isPasswordValid)
         {
@@ -242,10 +200,7 @@ public sealed class AuthService : IAuthService
         // ===================================
         // 4. CHECK ACCOUNT STATUS
         // ===================================
-        var isActive = string.Equals(
-            user.Status,
-            "active",
-            StringComparison.OrdinalIgnoreCase);
+        var isActive = string.Equals(user.Status, "active", StringComparison.OrdinalIgnoreCase);
 
         var isDeleted = user.DeletedAt.HasValue;
 
@@ -266,8 +221,7 @@ public sealed class AuthService : IAuthService
 
         if (roles.Length == 0)
         {
-            throw new InvalidOperationException(
-                "Authenticated user has no assigned system role.");
+            throw new InvalidOperationException("Authenticated user has no assigned system role.");
         }
 
         // ===================================
@@ -275,16 +229,13 @@ public sealed class AuthService : IAuthService
         // ===================================
         if (user.Profile is null)
         {
-            throw new InvalidOperationException(
-                "Authenticated user has no profile.");
+            throw new InvalidOperationException("Authenticated user has no profile.");
         }
 
         // ===================================
         // 7. GENERATE JWT ACCESS TOKEN
         // ===================================
-        var token = _jwtTokenService.GenerateAccessToken(
-            user.UserId,
-            roles);
+        var token = _jwtTokenService.GenerateAccessToken(user.UserId, roles);
 
         // ===================================
         // 8. CHECK ONBOARDING STATUS
@@ -299,24 +250,7 @@ public sealed class AuthService : IAuthService
         // ===================================
         // 9. BUILD LOGIN RESPONSE
         // ===================================
-        return new LoginResponse(
-            AccessToken: token.AccessToken,
-            TokenType: token.TokenType,
-            ExpiresIn: token.ExpiresIn,
-
-            User: new LoginUserResponse(
-                UserId: user.UserId,
-                DisplayName: user.Profile.DisplayName,
-                University: user.Profile.University ?? string.Empty,
-                Email: user.Credential.Email,
-                Username: user.Username,
-                Status: user.Status,
-                Roles: roles,
-                IsOnboardingCompleted: isOnboardingCompleted
-            ),
-
-            RedirectTo: redirectTo
-        );
+        return new LoginResponse(AccessToken: token.AccessToken, TokenType: token.TokenType, ExpiresIn: token.ExpiresIn, User: new LoginUserResponse(UserId: user.UserId, DisplayName: user.Profile.DisplayName, University: user.Profile.University ?? string.Empty, Email: user.Credential.Email, Username: user.Username, Status: user.Status, Roles: roles, IsOnboardingCompleted: isOnboardingCompleted), RedirectTo: redirectTo);
     }
 
 }

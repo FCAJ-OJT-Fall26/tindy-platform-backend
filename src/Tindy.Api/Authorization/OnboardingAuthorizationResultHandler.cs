@@ -10,28 +10,22 @@ public sealed class OnboardingAuthorizationResultHandler
 {
     private readonly AuthorizationMiddlewareResultHandler _defaultHandler = new();
 
-    public Task HandleAsync(
-        RequestDelegate next,
-        HttpContext httpContext,
-        AuthorizationPolicy policy,
-        PolicyAuthorizationResult authorizeResult)
+    public Task HandleAsync(RequestDelegate next, HttpContext httpContext, AuthorizationPolicy policy, PolicyAuthorizationResult authorizeResult)
     {
         var onboardingRequired = authorizeResult.Forbidden &&
-            authorizeResult.AuthorizationFailure?.FailureReasons.Any(
-                reason => reason.Message == OnboardingPolicies.OnboardingRequired) == true;
+            authorizeResult.AuthorizationFailure?.FailureReasons.Any(reason => reason.Message == OnboardingPolicies.OnboardingRequired) == true;
 
         if (!onboardingRequired)
         {
             // Preserve normal JWT 401 challenges and generic 403 forbids.
-            return _defaultHandler.HandleAsync(
-                next, httpContext, policy, authorizeResult);
+            return _defaultHandler.HandleAsync(next, httpContext, policy, authorizeResult);
         }
 
         var problem = new ProblemDetails
         {
             Status = StatusCodes.Status403Forbidden,
             Title = "Forbidden",
-            Detail = "Bạn cần hoàn tất 8 bước onboarding để truy cập chức năng này.",
+            Detail = "You must complete all 8 onboarding steps to access this feature.",
             Instance = httpContext.Request.Path.ToString()
         };
 
@@ -41,8 +35,6 @@ public sealed class OnboardingAuthorizationResultHandler
         httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
         httpContext.Response.ContentType = "application/problem+json";
 
-        return httpContext.Response.WriteAsync(
-            JsonSerializer.Serialize(problem),
-            httpContext.RequestAborted);
+        return httpContext.Response.WriteAsync(JsonSerializer.Serialize(problem), httpContext.RequestAborted);
     }
 }

@@ -35,14 +35,10 @@ public static class RoleSeeder
     // ===================================
     // 2. ASYNCHRONOUS SEED
     // ===================================
-    public static async Task SeedAsync(
-        DbContext context,
-        CancellationToken cancellationToken = default)
+    public static async Task SeedAsync(DbContext context, CancellationToken cancellationToken = default)
     {
         var roleExists = await context.Set<Role>()
-            .AnyAsync(
-                x => x.RoleName == RoleNames.Member,
-                cancellationToken);
+            .AnyAsync(x => x.RoleName == RoleNames.Member, cancellationToken);
 
         if (roleExists)
         {

@@ -14,9 +14,7 @@ public sealed class OnboardingCompletedHandler
         _reader = reader;
     }
 
-    protected override async Task HandleRequirementAsync(
-        AuthorizationHandlerContext context,
-        OnboardingCompletedRequirement requirement)
+    protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, OnboardingCompletedRequirement requirement)
     {
         if (context.User.Identity?.IsAuthenticated != true ||
             !Guid.TryParse(context.User.FindFirst("sub")?.Value, out var userId) ||
@@ -38,9 +36,7 @@ public sealed class OnboardingCompletedHandler
                 break;
 
             case OnboardingAccessStatus.Incomplete:
-                context.Fail(new AuthorizationFailureReason(
-                    this,
-                    OnboardingPolicies.OnboardingRequired));
+                context.Fail(new AuthorizationFailureReason(this, OnboardingPolicies.OnboardingRequired));
                 break;
 
             // Inactive/deleted/missing accounts must not pass the gate.

@@ -7,8 +7,7 @@ namespace Tindy.Infrastructure.Persistence.Configurations;
 public class RolePermissionConfiguration
     : IEntityTypeConfiguration<RolePermission>
 {
-    public void Configure(
-        EntityTypeBuilder<RolePermission> builder)
+    public void Configure(EntityTypeBuilder<RolePermission> builder)
     {
         builder.ToTable("role_permissions");
 
@@ -35,7 +34,6 @@ public class RolePermissionConfiguration
             .OnDelete(DeleteBehavior.Cascade);
 
         builder.HasIndex(x => x.PermissionId)
-            .HasDatabaseName(
-                "ix_role_permissions_permission_id");
+            .HasDatabaseName("ix_role_permissions_permission_id");
     }
 }

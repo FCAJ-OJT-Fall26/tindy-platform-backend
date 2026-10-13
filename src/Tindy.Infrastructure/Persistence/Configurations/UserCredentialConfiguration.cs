@@ -7,8 +7,7 @@ namespace Tindy.Infrastructure.Persistence.Configurations;
 public class UserCredentialConfiguration
     : IEntityTypeConfiguration<UserCredential>
 {
-    public void Configure(
-        EntityTypeBuilder<UserCredential> builder)
+    public void Configure(EntityTypeBuilder<UserCredential> builder)
     {
         builder.ToTable("user_credentials");
 
@@ -57,8 +56,7 @@ public class UserCredentialConfiguration
 
         builder.HasIndex(x => x.EmailNormalized)
             .IsUnique()
-            .HasDatabaseName(
-                "ux_user_credentials_email_normalized");
+            .HasDatabaseName("ux_user_credentials_email_normalized");
 
         builder.HasOne(x => x.User)
             .WithOne(x => x.Credential)

@@ -9,7 +9,7 @@ namespace Tindy.Api.Controllers;
 
 [ApiController]
 [Authorize(Policy = OnboardingPolicies.AuthenticatedOnly)]
-[Route("api/v1/me")]
+[Route("api/me")]
 public sealed class MeController : ControllerBase
 {
     private readonly IOnboardingService _onboardingService;
@@ -31,14 +31,14 @@ public sealed class MeController : ControllerBase
     public async Task<IActionResult> GetMe(CancellationToken ct)
     {
         var data = await _onboardingService.GetCurrentUserAsync(CurrentUserId, ct);
-        return Ok(new { success = true, message = "Lấy thông tin tài khoản thành công", data });
+        return Ok(new { success = true, message = "Account information retrieved successfully.", data });
     }
 
     [HttpGet("onboarding")]
     public async Task<IActionResult> GetOnboarding(CancellationToken ct)
     {
         var data = await _onboardingService.GetDraftAsync(CurrentUserId, ct);
-        return Ok(new { success = true, message = "Lấy tiến độ onboarding thành công", data });
+        return Ok(new { success = true, message = "Onboarding progress retrieved successfully.", data });
     }
 
     [HttpPut("onboarding/1")]
@@ -72,13 +72,13 @@ public sealed class MeController : ControllerBase
     private async Task<IActionResult> SaveAsync(Task<OnboardingSaveResponse> operation)
     {
         var data = await operation;
-        return Ok(new { success = true, message = "Đã lưu bước onboarding", data });
+        return Ok(new { success = true, message = "Onboarding step saved successfully.", data });
     }
 
     [HttpPost("onboarding/complete")]
     public async Task<IActionResult> Complete([FromBody] OnboardingCompleteRequest req, CancellationToken ct)
     {
         var data = await _onboardingService.CompleteAsync(CurrentUserId, req, ct);
-        return Ok(new { success = true, message = "Hoàn tất hồ sơ thành công", data });
+        return Ok(new { success = true, message = "Profile completed successfully.", data });
     }
 }

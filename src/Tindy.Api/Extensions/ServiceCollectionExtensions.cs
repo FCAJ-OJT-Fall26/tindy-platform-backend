@@ -17,9 +17,7 @@ namespace Tindy.Api.Extensions;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddApiServices(
-        this IServiceCollection services,
-        IConfiguration configuration)
+    public static IServiceCollection AddApiServices(this IServiceCollection services, IConfiguration configuration)
     {
         // ===================================
         // 1. CONTROLLERS & OPENAPI
@@ -40,25 +38,14 @@ public static class ServiceCollectionExtensions
             options.InvalidModelStateResponseFactory = context =>
             {
                 var errors = context.ModelState
-                    .Where(entry =>
-                        entry.Value is { Errors.Count: > 0 })
-                    .ToDictionary(
-                        entry => JsonNamingPolicy.SnakeCaseLower
-                            .ConvertName(entry.Key),
-                        entry => entry.Value!.Errors
-                            .Select(error =>
-                                string.IsNullOrWhiteSpace(
-                                    error.ErrorMessage)
-                                    ? "Invalid value."
-                                    : error.ErrorMessage)
-                            .ToArray()
-                    );
+                    .Where(entry => entry.Value is { Errors.Count: > 0 })
+                    .ToDictionary(entry => JsonNamingPolicy.SnakeCaseLower.ConvertName(entry.Key), entry => entry.Value!.Errors.Select(error => string.IsNullOrWhiteSpace(error.ErrorMessage) ? "Invalid value." : error.ErrorMessage).ToArray());
 
                 var problem = new ValidationProblemDetails(errors)
                 {
                     Status = StatusCodes.Status400BadRequest,
                     Title = "Bad Request",
-                    Detail = "Dữ liệu đầu vào không hợp lệ.",
+                    Detail = "The input data is invalid.",
                     Instance = context.HttpContext.Request.Path
                 };
 
@@ -70,8 +57,7 @@ public static class ServiceCollectionExtensions
 
                 var result = new BadRequestObjectResult(problem);
 
-                result.ContentTypes.Add(
-                    "application/problem+json");
+                result.ContentTypes.Add("application/problem+json");
 
                 return result;
             };
@@ -83,12 +69,10 @@ public static class ServiceCollectionExtensions
         // ===================================
         // 2. LOAD JWT SETTINGS
         // ===================================
-        var jwtSection = configuration.GetSection(
-            JwtOptions.SectionName);
+        var jwtSection = configuration.GetSection(JwtOptions.SectionName);
 
         var jwtSettings = jwtSection.Get<JwtOptions>()
-            ?? throw new InvalidOperationException(
-                "JWT configuration was not found.");
+            ?? throw new InvalidOperationException("JWT configuration was not found.");
 
         // ===================================
         // 3. VALIDATE JWT SETTINGS
@@ -96,41 +80,34 @@ public static class ServiceCollectionExtensions
         if (string.IsNullOrWhiteSpace(jwtSettings.Issuer) ||
             string.IsNullOrWhiteSpace(jwtSettings.Audience))
         {
-            throw new InvalidOperationException(
-                "JWT Issuer and Audience are required.");
+            throw new InvalidOperationException("JWT Issuer and Audience are required.");
         }
 
         if (string.IsNullOrWhiteSpace(jwtSettings.SigningKey))
         {
-            throw new InvalidOperationException(
-                "JWT SigningKey was not configured.");
+            throw new InvalidOperationException("JWT SigningKey was not configured.");
         }
 
         byte[] signingKeyBytes;
 
         try
         {
-            signingKeyBytes = Convert.FromBase64String(
-                jwtSettings.SigningKey);
+            signingKeyBytes = Convert.FromBase64String(jwtSettings.SigningKey);
         }
         catch (FormatException ex)
         {
-            throw new InvalidOperationException(
-                "JWT SigningKey must be valid Base64.",
-                ex);
+            throw new InvalidOperationException("JWT SigningKey must be valid Base64.", ex);
         }
 
         if (signingKeyBytes.Length < 32)
         {
-            throw new InvalidOperationException(
-                "JWT SigningKey must contain at least 32 bytes.");
+            throw new InvalidOperationException("JWT SigningKey must contain at least 32 bytes.");
         }
 
         if (jwtSettings.AccessTokenLifetimeMinutes <= 0 ||
             jwtSettings.ClockSkewSeconds < 0)
         {
-            throw new InvalidOperationException(
-                "JWT lifetime or clock skew is invalid.");
+            throw new InvalidOperationException("JWT lifetime or clock skew is invalid.");
         }
 
         // Shared configuration for JWT Token Service
@@ -140,8 +117,7 @@ public static class ServiceCollectionExtensions
         // 4. JWT BEARER AUTHENTICATION
         // ===================================
         services
-            .AddAuthentication(
-                JwtBearerDefaults.AuthenticationScheme)
+            .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {
                 options.MapInboundClaims = false;
@@ -170,8 +146,7 @@ public static class ServiceCollectionExtensions
                         ValidateLifetime = true,
                         RequireExpirationTime = true,
 
-                        ClockSkew = TimeSpan.FromSeconds(
-                            jwtSettings.ClockSkewSeconds),
+                        ClockSkew = TimeSpan.FromSeconds(jwtSettings.ClockSkewSeconds),
 
                         NameClaimType = "sub",
                         RoleClaimType = "role"
@@ -189,21 +164,11 @@ public static class ServiceCollectionExtensions
                         context.Response.Headers[
                             "WWW-Authenticate"] = "Bearer";
 
-                        await WriteAuthenticationProblemAsync(
-                            context.HttpContext,
-                            StatusCodes.Status401Unauthorized,
-                            "Unauthorized",
-                            "Missing, invalid or expired access token.",
-                            "AUTH_UNAUTHORIZED");
+                        await WriteAuthenticationProblemAsync(context.HttpContext, StatusCodes.Status401Unauthorized, "Unauthorized", "Missing, invalid or expired access token.", "AUTH_UNAUTHORIZED");
                     },
 
                     OnForbidden = context =>
-                        WriteAuthenticationProblemAsync(
-                            context.HttpContext,
-                            StatusCodes.Status403Forbidden,
-                            "Forbidden",
-                            "You do not have permission to access this resource.",
-                            "AUTH_FORBIDDEN")
+                        WriteAuthenticationProblemAsync(context.HttpContext, StatusCodes.Status403Forbidden, "Forbidden", "You do not have permission to access this resource.", "AUTH_FORBIDDEN")
                 };
             });
 
@@ -214,8 +179,7 @@ public static class ServiceCollectionExtensions
         // Explicitly exempt only authenticated setup endpoints and public endpoints.
         services.AddAuthorization(options =>
         {
-            var completedOnboardingPolicy = new AuthorizationPolicyBuilder(
-                    JwtBearerDefaults.AuthenticationScheme)
+            var completedOnboardingPolicy = new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme)
                 .RequireAuthenticatedUser()
                 .AddRequirements(new OnboardingCompletedRequirement())
                 .Build();
@@ -228,16 +192,11 @@ public static class ServiceCollectionExtensions
             options.FallbackPolicy = completedOnboardingPolicy;
 
             // Limited access for /me, onboarding and logout.
-            options.AddPolicy(
-                OnboardingPolicies.AuthenticatedOnly,
-                new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme)
-                    .RequireAuthenticatedUser()
-                    .Build());
+            options.AddPolicy(OnboardingPolicies.AuthenticatedOnly, new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme).RequireAuthenticatedUser().Build());
         });
 
         services.AddScoped<IAuthorizationHandler, OnboardingCompletedHandler>();
-        services.AddSingleton<IAuthorizationMiddlewareResultHandler,
-            OnboardingAuthorizationResultHandler>();
+        services.AddSingleton<IAuthorizationMiddlewareResultHandler, OnboardingAuthorizationResultHandler>();
 
         // ===================================
         // AUTHENTICATION APPLICATION SERVICE
@@ -262,13 +221,7 @@ public static class ServiceCollectionExtensions
             // ===================================
             // 1. LOGIN RATE LIMIT POLICY
             // ===================================
-            options.AddPolicy("auth-login", context =>
-                RateLimitPartition.GetFixedWindowLimiter(
-                    partitionKey:
-                        context.Connection.RemoteIpAddress?
-                            .ToString() ?? "unknown",
-
-                    factory: _ => new FixedWindowRateLimiterOptions
+            options.AddPolicy("auth-login", context => RateLimitPartition.GetFixedWindowLimiter(partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown", factory: _ => new FixedWindowRateLimiterOptions
                     {
                         PermitLimit = 10,
                         Window = TimeSpan.FromMinutes(1),
@@ -287,7 +240,7 @@ public static class ServiceCollectionExtensions
                 {
                     Status = StatusCodes.Status429TooManyRequests,
                     Title = "Too Many Requests",
-                    Detail = "Quá nhiều yêu cầu đăng nhập. Vui lòng thử lại sau.",
+                    Detail = "Too many login attempts. Please try again later.",
                     Instance = httpContext.Request.Path.ToString()
                 };
 
@@ -303,9 +256,7 @@ public static class ServiceCollectionExtensions
                 httpContext.Response.ContentType =
                     "application/problem+json";
 
-                await httpContext.Response.WriteAsync(
-                    JsonSerializer.Serialize(problem),
-                    cancellationToken);
+                await httpContext.Response.WriteAsync(JsonSerializer.Serialize(problem), cancellationToken);
             };
         });
 
@@ -317,12 +268,7 @@ public static class ServiceCollectionExtensions
     // ===================================
     // 7. AUTH ERROR RESPONSE HELPER
     // ===================================
-    private static async Task WriteAuthenticationProblemAsync(
-        HttpContext httpContext,
-        int statusCode,
-        string title,
-        string detail,
-        string errorCode)
+    private static async Task WriteAuthenticationProblemAsync(HttpContext httpContext, int statusCode, string title, string detail, string errorCode)
     {
         var problemDetails = new ProblemDetails
         {
@@ -342,8 +288,6 @@ public static class ServiceCollectionExtensions
         httpContext.Response.ContentType =
             "application/problem+json";
 
-        await httpContext.Response.WriteAsync(
-            JsonSerializer.Serialize(problemDetails),
-            httpContext.RequestAborted);
+        await httpContext.Response.WriteAsync(JsonSerializer.Serialize(problemDetails), httpContext.RequestAborted);
     }
 }

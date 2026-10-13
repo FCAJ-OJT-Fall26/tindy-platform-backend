@@ -15,7 +15,7 @@ public static class ServicesCollectionExtensions
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString("DefaultConnection")
-            ?? throw new InvalidOperationException("Connection string ' 'DefaultConnection' was not found'.");
+            ?? throw new InvalidOperationException("Connection string 'DefaultConnection' was not found.");
 
 
         services.AddDbContext<TindyDbContext>(options =>
@@ -34,13 +34,10 @@ public static class ServicesCollectionExtensions
             // ===================================
             // ASYNCHRONOUS DATABASE SEEDING
             // ===================================
-            options.UseAsyncSeeding(
-                async (context, _, cancellationToken) =>
-                {
-                    await TindySeedRunner.SeedAsync(
-                        context,
-                        cancellationToken);
-                });
+            options.UseAsyncSeeding(async (context, _, cancellationToken) =>
+            {
+                await TindySeedRunner.SeedAsync(context, cancellationToken);
+            });
         });
 
         // ===================================

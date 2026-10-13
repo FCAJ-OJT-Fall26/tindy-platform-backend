@@ -8,16 +8,12 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
 {
     private readonly ILogger<GlobalExceptionHandler> _logger;
 
-    public GlobalExceptionHandler(
-        ILogger<GlobalExceptionHandler> logger)
+    public GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger)
     {
         _logger = logger;
     }
 
-    public async ValueTask<bool> TryHandleAsync(
-        HttpContext httpContext,
-        Exception exception,
-        CancellationToken cancellationToken)
+    public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
     {
         // 1. Map Exception -> HTTP Status Code
         var statusCode = exception switch
@@ -41,19 +37,11 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         // 2. Logging
         if (statusCode >= 500)
         {
-            _logger.LogError(
-                exception,
-                "Unhandled exception occurred. TraceId: {TraceId}",
-                httpContext.TraceIdentifier);
+            _logger.LogError(exception, "Unhandled exception occurred. TraceId: {TraceId}", httpContext.TraceIdentifier);
         }
         else
         {
-            _logger.LogWarning(
-                "Request failed. StatusCode: {StatusCode}, " +
-                "Exception: {ExceptionType}, TraceId: {TraceId}",
-                statusCode,
-                exception.GetType().Name,
-                httpContext.TraceIdentifier);
+            _logger.LogWarning("Request failed. StatusCode: {StatusCode}, " + "Exception: {ExceptionType}, TraceId: {TraceId}", statusCode, exception.GetType().Name, httpContext.TraceIdentifier);
         }
 
         // 3. Create ProblemDetails
@@ -120,9 +108,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         httpContext.Response.ContentType =
             "application/problem+json";
 
-        await httpContext.Response.WriteAsJsonAsync(
-            problemDetails,
-            cancellationToken);
+        await httpContext.Response.WriteAsJsonAsync(problemDetails, cancellationToken);
 
         // 6. Exception was handled
         return true;

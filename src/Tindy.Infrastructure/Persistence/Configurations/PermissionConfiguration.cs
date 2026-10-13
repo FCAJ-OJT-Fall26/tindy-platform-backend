@@ -7,8 +7,7 @@ namespace Tindy.Infrastructure.Persistence.Configurations;
 public class PermissionConfiguration
     : IEntityTypeConfiguration<Permission>
 {
-    public void Configure(
-        EntityTypeBuilder<Permission> builder)
+    public void Configure(EntityTypeBuilder<Permission> builder)
     {
         builder.ToTable("permissions");
 
