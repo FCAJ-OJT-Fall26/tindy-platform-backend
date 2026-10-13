@@ -21,17 +21,17 @@ Phạm vi: không thay đổi Entity, EF migrations, JWT signing, Registration/L
 
 | Endpoint | Policy | Đặc điểm |
 | --- | --- | --- |
-| `POST /api/v1/auth/register` | `[AllowAnonymous]` | Công khai |
-| `POST /api/v1/auth/login` | `[AllowAnonymous]` | Công khai, giữ rate limiting |
-| `POST /api/v1/auth/logout` | `AuthenticatedOnly` | Đã login, chưa xong onboarding vẫn logout được |
-| `GET /api/v1/me` | `AuthenticatedOnly` | Lấy thông tin user để frontend điều hướng |
-| `GET /api/v1/me/onboarding` | `AuthenticatedOnly` | Lấy draft |
-| `PUT /api/v1/me/onboarding/1..7` | `AuthenticatedOnly` | Lưu bước |
-| `POST /api/v1/me/onboarding/complete` | `AuthenticatedOnly` | Hoàn thành bước 8 |
+| `POST /api/auth/register` | `[AllowAnonymous]` | Công khai |
+| `POST /api/auth/login` | `[AllowAnonymous]` | Công khai, giữ rate limiting |
+| `POST /api/auth/logout` | `AuthenticatedOnly` | Đã login, chưa xong onboarding vẫn logout được |
+| `GET /api/me` | `AuthenticatedOnly` | Lấy thông tin user để frontend điều hướng |
+| `GET /api/me/onboarding` | `AuthenticatedOnly` | Lấy draft |
+| `PUT /api/me/onboarding/1..7` | `AuthenticatedOnly` | Lưu bước |
+| `POST /api/me/onboarding/complete` | `AuthenticatedOnly` | Hoàn thành bước 8 |
 | `GET /api/health` | `[AllowAnonymous]` | Health check |
 | `/openapi/tindy.json` | `.AllowAnonymous()` | Development only |
-| `GET /api/v1/dev/auth-check` | `AuthenticatedOnly` | JWT smoke test, DEV only |
-| `GET /api/v1/dev/onboarding-gate-check` | DefaultPolicy | Gate smoke test, DEV only |
+| `GET /api/dev/auth-check` | `AuthenticatedOnly` | JWT smoke test, DEV only |
+| `GET /api/dev/onboarding-gate-check` | DefaultPolicy | Gate smoke test, DEV only |
 | API nghiệp vụ mới | Default/Fallback policy | JWT + hoàn tất onboarding |
 
 **Cẩn thận:** `[AllowAnonymous]` bỏ qua **cả JWT và onboarding gate**. Chỉ đặt trên endpoint công khai được review, không đặt trên controller nghiệp vụ. Một policy cụ thể khác có thể thay thế DefaultPolicy; khi khai báo `[Authorize(Roles = "...")]` hoặc policy RBAC riêng, cần kết hợp với Onboarding requirement để tránh bypass. Không lạm dụng `AuthenticatedOnly` cho API nghiệp vụ.
@@ -50,8 +50,8 @@ Ví dụ lỗi onboarding:
 {
   "title": "Forbidden",
   "status": 403,
-  "detail": "Bạn cần hoàn tất 8 bước onboarding để truy cập chức năng này.",
-  "instance": "/api/v1/dev/onboarding-gate-check",
+  "detail": "You must complete all 8 onboarding steps to access this feature.",
+  "instance": "/api/dev/onboarding-gate-check",
   "error_code": "ONBOARDING_REQUIRED",
   "traceId": "..."
 }
@@ -78,16 +78,16 @@ Không cần `dotnet ef migrations add`, `dotnet ef database update` riêng ở 
 Chạy `dotnet run --project .\src\Tindy.Api\Tindy.Api.csproj --launch-profile https` và dùng `base_url=https://localhost:7190` nếu launch profile chưa đổi.
 
 1. Register tài khoản **mới** hoặc Login tài khoản test `is_onboarding_completed=false`, lưu token A.
-2. `GET /api/v1/dev/auth-check` với token A → **200** (JWT hợp lệ, không kiểm tra onboarding).
-3. `GET /api/v1/dev/onboarding-gate-check` với token A → **403** `ONBOARDING_REQUIRED`.
-4. `GET /api/v1/dev/onboarding-gate-check` không token → **401** `AUTH_UNAUTHORIZED`.
-5. `GET /api/v1/me` và `GET /api/v1/me/onboarding` với token A → **200**.
-6. `PUT /api/v1/me/onboarding/{1..7}` và `POST /api/v1/me/onboarding/complete` với **cùng token A** → các request hợp lệ thành công (Step 8 có `confirmed=true`; `bio` tùy chọn theo thay đổi STEP 12 của bạn).
-7. Gọi lại `GET /api/v1/dev/onboarding-gate-check` bằng **token A ban đầu** → **200** ngay sau completion, không cần Login lại hay cấp JWT mới.
-8. `POST /api/v1/auth/logout` với token A → **200** dù chưa complete; logout không revoke JWT trên server.
+2. `GET /api/dev/auth-check` với token A → **200** (JWT hợp lệ, không kiểm tra onboarding).
+3. `GET /api/dev/onboarding-gate-check` với token A → **403** `ONBOARDING_REQUIRED`.
+4. `GET /api/dev/onboarding-gate-check` không token → **401** `AUTH_UNAUTHORIZED`.
+5. `GET /api/me` và `GET /api/me/onboarding` với token A → **200**.
+6. `PUT /api/me/onboarding/{1..7}` và `POST /api/me/onboarding/complete` với **cùng token A** → các request hợp lệ thành công (Step 8 có `confirmed=true`; `bio` tùy chọn theo thay đổi STEP 12 của bạn).
+7. Gọi lại `GET /api/dev/onboarding-gate-check` bằng **token A ban đầu** → **200** ngay sau completion, không cần Login lại hay cấp JWT mới.
+8. `POST /api/auth/logout` với token A → **200** dù chưa complete; logout không revoke JWT trên server.
 9. Gọi API business (khi có) với user incomplete → **403**; completed → vào action bình thường.
 
-**Lưu ý:** Không test bằng cách trỏ vào `/api/v1/dev/auth-check` cho onboarding gate vì endpoint này cố ý chỉ yêu cầu JWT. Nếu đang test bằng một account đã complete, hãy dùng account test mới thay vì tự xóa dữ liệu đang có.
+**Lưu ý:** Không test bằng cách trỏ vào `/api/dev/auth-check` cho onboarding gate vì endpoint này cố ý chỉ yêu cầu JWT. Nếu đang test bằng một account đã complete, hãy dùng account test mới thay vì tự xóa dữ liệu đang có.
 
 ### SQL xác minh trạng thái
 

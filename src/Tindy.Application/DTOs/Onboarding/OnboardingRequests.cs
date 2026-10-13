@@ -6,8 +6,7 @@ public sealed class OnboardingStep1Request
 {
     [Required]
     [StringLength(50, MinimumLength = 3)]
-    [RegularExpression(@"^[A-Za-z0-9_.]{3,50}$",
-        ErrorMessage = "Username chỉ được chứa chữ Latin, số, dấu _ hoặc dấu . (3–50 ký tự).")]
+    [RegularExpression(@"^[A-Za-z0-9_.]{3,50}$", ErrorMessage = "Username must contain only Latin letters, digits, underscores (_) or periods (.), and must be 3–50 characters long.")]
     public string? Username { get; set; }
 
     [Required]
@@ -31,9 +30,7 @@ public sealed class OnboardingStep2Request : IValidatableObject
 
         if (Skills.Any(s => string.IsNullOrWhiteSpace(s) || s.Trim().Length > 100))
         {
-            yield return new ValidationResult(
-                "Mỗi kỹ năng phải chứa 1–100 ký tự hợp lệ.",
-                new[] { nameof(Skills) });
+            yield return new ValidationResult("Each skill must contain 1–100 valid characters.", new[] { nameof(Skills) });
         }
     }
 }
@@ -46,12 +43,9 @@ public sealed class OnboardingStep3Request : IValidatableObject
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (PreferredRole is not null &&
-            !OnboardingAllowedRoles.Names.Any(x =>
-                string.Equals(x, PreferredRole.Trim(), StringComparison.OrdinalIgnoreCase)))
+            !OnboardingAllowedRoles.Names.Any(x => string.Equals(x, PreferredRole.Trim(), StringComparison.OrdinalIgnoreCase)))
         {
-            yield return new ValidationResult(
-                "Preferred role không nằm trong danh sách hỗ trợ.",
-                new[] { nameof(PreferredRole) });
+            yield return new ValidationResult("The preferred role is not in the list of supported roles.", new[] { nameof(PreferredRole) });
         }
     }
 }
@@ -105,11 +99,9 @@ public sealed class OnboardingStep7Request : IValidatableObject
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (!IsWebUrlOrEmpty(GithubUrl))
-            yield return new ValidationResult("GitHub URL phải bắt đầu bằng http:// hoặc https://.",
-                new[] { nameof(GithubUrl) });
+            yield return new ValidationResult("GitHub URL must start with http:// or https://.", new[] { nameof(GithubUrl) });
         if (!IsWebUrlOrEmpty(PersonalWebsiteUrl))
-            yield return new ValidationResult("Portfolio URL phải bắt đầu bằng http:// hoặc https://.",
-                new[] { nameof(PersonalWebsiteUrl) });
+            yield return new ValidationResult("Portfolio URL must start with http:// or https://.", new[] { nameof(PersonalWebsiteUrl) });
     }
 
     public static bool IsWebUrlOrEmpty(string? value) =>
@@ -141,14 +133,11 @@ public sealed class OnboardingCompleteRequest : IValidatableObject
     [System.Text.Json.Serialization.JsonIgnore]
     public bool BioWasProvided { get; private set; }
 
-    public IEnumerable<ValidationResult> Validate(
-        ValidationContext validationContext)
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (Confirmed == false)
         {
-            yield return new ValidationResult(
-                "Phải xác nhận hoàn tất hồ sơ.",
-                new[] { nameof(Confirmed) });
+            yield return new ValidationResult("You must confirm profile completion.", new[] { nameof(Confirmed) });
         }
     }
 }

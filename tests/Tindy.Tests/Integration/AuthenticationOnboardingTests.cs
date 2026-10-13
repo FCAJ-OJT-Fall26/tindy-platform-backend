@@ -31,23 +31,22 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
         };
 
         // STEP 08: registration + persisted user/profile/role + JWT.
-        var registration = await client.PostAsJsonAsync("/api/v1/auth/register", registerBody);
+        var registration = await client.PostAsJsonAsync("/api/auth/register", registerBody);
         Assert.Equal(HttpStatusCode.Created, registration.StatusCode);
         using var registrationJson = await ReadJsonAsync(registration);
         var token = registrationJson.RootElement.GetProperty("data").GetProperty("access_token").GetString();
         Assert.False(string.IsNullOrWhiteSpace(token));
-        Assert.False(registrationJson.RootElement.GetProperty("data").GetProperty("user")
-            .GetProperty("is_onboarding_completed").GetBoolean());
+        Assert.False(registrationJson.RootElement.GetProperty("data").GetProperty("user").GetProperty("is_onboarding_completed").GetBoolean());
 
         // Duplicate registration must not create a second credential.
-        var duplicate = await client.PostAsJsonAsync("/api/v1/auth/register", registerBody);
+        var duplicate = await client.PostAsJsonAsync("/api/auth/register", registerBody);
         Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
         await AssertErrorAsync(duplicate, "AUTH_EMAIL_ALREADY_EXISTS");
 
         // STEP 09: Login by email + wrong-password rejection.
-        var login = await client.PostAsJsonAsync("/api/v1/auth/login", new { identifier = email, password });
+        var login = await client.PostAsJsonAsync("/api/auth/login", new { identifier = email, password });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        var wrongPassword = await client.PostAsJsonAsync("/api/v1/auth/login", new
+        var wrongPassword = await client.PostAsJsonAsync("/api/auth/login", new
         {
             identifier = email,
             password = "WrongPassword123!"
@@ -57,13 +56,13 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         // STEP 13: uncompleted user cannot use business endpoints.
-        var gateBefore = await client.GetAsync("/api/v1/dev/onboarding-gate-check");
+        var gateBefore = await client.GetAsync("/api/dev/onboarding-gate-check");
         Assert.Equal(HttpStatusCode.Forbidden, gateBefore.StatusCode);
         await AssertErrorAsync(gateBefore, "ONBOARDING_REQUIRED");
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/me/onboarding")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/me/onboarding")).StatusCode);
 
         // STEP 12: Cannot complete before all seven step markers exist.
-        var premature = await client.PostAsJsonAsync("/api/v1/me/onboarding/complete", new { confirmed = true });
+        var premature = await client.PostAsJsonAsync("/api/me/onboarding/complete", new { confirmed = true });
         Assert.Equal(HttpStatusCode.UnprocessableEntity, premature.StatusCode);
         await AssertErrorAsync(premature, "ONBOARDING_INCOMPLETE");
 
@@ -80,12 +79,12 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
 
         foreach (var (number, body) in steps)
         {
-            var put = await client.PutAsJsonAsync($"/api/v1/me/onboarding/{number}", body);
+            var put = await client.PutAsJsonAsync($"/api/me/onboarding/{number}", body);
             Assert.Equal(HttpStatusCode.OK, put.StatusCode);
         }
 
         // Step 1 username is also accepted for local login.
-        var usernameLogin = await client.PostAsJsonAsync("/api/v1/auth/login", new
+        var usernameLogin = await client.PostAsJsonAsync("/api/auth/login", new
         {
             identifier = username.ToUpperInvariant(),
             password
@@ -93,25 +92,23 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
         Assert.Equal(HttpStatusCode.OK, usernameLogin.StatusCode);
 
         const string bio = "My own summary; AI suggestions are optional.";
-        var finish = await client.PostAsJsonAsync("/api/v1/me/onboarding/complete", new
+        var finish = await client.PostAsJsonAsync("/api/me/onboarding/complete", new
         {
             confirmed = true,
             bio
         });
         Assert.Equal(HttpStatusCode.OK, finish.StatusCode);
         using var finishJson = await ReadJsonAsync(finish);
-        Assert.True(finishJson.RootElement.GetProperty("data")
-            .GetProperty("is_onboarding_completed").GetBoolean());
+        Assert.True(finishJson.RootElement.GetProperty("data").GetProperty("is_onboarding_completed").GetBoolean());
 
         // STEP 13: SAME JWT should work immediately after completion.
-        var gateAfter = await client.GetAsync("/api/v1/dev/onboarding-gate-check");
+        var gateAfter = await client.GetAsync("/api/dev/onboarding-gate-check");
         Assert.Equal(HttpStatusCode.OK, gateAfter.StatusCode);
 
         // STEP 10: Logout response is stateless, it does not revoke the JWT.
-        var logout = await client.PostAsync("/api/v1/auth/logout", content: null);
+        var logout = await client.PostAsync("/api/auth/logout", content: null);
         Assert.Equal(HttpStatusCode.OK, logout.StatusCode);
-        Assert.Equal(HttpStatusCode.OK,
-            (await client.GetAsync("/api/v1/dev/onboarding-gate-check")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/dev/onboarding-gate-check")).StatusCode);
 
         // Database assertions use a new EF scope, not the controller's tracking scope.
         using var scope = _factory.Services.CreateScope();
@@ -146,9 +143,7 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
             email = email.ToUpperInvariant(), password = "Password123!", accept_terms = true
         };
 
-        var responses = await Task.WhenAll(
-            client.PostAsJsonAsync("/api/v1/auth/register", body1),
-            client.PostAsJsonAsync("/api/v1/auth/register", body2));
+        var responses = await Task.WhenAll(client.PostAsJsonAsync("/api/auth/register", body1), client.PostAsJsonAsync("/api/auth/register", body2));
 
         Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.Created));
         Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
@@ -163,7 +158,7 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
     {
         using var client = _factory.CreateHttpsClient();
         var email = $"disabled.{Guid.NewGuid():N}@example.com";
-        var registration = await client.PostAsJsonAsync("/api/v1/auth/register", new
+        var registration = await client.PostAsJsonAsync("/api/auth/register", new
         {
             display_name = "Blocked User", university = "FPT University",
             email, password = "Password123!", accept_terms = true
@@ -175,14 +170,13 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<TindyDbContext>();
-            var user = await db.Users.SingleAsync(x => x.Credential != null &&
-                x.Credential.EmailNormalized == email);
+            var user = await db.Users.SingleAsync(x => x.Credential != null && x.Credential.EmailNormalized == email);
             user.Status = "suspended";
             await db.SaveChangesAsync();
         }
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        var gated = await client.GetAsync("/api/v1/dev/onboarding-gate-check");
+        var gated = await client.GetAsync("/api/dev/onboarding-gate-check");
         Assert.Equal(HttpStatusCode.Forbidden, gated.StatusCode);
     }
 
@@ -191,10 +185,9 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
     {
         using var client = _factory.CreateHttpsClient();
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/health")).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized,
-            (await client.GetAsync("/api/v1/dev/onboarding-gate-check")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/dev/onboarding-gate-check")).StatusCode);
 
-        var invalid = await client.PostAsJsonAsync("/api/v1/auth/register", new
+        var invalid = await client.PostAsJsonAsync("/api/auth/register", new
         {
             display_name = "", university = "", email = "not-an-email",
             password = "weak", accept_terms = false

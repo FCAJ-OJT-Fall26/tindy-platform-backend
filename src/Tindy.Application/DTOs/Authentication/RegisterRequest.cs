@@ -20,8 +20,7 @@ public sealed class RegisterRequest : IValidatableObject
 
     public bool AcceptTerms { get; set; }
 
-    public IEnumerable<ValidationResult> Validate(
-        ValidationContext validationContext)
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         // ===================================
         // 1. FULL NAME
@@ -30,9 +29,7 @@ public sealed class RegisterRequest : IValidatableObject
             (string.IsNullOrWhiteSpace(DisplayName) ||
              DisplayName.Trim().Length > 100))
         {
-            yield return new ValidationResult(
-                "Full name must contain 1–100 characters.",
-                new[] { nameof(DisplayName) });
+            yield return new ValidationResult("Full name must contain 1–100 characters.", new[] { nameof(DisplayName) });
         }
 
         // ===================================
@@ -42,9 +39,7 @@ public sealed class RegisterRequest : IValidatableObject
             (string.IsNullOrWhiteSpace(University) ||
              University.Trim().Length > 255))
         {
-            yield return new ValidationResult(
-                "University must contain 1–255 characters.",
-                new[] { nameof(University) });
+            yield return new ValidationResult("University must contain 1–255 characters.", new[] { nameof(University) });
         }
 
         // ===================================
@@ -58,9 +53,7 @@ public sealed class RegisterRequest : IValidatableObject
                 !new EmailAddressAttribute()
                     .IsValid(normalizedInput))
             {
-                yield return new ValidationResult(
-                    "Email is invalid or too long.",
-                    new[] { nameof(Email) });
+                yield return new ValidationResult("Email is invalid or too long.", new[] { nameof(Email) });
             }
         }
 
@@ -73,9 +66,7 @@ public sealed class RegisterRequest : IValidatableObject
             var hasLower = Password.Any(char.IsLower);
             var hasDigit = Password.Any(char.IsDigit);
 
-            var hasSpecial = Password.Any(
-                c => !char.IsLetterOrDigit(c) &&
-                     !char.IsWhiteSpace(c));
+            var hasSpecial = Password.Any(c => !char.IsLetterOrDigit(c) && !char.IsWhiteSpace(c));
 
             var isValid = Password.Length >= 8
                 && Encoding.UTF8.GetByteCount(Password) <= 72
@@ -86,11 +77,7 @@ public sealed class RegisterRequest : IValidatableObject
 
             if (!isValid)
             {
-                yield return new ValidationResult(
-                    "Password must have at least 8 characters, " +
-                    "uppercase, lowercase, digit and special " +
-                    "character, with a maximum of 72 UTF-8 bytes.",
-                    new[] { nameof(Password) });
+                yield return new ValidationResult("Password must have at least 8 characters, " + "uppercase, lowercase, digit and special " + "character, with a maximum of 72 UTF-8 bytes.", new[] { nameof(Password) });
             }
         }
 
@@ -99,9 +86,7 @@ public sealed class RegisterRequest : IValidatableObject
         // ===================================
         if (!AcceptTerms)
         {
-            yield return new ValidationResult(
-                "You must accept the terms.",
-                new[] { nameof(AcceptTerms) });
+            yield return new ValidationResult("You must accept the terms.", new[] { nameof(AcceptTerms) });
         }
     }
 }

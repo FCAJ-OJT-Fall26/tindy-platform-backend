@@ -8,14 +8,11 @@ namespace Tindy.Infrastructure.Persistence.Configurations;
 public sealed class UserOnboardingStepConfiguration
     : IEntityTypeConfiguration<UserOnboardingStep>
 {
-    public void Configure(
-        EntityTypeBuilder<UserOnboardingStep> builder)
+    public void Configure(EntityTypeBuilder<UserOnboardingStep> builder)
     {
         builder.ToTable("user_onboarding_steps", table =>
         {
-            table.HasCheckConstraint(
-                "ck_user_onboarding_steps_step_number",
-                "step_number BETWEEN 1 AND 7");
+            table.HasCheckConstraint("ck_user_onboarding_steps_step_number", "step_number BETWEEN 1 AND 7");
         });
 
         builder.HasKey(x => new

@@ -5,7 +5,7 @@ public sealed class OnboardingIncompleteException : BusinessRuleException
     public IReadOnlyList<int> MissingSteps { get; }
 
     public OnboardingIncompleteException(IReadOnlyList<int> missingSteps)
-        : base("Chưa hoàn thành hoặc dữ liệu không hợp lệ ở các bước onboarding bắt buộc.")
+        : base("Required onboarding steps are incomplete or contain invalid data.")
     {
         MissingSteps = missingSteps;
     }

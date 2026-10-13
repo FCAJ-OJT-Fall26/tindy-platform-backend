@@ -14,9 +14,7 @@ public sealed class OnboardingAccessReader : IOnboardingAccessReader
         _context = context;
     }
 
-    public async Task<OnboardingAccessStatus> GetStatusAsync(
-        Guid userId,
-        CancellationToken cancellationToken = default)
+    public async Task<OnboardingAccessStatus> GetStatusAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         // Read the live DB state for each authorized request.
         // Do not read an onboarding flag from JWT claims or client storage.

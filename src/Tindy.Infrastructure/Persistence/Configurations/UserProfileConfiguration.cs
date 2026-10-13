@@ -11,11 +11,7 @@ public class UserProfileConfiguration
     {
         builder.ToTable("user_profiles", table =>
         {
-            table.HasCheckConstraint(
-                "ck_user_profiles_available_hours_per_week",
-                "available_hours_per_week IS NULL OR " +
-                "available_hours_per_week BETWEEN 1 AND 40"
-            );
+            table.HasCheckConstraint("ck_user_profiles_available_hours_per_week", "available_hours_per_week IS NULL OR " + "available_hours_per_week BETWEEN 1 AND 40");
         });
 
         builder.HasKey(x => x.UserId);

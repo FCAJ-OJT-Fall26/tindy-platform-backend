@@ -4,7 +4,7 @@ namespace Tindy.Application.Exceptions;
 public sealed class InvalidCredentialsException : Exception
 {
     public InvalidCredentialsException()
-        : base("Thông tin đăng nhập không chính xác.")
+        : base("The login credentials are incorrect.")
     {
     }
 }

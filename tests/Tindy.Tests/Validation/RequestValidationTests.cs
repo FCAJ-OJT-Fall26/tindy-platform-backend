@@ -19,8 +19,7 @@ public sealed class RequestValidationTests
     [InlineData("short", "password", false)]
     [InlineData("PASSWORD123!", "password", false)]
     [InlineData("Password123!", "password", true)]
-    public void RegisterRequest_PasswordRules_AreEnforced(
-        string password, string field, bool expectedValid = false)
+    public void RegisterRequest_PasswordRules_AreEnforced(string password, string field, bool expectedValid = false)
     {
         var request = ValidRegister();
         request.Password = password;

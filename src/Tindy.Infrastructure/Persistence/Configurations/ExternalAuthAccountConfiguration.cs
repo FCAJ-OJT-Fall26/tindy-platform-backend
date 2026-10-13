@@ -7,8 +7,7 @@ namespace Tindy.Infrastructure.Persistence.Configurations;
 public class ExternalAuthAccountConfiguration
     : IEntityTypeConfiguration<ExternalAuthAccount>
 {
-    public void Configure(
-        EntityTypeBuilder<ExternalAuthAccount> builder)
+    public void Configure(EntityTypeBuilder<ExternalAuthAccount> builder)
     {
         builder.ToTable("external_auth_accounts");
 
@@ -51,12 +50,10 @@ public class ExternalAuthAccountConfiguration
             x.ProviderUserId
         })
         .IsUnique()
-        .HasDatabaseName(
-            "ux_external_auth_accounts_provider_user");
+        .HasDatabaseName("ux_external_auth_accounts_provider_user");
 
         builder.HasIndex(x => x.UserId)
-            .HasDatabaseName(
-                "ix_external_auth_accounts_user_id");
+            .HasDatabaseName("ix_external_auth_accounts_user_id");
 
         builder.HasOne(x => x.User)
             .WithMany(x => x.ExternalAuthAccounts)

@@ -28,62 +28,49 @@ public sealed class JwtTokenService : IJwtTokenService
         if (string.IsNullOrWhiteSpace(_jwtOptions.Issuer) ||
             string.IsNullOrWhiteSpace(_jwtOptions.Audience))
         {
-            throw new InvalidOperationException(
-                "JWT Issuer and Audience are required.");
+            throw new InvalidOperationException("JWT Issuer and Audience are required.");
         }
 
         if (_jwtOptions.AccessTokenLifetimeMinutes <= 0 ||
             _jwtOptions.AccessTokenLifetimeMinutes > int.MaxValue / 60)
         {
-            throw new InvalidOperationException(
-                "JWT Access Token lifetime is invalid.");
+            throw new InvalidOperationException("JWT Access Token lifetime is invalid.");
         }
 
         if (string.IsNullOrWhiteSpace(_jwtOptions.SigningKey))
         {
-            throw new InvalidOperationException(
-                "JWT SigningKey was not configured.");
+            throw new InvalidOperationException("JWT SigningKey was not configured.");
         }
 
         byte[] keyBytes;
 
         try
         {
-            keyBytes = Convert.FromBase64String(
-                _jwtOptions.SigningKey);
+            keyBytes = Convert.FromBase64String(_jwtOptions.SigningKey);
         }
         catch (FormatException ex)
         {
-            throw new InvalidOperationException(
-                "JWT SigningKey must be valid Base64.",
-                ex);
+            throw new InvalidOperationException("JWT SigningKey must be valid Base64.", ex);
         }
 
         if (keyBytes.Length < 32)
         {
-            throw new InvalidOperationException(
-                "JWT SigningKey must contain at least 32 bytes.");
+            throw new InvalidOperationException("JWT SigningKey must contain at least 32 bytes.");
         }
 
         var securityKey = new SymmetricSecurityKey(keyBytes);
 
-        _signingCredentials = new SigningCredentials(
-            securityKey,
-            SecurityAlgorithms.HmacSha256);
+        _signingCredentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
     }
 
     // ===================================
     // 2. GENERATE ACCESS TOKEN
     // ===================================
-    public AccessTokenResult GenerateAccessToken(
-        Guid userId,
-        IReadOnlyCollection<string> roles)
+    public AccessTokenResult GenerateAccessToken(Guid userId, IReadOnlyCollection<string> roles)
     {
         if (userId == Guid.Empty)
         {
-            throw new ArgumentException(
-                "UserId cannot be empty.",
-                nameof(userId));
+            throw new ArgumentException("UserId cannot be empty.", nameof(userId));
         }
 
         ArgumentNullException.ThrowIfNull(roles);
@@ -96,9 +83,7 @@ public sealed class JwtTokenService : IJwtTokenService
 
         if (roleNames.Length == 0)
         {
-            throw new ArgumentException(
-                "At least one role is required.",
-                nameof(roles));
+            throw new ArgumentException("At least one role is required.", nameof(roles));
         }
 
         // ===================================
@@ -106,27 +91,18 @@ public sealed class JwtTokenService : IJwtTokenService
         // ===================================
         var now = DateTimeOffset.UtcNow;
 
-        var expiresAt = now.AddMinutes(
-            _jwtOptions.AccessTokenLifetimeMinutes);
+        var expiresAt = now.AddMinutes(_jwtOptions.AccessTokenLifetimeMinutes);
 
         // ===================================
         // 4. STANDARD JWT CLAIMS
         // ===================================
         var claims = new List<Claim>
         {
-            new Claim(
-                JwtRegisteredClaimNames.Sub,
-                userId.ToString("D")),
+            new Claim(JwtRegisteredClaimNames.Sub, userId.ToString("D")),
 
-            new Claim(
-                JwtRegisteredClaimNames.Jti,
-                Guid.NewGuid().ToString("N")),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
 
-            new Claim(
-                JwtRegisteredClaimNames.Iat,
-                now.ToUnixTimeSeconds().ToString(
-                    CultureInfo.InvariantCulture),
-                ClaimValueTypes.Integer64)
+            new Claim(JwtRegisteredClaimNames.Iat, now.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture), ClaimValueTypes.Integer64)
         };
 
         // ===================================
@@ -140,13 +116,7 @@ public sealed class JwtTokenService : IJwtTokenService
         // ===================================
         // 6. CREATE SIGNED JWT
         // ===================================
-        var jwtToken = new JwtSecurityToken(
-            issuer: _jwtOptions.Issuer,
-            audience: _jwtOptions.Audience,
-            claims: claims,
-            notBefore: now.UtcDateTime,
-            expires: expiresAt.UtcDateTime,
-            signingCredentials: _signingCredentials);
+        var jwtToken = new JwtSecurityToken(issuer: _jwtOptions.Issuer, audience: _jwtOptions.Audience, claims: claims, notBefore: now.UtcDateTime, expires: expiresAt.UtcDateTime, signingCredentials: _signingCredentials);
 
         // ===================================
         // 7. SERIALIZE JWT
@@ -158,10 +128,6 @@ public sealed class JwtTokenService : IJwtTokenService
         // ===================================
         // 8. RETURN RESULT
         // ===================================
-        return new AccessTokenResult(
-            AccessToken: accessToken,
-            TokenType: "Bearer",
-            ExpiresIn: checked(
-                _jwtOptions.AccessTokenLifetimeMinutes * 60));
+        return new AccessTokenResult(AccessToken: accessToken, TokenType: "Bearer", ExpiresIn: checked(_jwtOptions.AccessTokenLifetimeMinutes * 60));
     }
 }

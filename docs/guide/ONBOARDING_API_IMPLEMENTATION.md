@@ -13,16 +13,16 @@ Nguồn đối chiếu: `AUTHENTICATION_API.md` (STEP 01), `ONBOARDING_SCHEMA.md
 
 | Method | Endpoint | Action |
 |---|---|---|
-| GET | `/api/v1/me` | Đọc current user từ DB |
-| GET | `/api/v1/me/onboarding` | Đọc trạng thái và step_data |
-| PUT | `/api/v1/me/onboarding/1` | Username, display name, university |
-| PUT | `/api/v1/me/onboarding/2` | Skills full replace |
-| PUT | `/api/v1/me/onboarding/3` | PreferredRole (KHÔNG phải RBAC member) |
-| PUT | `/api/v1/me/onboarding/4` | Professional interests + learning goals |
-| PUT | `/api/v1/me/onboarding/5` | Availability 1–40 |
-| PUT | `/api/v1/me/onboarding/6` | Projects & experience |
-| PUT | `/api/v1/me/onboarding/7` | Github/Portfolio optional, bắt buộc submit |
-| POST | `/api/v1/me/onboarding/complete` | Xác nhận Step 8 |
+| GET | `/api/me` | Đọc current user từ DB |
+| GET | `/api/me/onboarding` | Đọc trạng thái và step_data |
+| PUT | `/api/me/onboarding/1` | Username, display name, university |
+| PUT | `/api/me/onboarding/2` | Skills full replace |
+| PUT | `/api/me/onboarding/3` | PreferredRole (KHÔNG phải RBAC member) |
+| PUT | `/api/me/onboarding/4` | Professional interests + learning goals |
+| PUT | `/api/me/onboarding/5` | Availability 1–40 |
+| PUT | `/api/me/onboarding/6` | Projects & experience |
+| PUT | `/api/me/onboarding/7` | Github/Portfolio optional, bắt buộc submit |
+| POST | `/api/me/onboarding/complete` | Xác nhận Step 8 |
 
 Tất cả yêu cầu `Authorization: Bearer <access_token>`.
 

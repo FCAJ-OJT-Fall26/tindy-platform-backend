@@ -14,15 +14,13 @@ public sealed class OnboardingService : IOnboardingService
     public OnboardingService(IOnboardingRepository repository) => _repository = repository;
 
     // ===================================
-    // GET /api/v1/me
+    // GET /api/me
     // ===================================
-    public async Task<CurrentUserResponse> GetCurrentUserAsync(
-        Guid userId, CancellationToken ct = default)
+    public async Task<CurrentUserResponse> GetCurrentUserAsync(Guid userId, CancellationToken ct = default)
     {
         var user = await GetActiveUserAsync(userId, ct);
         var profile = RequireProfile(user);
-        var credential = user.Credential ?? throw new InvalidOperationException(
-            "User credential was not found.");
+        var credential = user.Credential ?? throw new InvalidOperationException("User credential was not found.");
 
         var roles = user.UserRoles
             .Select(x => x.Role.RoleName)
@@ -30,16 +28,13 @@ public sealed class OnboardingService : IOnboardingService
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
 
-        return new CurrentUserResponse(user.UserId, user.Username,
-            profile.DisplayName, profile.University, credential.Email,
-            user.Status, roles, user.IsOnboardingCompleted);
+        return new CurrentUserResponse(user.UserId, user.Username, profile.DisplayName, profile.University, credential.Email, user.Status, roles, user.IsOnboardingCompleted);
     }
 
     // ===================================
-    // GET /api/v1/me/onboarding
+    // GET /api/me/onboarding
     // ===================================
-    public async Task<OnboardingDraftResponse> GetDraftAsync(
-        Guid userId, CancellationToken ct = default)
+    public async Task<OnboardingDraftResponse> GetDraftAsync(Guid userId, CancellationToken ct = default)
     {
         var user = await GetActiveUserAsync(userId, ct);
         var profile = RequireProfile(user);
@@ -68,15 +63,13 @@ public sealed class OnboardingService : IOnboardingService
             ["8"] = new { profile.Bio }
         };
 
-        return new OnboardingDraftResponse(8, CompletedSteps(user),
-            NextStep(user), user.IsOnboardingCompleted, data);
+        return new OnboardingDraftResponse(8, CompletedSteps(user), NextStep(user), user.IsOnboardingCompleted, data);
     }
 
     // ===================================
     // STEP 1 - BASIC INFORMATION
     // ===================================
-    public Task<OnboardingSaveResponse> SaveStep1Async(
-        Guid userId, OnboardingStep1Request request, CancellationToken ct = default)
+    public Task<OnboardingSaveResponse> SaveStep1Async(Guid userId, OnboardingStep1Request request, CancellationToken ct = default)
     {
         return _repository.ExecuteInTransactionAsync(userId, async token =>
         {
@@ -105,8 +98,7 @@ public sealed class OnboardingService : IOnboardingService
     // ===================================
     // STEP 2 - SKILLS (REPLACE FULL LIST)
     // ===================================
-    public Task<OnboardingSaveResponse> SaveStep2Async(
-        Guid userId, OnboardingStep2Request request, CancellationToken ct = default)
+    public Task<OnboardingSaveResponse> SaveStep2Async(Guid userId, OnboardingStep2Request request, CancellationToken ct = default)
     {
         // Canonicalize once and share the resulting names among all users.
         var names = request.Skills!
@@ -131,21 +123,17 @@ public sealed class OnboardingService : IOnboardingService
     // ===================================
     // STEP 3 - PREFERRED ROLE (NOT RBAC)
     // ===================================
-    public Task<OnboardingSaveResponse> SaveStep3Async(
-        Guid userId, OnboardingStep3Request request, CancellationToken ct = default)
+    public Task<OnboardingSaveResponse> SaveStep3Async(Guid userId, OnboardingStep3Request request, CancellationToken ct = default)
     {
-        var roleName = OnboardingAllowedRoles.Names.Single(x =>
-            string.Equals(x, request.PreferredRole!.Trim(), StringComparison.OrdinalIgnoreCase));
+        var roleName = OnboardingAllowedRoles.Names.Single(x => string.Equals(x, request.PreferredRole!.Trim(), StringComparison.OrdinalIgnoreCase));
 
-        return SaveScalarStepAsync(userId, 3,
-            (_, profile) => profile.PreferredRole = roleName, ct);
+        return SaveScalarStepAsync(userId, 3, (_, profile) => profile.PreferredRole = roleName, ct);
     }
 
     // ===================================
     // STEP 4 - INTERESTS & GOALS
     // ===================================
-    public Task<OnboardingSaveResponse> SaveStep4Async(
-        Guid userId, OnboardingStep4Request request, CancellationToken ct = default)
+    public Task<OnboardingSaveResponse> SaveStep4Async(Guid userId, OnboardingStep4Request request, CancellationToken ct = default)
     {
         return SaveScalarStepAsync(userId, 4, (_, profile) =>
         {
@@ -157,18 +145,15 @@ public sealed class OnboardingService : IOnboardingService
     // ===================================
     // STEP 5 - AVAILABILITY
     // ===================================
-    public Task<OnboardingSaveResponse> SaveStep5Async(
-        Guid userId, OnboardingStep5Request request, CancellationToken ct = default)
+    public Task<OnboardingSaveResponse> SaveStep5Async(Guid userId, OnboardingStep5Request request, CancellationToken ct = default)
     {
-        return SaveScalarStepAsync(userId, 5,
-            (_, profile) => profile.AvailableHoursPerWeek = request.AvailableHoursPerWeek!.Value, ct);
+        return SaveScalarStepAsync(userId, 5, (_, profile) => profile.AvailableHoursPerWeek = request.AvailableHoursPerWeek!.Value, ct);
     }
 
     // ===================================
     // STEP 6 - PROJECT EXPERIENCE
     // ===================================
-    public Task<OnboardingSaveResponse> SaveStep6Async(
-        Guid userId, OnboardingStep6Request request, CancellationToken ct = default)
+    public Task<OnboardingSaveResponse> SaveStep6Async(Guid userId, OnboardingStep6Request request, CancellationToken ct = default)
     {
         return SaveScalarStepAsync(userId, 6, (_, profile) =>
         {
@@ -180,8 +165,7 @@ public sealed class OnboardingService : IOnboardingService
     // ===================================
     // STEP 7 - OPTIONAL LINKS (SUBMIT REQUIRED)
     // ===================================
-    public Task<OnboardingSaveResponse> SaveStep7Async(
-        Guid userId, OnboardingStep7Request request, CancellationToken ct = default)
+    public Task<OnboardingSaveResponse> SaveStep7Async(Guid userId, OnboardingStep7Request request, CancellationToken ct = default)
     {
         return SaveScalarStepAsync(userId, 7, (_, profile) =>
         {
@@ -194,82 +178,70 @@ public sealed class OnboardingService : IOnboardingService
     // STEP 8 - COMPLETE & CONFIRM
     // ===================================
 
-    public Task<OnboardingCompleteResponse> CompleteAsync(
-        Guid userId,
-        OnboardingCompleteRequest request,
-        CancellationToken ct = default)
+    public Task<OnboardingCompleteResponse> CompleteAsync(Guid userId, OnboardingCompleteRequest request, CancellationToken ct = default)
     {
         if (request.Confirmed != true)
         {
-            throw new BusinessRuleException(
-                "Bạn cần xác nhận trước khi hoàn tất hồ sơ.");
+            throw new BusinessRuleException("You must confirm before completing your profile.");
         }
 
-        return _repository.ExecuteInTransactionAsync(
-            userId,
-            async token =>
+        return _repository.ExecuteInTransactionAsync(userId, async token =>
+        {
+            var user = await GetActiveUserAsync(userId, token);
+            var profile = RequireProfile(user);
+
+            // ===================================
+            // 1. CHECK ALREADY COMPLETED
+            // ===================================
+            if (user.IsOnboardingCompleted)
             {
-                var user = await GetActiveUserAsync(userId, token);
-                var profile = RequireProfile(user);
-
-                // ===================================
-                // 1. CHECK ALREADY COMPLETED
-                // ===================================
-                if (user.IsOnboardingCompleted)
-                {
-                    return Completed(user);
-                }
-
-                // ===================================
-                // 2. VALIDATE STEPS 1-7
-                // ===================================
-                var missingSteps = Enumerable.Range(1, 7)
-                    .Where(step =>
-                        !user.OnboardingSteps.Any(
-                            x => x.StepNumber == step) ||
-                        !IsStepDataValid(step, user, profile))
-                    .ToArray();
-
-                if (missingSteps.Length > 0)
-                {
-                    throw new OnboardingIncompleteException(
-                        missingSteps);
-                }
-
-                // ===================================
-                // 3. SAVE USER-EDITED BIO (OPTIONAL)
-                // ===================================
-                if (request.BioWasProvided)
-                {
-                    profile.Bio =
-                        string.IsNullOrWhiteSpace(request.Bio)
-                            ? null
-                            : request.Bio.Trim();
-
-                    profile.UpdatedAt = DateTime.UtcNow;
-                }
-
-                // ===================================
-                // 4. COMPLETE ONBOARDING
-                // ===================================
-                user.IsOnboardingCompleted = true;
-                user.UpdatedAt = DateTime.UtcNow;
-
-                // Save Bio + Onboarding status atomically
-                await _repository.SaveChangesAsync(token);
-
-                // ===================================
-                // 5. RETURN RESPONSE
-                // ===================================
                 return Completed(user);
+            }
 
-            }, ct);
+            // ===================================
+            // 2. VALIDATE STEPS 1-7
+            // ===================================
+            var missingSteps = Enumerable.Range(1, 7)
+                .Where(step => !user.OnboardingSteps.Any(x => x.StepNumber == step) || !IsStepDataValid(step, user, profile))
+                .ToArray();
+
+            if (missingSteps.Length > 0)
+            {
+                throw new OnboardingIncompleteException(missingSteps);
+            }
+
+            // ===================================
+            // 3. SAVE USER-EDITED BIO (OPTIONAL)
+            // ===================================
+            if (request.BioWasProvided)
+            {
+                profile.Bio =
+                    string.IsNullOrWhiteSpace(request.Bio)
+                        ? null
+                        : request.Bio.Trim();
+
+                profile.UpdatedAt = DateTime.UtcNow;
+            }
+
+            // ===================================
+            // 4. COMPLETE ONBOARDING
+            // ===================================
+            user.IsOnboardingCompleted = true;
+            user.UpdatedAt = DateTime.UtcNow;
+
+            // Save Bio + Onboarding status atomically
+            await _repository.SaveChangesAsync(token);
+
+            // ===================================
+            // 5. RETURN RESPONSE
+            // ===================================
+            return Completed(user);
+
+        }, ct);
     }
 
 
-    private Task<OnboardingSaveResponse> SaveScalarStepAsync(
-        Guid userId, int step, Action<User, UserProfile> mutate,
-        CancellationToken ct)
+    private Task<OnboardingSaveResponse> SaveScalarStepAsync(Guid userId, int step, Action<User, UserProfile> mutate, CancellationToken ct)
     {
         return _repository.ExecuteInTransactionAsync(userId, async token =>
         {
@@ -349,12 +321,9 @@ public sealed class OnboardingService : IOnboardingService
                     profile.University.Length <= 255;
             case 2:
                 return profile.UserSkills.Count > 0 &&
-                    profile.UserSkills.All(s =>
-                        !string.IsNullOrWhiteSpace(s.Skill.Name) &&
-                        s.Skill.Name.Length <= 100);
+                    profile.UserSkills.All(s => !string.IsNullOrWhiteSpace(s.Skill.Name) && s.Skill.Name.Length <= 100);
             case 3:
-                return OnboardingAllowedRoles.Names.Contains(
-                    profile.PreferredRole ?? string.Empty, StringComparer.Ordinal);
+                return OnboardingAllowedRoles.Names.Contains(profile.PreferredRole ?? string.Empty, StringComparer.Ordinal);
             case 4:
                 return !string.IsNullOrWhiteSpace(profile.ProfessionalInterests) &&
                     !string.IsNullOrWhiteSpace(profile.LearningGoals);

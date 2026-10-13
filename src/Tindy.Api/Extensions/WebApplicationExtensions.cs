@@ -6,8 +6,7 @@ namespace Tindy.Api.Extensions;
 
 public static class WebApplicationExtensions
 {
-    public static WebApplication UseApiPipeline(
-        this WebApplication app)
+    public static WebApplication UseApiPipeline(this WebApplication app)
     {
         // ===================================
         // 1. DEVELOPMENT TOOLS
@@ -18,9 +17,7 @@ public static class WebApplicationExtensions
 
             app.UseSwaggerUI(options =>
             {
-                options.SwaggerEndpoint(
-                    "/openapi/tindy.json",
-                    "Tindy API");
+                options.SwaggerEndpoint("/openapi/tindy.json", "Tindy API");
             });
         }
 
@@ -49,17 +46,13 @@ public static class WebApplicationExtensions
         if (app.Environment.IsDevelopment())
         {
             // Keep the JWT-only smoke test working for new users.
-            app.MapGet(
-                "/api/v1/dev/auth-check",
-                () => Results.Ok(new { message = "Authenticated" }))
+            app.MapGet("/api/dev/auth-check", () => Results.Ok(new { message = "Authenticated" }))
                 .RequireAuthorization(OnboardingPolicies.AuthenticatedOnly)
                 .ExcludeFromDescription();
 
             // DEV-only test for the full onboarding gate.
             // This endpoint uses DefaultPolicy (JWT + completed onboarding).
-            app.MapGet(
-                "/api/v1/dev/onboarding-gate-check",
-                () => Results.Ok(new { message = "Onboarding gate passed" }))
+            app.MapGet("/api/dev/onboarding-gate-check", () => Results.Ok(new { message = "Onboarding gate passed" }))
                 .RequireAuthorization()
                 .ExcludeFromDescription();
         }

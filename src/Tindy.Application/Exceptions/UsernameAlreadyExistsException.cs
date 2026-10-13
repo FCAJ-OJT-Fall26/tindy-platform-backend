@@ -3,8 +3,8 @@ namespace Tindy.Application.Exceptions;
 public sealed class UsernameAlreadyExistsException : ConflictException
 {
     public UsernameAlreadyExistsException()
-        : base("Username đã được sử dụng.") { }
+        : base("This username is already in use.") { }
 
     public UsernameAlreadyExistsException(Exception innerException)
-        : base("Username đã được sử dụng.", innerException) { }
+        : base("This username is already in use.", innerException) { }
 }

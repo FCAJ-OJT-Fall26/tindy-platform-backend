@@ -24,30 +24,22 @@ public sealed class PasswordHasher : IPasswordHasher
     {
         if (string.IsNullOrWhiteSpace(password))
         {
-            throw new ArgumentException(
-                "Password cannot be empty.",
-                nameof(password));
+            throw new ArgumentException("Password cannot be empty.", nameof(password));
         }
 
         if (Encoding.UTF8.GetByteCount(password) > MaxPasswordBytes)
         {
-            throw new ArgumentException(
-                "Password exceeds the 72-byte BCrypt limit.",
-                nameof(password));
+            throw new ArgumentException("Password exceeds the 72-byte BCrypt limit.", nameof(password));
         }
 
-        return BCryptNet.HashPassword(
-            password,
-            workFactor: WorkFactor);
+        return BCryptNet.HashPassword(password, workFactor: WorkFactor);
     }
 
     // ===================================
     // 3. VERIFY PASSWORD
     // ===================================
 
-    public bool VerifyPassword(
-        string password,
-        string passwordHash)
+    public bool VerifyPassword(string password, string passwordHash)
     {
         if (string.IsNullOrEmpty(password) ||
             string.IsNullOrWhiteSpace(passwordHash))
@@ -62,9 +54,7 @@ public sealed class PasswordHasher : IPasswordHasher
 
         try
         {
-            return BCryptNet.Verify(
-                password,
-                passwordHash);
+            return BCryptNet.Verify(password, passwordHash);
         }
         catch (BCrypt.Net.SaltParseException)
         {

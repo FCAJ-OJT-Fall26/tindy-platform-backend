@@ -5,7 +5,5 @@ namespace Tindy.Application.Interfaces.Services;
 
 public interface IJwtTokenService
 {
-    AccessTokenResult GenerateAccessToken(
-        Guid userId,
-        IReadOnlyCollection<string> roles);
+    AccessTokenResult GenerateAccessToken(Guid userId, IReadOnlyCollection<string> roles);
 }

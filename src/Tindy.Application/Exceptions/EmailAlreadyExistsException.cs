@@ -5,14 +5,12 @@ public sealed class EmailAlreadyExistsException
     : ConflictException
 {
     public EmailAlreadyExistsException()
-        : base("Email này đã được sử dụng.")
+        : base("This email address is already in use.")
     {
     }
 
     public EmailAlreadyExistsException(Exception innerException)
-        : base(
-            "Email này đã được sử dụng.",
-            innerException)
+        : base("This email address is already in use.", innerException)
     {
     }
 }
