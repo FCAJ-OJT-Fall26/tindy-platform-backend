@@ -48,12 +48,14 @@ public sealed class AuthRepository : IAuthRepository
     // ===================================
     // 3. GET USER BY EMAIL
     // ===================================
+
     public async Task<User?> GetByEmailAsync(
         string emailNormalized,
         CancellationToken cancellationToken = default)
     {
         return await _context.Users
             .AsNoTracking()
+            .Include(x => x.Profile)
             .Include(x => x.Credential)
             .Include(x => x.UserRoles)
                 .ThenInclude(x => x.Role)
@@ -64,15 +66,18 @@ public sealed class AuthRepository : IAuthRepository
                 cancellationToken);
     }
 
+
     // ===================================
     // 4. GET USER BY USERNAME
     // ===================================
+
     public async Task<User?> GetByUsernameAsync(
         string usernameNormalized,
         CancellationToken cancellationToken = default)
     {
         return await _context.Users
             .AsNoTracking()
+            .Include(x => x.Profile)
             .Include(x => x.Credential)
             .Include(x => x.UserRoles)
                 .ThenInclude(x => x.Role)
@@ -81,6 +86,7 @@ public sealed class AuthRepository : IAuthRepository
                 x => x.UsernameNormalized == usernameNormalized,
                 cancellationToken);
     }
+
 
     // ===================================
     // 5. GET USER BY ID

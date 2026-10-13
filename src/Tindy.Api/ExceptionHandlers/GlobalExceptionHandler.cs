@@ -22,6 +22,9 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         // 1. Map Exception -> HTTP Status Code
         var statusCode = exception switch
         {
+            InvalidCredentialsException =>
+                StatusCodes.Status401Unauthorized,
+
             NotFoundException =>
                 StatusCodes.Status404NotFound,
 
@@ -60,6 +63,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
 
             Title = statusCode switch
             {
+                401 => "Unauthorized",
                 404 => "Not Found",
                 409 => "Conflict",
                 422 => "Unprocessable Entity",
@@ -76,6 +80,9 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         problemDetails.Extensions["error_code"] =
             exception switch
             {
+                InvalidCredentialsException =>
+                    "AUTH_INVALID_CREDENTIALS",
+
                 EmailAlreadyExistsException =>
                     "AUTH_EMAIL_ALREADY_EXISTS",
 

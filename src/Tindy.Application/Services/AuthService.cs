@@ -186,4 +186,137 @@ public sealed class AuthService : IAuthService
             RedirectTo: "/onboarding"
         );
     }
+
+
+    public async Task<LoginResponse> LoginAsync(
+        LoginRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // ===================================
+        // 1. NORMALIZE IDENTIFIER
+        // ===================================
+        var identifier = request.Identifier!.Trim();
+
+        var normalizedIdentifier =
+            identifier.ToLowerInvariant();
+
+        // ===================================
+        // 2. FIND USER BY EMAIL OR USERNAME
+        // ===================================
+        User? user;
+
+        if (normalizedIdentifier.Contains('@'))
+        {
+            // Login with email
+            user = await _authRepository.GetByEmailAsync(
+                normalizedIdentifier,
+                cancellationToken);
+        }
+        else
+        {
+            // Login with username
+            user = await _authRepository.GetByUsernameAsync(
+                normalizedIdentifier,
+                cancellationToken);
+        }
+
+        // ===================================
+        // 3. VERIFY PASSWORD
+        // ===================================
+        if (user?.Credential is null)
+        {
+            throw new InvalidCredentialsException();
+        }
+
+        var isPasswordValid = _passwordHasher.VerifyPassword(
+            request.Password!,
+            user.Credential.PasswordHash);
+
+        if (!isPasswordValid)
+        {
+            throw new InvalidCredentialsException();
+        }
+
+        // ===================================
+        // 4. CHECK ACCOUNT STATUS
+        // ===================================
+        var isActive = string.Equals(
+            user.Status,
+            "active",
+            StringComparison.OrdinalIgnoreCase);
+
+        var isDeleted = user.DeletedAt.HasValue;
+
+        if (!isActive || isDeleted)
+        {
+            throw new InvalidCredentialsException();
+        }
+
+        // ===================================
+        // 5. LOAD SYSTEM ROLES
+        // ===================================
+        var roles = user.UserRoles
+            .Select(x => x.Role.RoleName)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+
+        if (roles.Length == 0)
+        {
+            throw new InvalidOperationException(
+                "Authenticated user has no assigned system role.");
+        }
+
+        // ===================================
+        // 6. CHECK INITIAL PROFILE
+        // ===================================
+        if (user.Profile is null)
+        {
+            throw new InvalidOperationException(
+                "Authenticated user has no profile.");
+        }
+
+        // ===================================
+        // 7. GENERATE JWT ACCESS TOKEN
+        // ===================================
+        var token = _jwtTokenService.GenerateAccessToken(
+            user.UserId,
+            roles);
+
+        // ===================================
+        // 8. CHECK ONBOARDING STATUS
+        // ===================================
+        var isOnboardingCompleted =
+            user.IsOnboardingCompleted;
+
+        var redirectTo = isOnboardingCompleted
+            ? "/discover"
+            : "/onboarding";
+
+        // ===================================
+        // 9. BUILD LOGIN RESPONSE
+        // ===================================
+        return new LoginResponse(
+            AccessToken: token.AccessToken,
+            TokenType: token.TokenType,
+            ExpiresIn: token.ExpiresIn,
+
+            User: new LoginUserResponse(
+                UserId: user.UserId,
+                DisplayName: user.Profile.DisplayName,
+                University: user.Profile.University ?? string.Empty,
+                Email: user.Credential.Email,
+                Username: user.Username,
+                Status: user.Status,
+                Roles: roles,
+                IsOnboardingCompleted: isOnboardingCompleted
+            ),
+
+            RedirectTo: redirectTo
+        );
+    }
+
 }

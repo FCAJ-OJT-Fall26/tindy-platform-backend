@@ -6,6 +6,8 @@ using Tindy.Infrastructure.Authentication;
 using Tindy.Application.Interfaces.Services;
 using Tindy.Application.Services;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 
 namespace Tindy.Api.Extensions;
 
@@ -210,6 +212,70 @@ public static class ServiceCollectionExtensions
         // AUTHENTICATION APPLICATION SERVICE
         // ===================================
         services.AddScoped<IAuthService, AuthService>();
+
+
+
+
+        // ===================================
+        // LOGIN RATE LIMITING
+        // ===================================
+        services.AddRateLimiter(options =>
+        {
+            // HTTP Status Code
+            options.RejectionStatusCode =
+                StatusCodes.Status429TooManyRequests;
+
+            // ===================================
+            // 1. LOGIN RATE LIMIT POLICY
+            // ===================================
+            options.AddPolicy("auth-login", context =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey:
+                        context.Connection.RemoteIpAddress?
+                            .ToString() ?? "unknown",
+
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }));
+
+            // ===================================
+            // 2. CUSTOM 429 ERROR RESPONSE
+            // ===================================
+            options.OnRejected = async (context, cancellationToken) =>
+            {
+                var httpContext = context.HttpContext;
+
+                var problem = new ProblemDetails
+                {
+                    Status = StatusCodes.Status429TooManyRequests,
+                    Title = "Too Many Requests",
+                    Detail = "Quá nhiều yêu cầu đăng nhập. Vui lòng thử lại sau.",
+                    Instance = httpContext.Request.Path.ToString()
+                };
+
+                problem.Extensions["error_code"] =
+                    "AUTH_TOO_MANY_ATTEMPTS";
+
+                problem.Extensions["traceId"] =
+                    httpContext.TraceIdentifier;
+
+                httpContext.Response.StatusCode =
+                    StatusCodes.Status429TooManyRequests;
+
+                httpContext.Response.ContentType =
+                    "application/problem+json";
+
+                await httpContext.Response.WriteAsync(
+                    JsonSerializer.Serialize(problem),
+                    cancellationToken);
+            };
+        });
+
+
 
         return services;
     }
