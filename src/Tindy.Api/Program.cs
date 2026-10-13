@@ -9,7 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 // ==============================
 
 // Api services
-builder.Services.AddApiServices();
+builder.Services.AddApiServices(builder.Configuration);
 
 // Infrastructure services
 builder.Services.AddInfrastructure(builder.Configuration);
@@ -40,3 +40,6 @@ app.UseExceptionHandler(new ExceptionHandlerOptions
 app.UseApiPipeline();
 
 app.Run();
+
+// Makes the API entry point accessible to WebApplicationFactory integration tests.
+public partial class Program { }

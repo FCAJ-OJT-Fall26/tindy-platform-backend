@@ -22,6 +22,9 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         // 1. Map Exception -> HTTP Status Code
         var statusCode = exception switch
         {
+            InvalidCredentialsException =>
+                StatusCodes.Status401Unauthorized,
+
             NotFoundException =>
                 StatusCodes.Status404NotFound,
 
@@ -60,6 +63,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
 
             Title = statusCode switch
             {
+                401 => "Unauthorized",
                 404 => "Not Found",
                 409 => "Conflict",
                 422 => "Unprocessable Entity",
@@ -73,12 +77,48 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
             Instance = httpContext.Request.Path
         };
 
+        problemDetails.Extensions["error_code"] =
+            exception switch
+            {
+                InvalidCredentialsException =>
+                    "AUTH_INVALID_CREDENTIALS",
+
+                EmailAlreadyExistsException =>
+                    "AUTH_EMAIL_ALREADY_EXISTS",
+
+                UsernameAlreadyExistsException =>
+                    "USERNAME_ALREADY_EXISTS",
+
+                OnboardingIncompleteException =>
+                    "ONBOARDING_INCOMPLETE",
+
+                ConflictException =>
+                    "CONFLICT",
+
+                NotFoundException =>
+                    "NOT_FOUND",
+
+                BusinessRuleException =>
+                    "BUSINESS_RULE_VIOLATION",
+
+                _ =>
+                    "INTERNAL_SERVER_ERROR"
+            };
+
+        if (exception is OnboardingIncompleteException incomplete)
+        {
+            problemDetails.Extensions["missing_steps"] = incomplete.MissingSteps;
+        }
+
         // 4. Include TraceId
         problemDetails.Extensions["traceId"] =
             httpContext.TraceIdentifier;
 
         // 5. Set HTTP status and write response
         httpContext.Response.StatusCode = statusCode;
+
+        httpContext.Response.ContentType =
+            "application/problem+json";
 
         await httpContext.Response.WriteAsJsonAsync(
             problemDetails,

@@ -9,7 +9,14 @@ public class UserProfileConfiguration
 {
     public void Configure(EntityTypeBuilder<UserProfile> builder)
     {
-        builder.ToTable("user_profiles");
+        builder.ToTable("user_profiles", table =>
+        {
+            table.HasCheckConstraint(
+                "ck_user_profiles_available_hours_per_week",
+                "available_hours_per_week IS NULL OR " +
+                "available_hours_per_week BETWEEN 1 AND 40"
+            );
+        });
 
         builder.HasKey(x => x.UserId);
 
@@ -54,6 +61,10 @@ public class UserProfileConfiguration
             .HasMaxLength(255)
             .IsRequired(false);
 
+        builder.Property(x => x.AvailableHoursPerWeek)
+            .HasColumnName("available_hours_per_week")
+            .IsRequired(false);
+
         builder.Property(x => x.PublicEmail)
             .HasColumnName("public_email")
             .HasMaxLength(255);
@@ -85,6 +96,28 @@ public class UserProfileConfiguration
 
         builder.Property(x => x.UpdatedAt)
             .HasColumnName("updated_at");
+
+
+        builder.Property(x => x.PreferredRole)
+            .HasColumnName("preferred_role")
+            .HasMaxLength(100);
+
+        builder.Property(x => x.ProfessionalInterests)
+            .HasColumnName("professional_interests")
+            .HasColumnType("text");
+
+        builder.Property(x => x.LearningGoals)
+            .HasColumnName("learning_goals")
+            .HasColumnType("text");
+
+        builder.Property(x => x.PreviousProjectsAndContribution)
+            .HasColumnName("previous_projects_and_contribution")
+            .HasColumnType("text");
+
+        builder.Property(x => x.TechnologiesToLearn)
+            .HasColumnName("technologies_to_learn")
+            .HasColumnType("text");
+
 
         builder.HasOne(x => x.User)
             .WithOne(x => x.Profile)
