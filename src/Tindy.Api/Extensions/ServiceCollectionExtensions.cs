@@ -67,6 +67,24 @@ public static class ServiceCollectionExtensions
         services.AddOpenApi("tindy");
 
         // ===================================
+        // CORS CONFIGURATION
+        // ===================================
+        var allowedOrigins = configuration
+            .GetSection("Cors:AllowedOrigins")
+            .Get<string[]>() ?? Array.Empty<string>();
+
+        services.AddCors(options =>
+        {
+            options.AddPolicy("TindyFrontend", policy =>
+            {
+                policy
+                    .WithOrigins(allowedOrigins)
+                    .AllowAnyHeader()
+                    .AllowAnyMethod();
+            });
+        });
+
+        // ===================================
         // 2. LOAD JWT SETTINGS
         // ===================================
         var jwtSection = configuration.GetSection(JwtOptions.SectionName);
@@ -222,12 +240,12 @@ public static class ServiceCollectionExtensions
             // 1. LOGIN RATE LIMIT POLICY
             // ===================================
             options.AddPolicy("auth-login", context => RateLimitPartition.GetFixedWindowLimiter(partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown", factory: _ => new FixedWindowRateLimiterOptions
-                    {
-                        PermitLimit = 10,
-                        Window = TimeSpan.FromMinutes(1),
-                        QueueLimit = 0,
-                        AutoReplenishment = true
-                    }));
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
 
             // ===================================
             // 2. CUSTOM 429 ERROR RESPONSE
