@@ -26,17 +26,28 @@ public static class WebApplicationExtensions
         // ===================================
         app.UseHttpsRedirection();
 
+        // ===================================
+        // 3. ROUTING
+        // ===================================
         app.UseRouting();
 
-        app.UseRateLimiter();
-        
         // ===================================
-        // 3. AUTHENTICATION
+        // 4. CORS
+        // ===================================
+        app.UseCors("TindyFrontend");
+
+        // ===================================
+        // 5. RATE LIMITING
+        // ===================================
+        app.UseRateLimiter();
+
+        // ===================================
+        // 6. AUTHENTICATION
         // ===================================
         app.UseAuthentication();
 
         // ===================================
-        // 4. AUTHORIZATION
+        // 7. AUTHORIZATION
         // ===================================
         app.UseAuthorization();
 
