@@ -226,9 +226,7 @@ public sealed class OnboardingService : IOnboardingService
             // ===================================
             // 2. VALIDATE STEPS 1-7
             // ===================================
-            var missingSteps = Enumerable.Range(1, 7)
-                .Where(step => !user.OnboardingSteps.Any(x => x.StepNumber == step) || !IsStepDataValid(step, user, profile))
-                .ToArray();
+            var missingSteps = MissingRequiredSteps(user, profile);
 
             if (missingSteps.Length > 0)
             {
@@ -311,17 +309,36 @@ public sealed class OnboardingService : IOnboardingService
             marker.CompletedAt = DateTime.UtcNow;
     }
 
-    private static int[] CompletedSteps(User user)
+    // A persisted step marker alone is not enough: related catalog/profile data
+    // must still be valid when the user asks to complete onboarding.
+    private static int[] MissingRequiredSteps(User user, UserProfile profile)
     {
-        var steps = user.OnboardingSteps.Select(x => x.StepNumber).ToList();
-        if (user.IsOnboardingCompleted)
-            steps.Add(8);
-        return steps.Distinct().OrderBy(x => x).ToArray();
+        var markedSteps = user.OnboardingSteps.Select(x => x.StepNumber).ToHashSet();
+        return Enumerable.Range(1, 7)
+            .Where(step => !markedSteps.Contains(step) || !IsStepDataValid(step, user, profile))
+            .ToArray();
     }
 
-    private static int NextStep(User user) =>
-        Enumerable.Range(1, 7)
-            .FirstOrDefault(x => !user.OnboardingSteps.Any(m => m.StepNumber == x), 8);
+    private static int[] CompletedSteps(User user)
+    {
+        // Completion is final. Catalog entries may later be disabled/deleted,
+        // without revoking an already completed user's onboarding status.
+        if (user.IsOnboardingCompleted)
+            return Enumerable.Range(1, 8).ToArray();
+
+        var missing = MissingRequiredSteps(user, RequireProfile(user)).ToHashSet();
+        return Enumerable.Range(1, 7)
+            .Where(step => !missing.Contains(step))
+            .ToArray();
+    }
+
+    private static int NextStep(User user)
+    {
+        if (user.IsOnboardingCompleted)
+            return 8;
+
+        return MissingRequiredSteps(user, RequireProfile(user)).FirstOrDefault(8);
+    }
 
     private static OnboardingSaveResponse Saved(User user, int step) =>
         new(step, CompletedSteps(user), NextStep(user), user.IsOnboardingCompleted);
@@ -342,12 +359,16 @@ public sealed class OnboardingService : IOnboardingService
                     !string.IsNullOrWhiteSpace(profile.University) &&
                     profile.University.Length <= 255;
             case 2:
+                // The skill FK proves a catalog link exists. Newly added links may not
+                // have their Skill navigation loaded in the same DbContext yet.
+                // Inactive skills selected earlier remain valid; new selections must be active.
                 return profile.UserSkills.Count > 0 &&
-                    profile.UserSkills.All(s => !string.IsNullOrWhiteSpace(s.Skill.Name) && s.Skill.Name.Length <= 100);
+                    profile.UserSkills.All(s => s.SkillId != Guid.Empty);
             case 3:
-                // An already-selected role remains valid even if the catalog later disables it.
-                // New selections are restricted to IsActive=true in SaveStep3Async.
-                return profile.PreferredRoleId.HasValue && profile.PreferredProfessionalRole is not null;
+                // The FK guarantees that an assigned role exists; navigation may not yet
+                // be populated in the same DbContext immediately after SaveStep3Async.
+                // Disabling a previously selected role does not invalidate onboarding.
+                return profile.PreferredRoleId.HasValue && profile.PreferredRoleId.Value != Guid.Empty;
             case 4:
                 return !string.IsNullOrWhiteSpace(profile.ProfessionalInterests) &&
                     !string.IsNullOrWhiteSpace(profile.LearningGoals);
