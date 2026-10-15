@@ -28,6 +28,11 @@ public sealed class SkillConfiguration
             .HasMaxLength(100)
             .IsRequired();
 
+        builder.Property(x => x.IsActive)
+            .HasColumnName("is_active")
+            .HasDefaultValue(true)
+            .IsRequired();
+
         builder.HasIndex(x => x.NameNormalized)
             .IsUnique()
             .HasDatabaseName("ux_skills_name_normalized");

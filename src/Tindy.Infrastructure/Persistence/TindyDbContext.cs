@@ -34,6 +34,15 @@ public class TindyDbContext : DbContext
         => Set<ExternalAuthAccount>();
 
 
+    public DbSet<ProfessionalRole> ProfessionalRoles
+        => Set<ProfessionalRole>();
+
+    public DbSet<SkillCategory> SkillCategories
+        => Set<SkillCategory>();
+
+    public DbSet<SkillCategorySkill> SkillCategorySkills
+        => Set<SkillCategorySkill>();
+
     public DbSet<Skill> Skills
         => Set<Skill>();
 

@@ -97,6 +97,50 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.ToTable("permissions", (string)null);
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.ProfessionalRole", b =>
+                {
+                    b.Property<Guid>("ProfessionalRoleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("professional_role_id");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("display_order");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("NameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name_normalized");
+
+                    b.HasKey("ProfessionalRoleId");
+
+                    b.HasIndex("NameNormalized")
+                        .IsUnique()
+                        .HasDatabaseName("ux_professional_roles_name_normalized");
+
+                    b.ToTable("professional_roles", (string)null);
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.Role", b =>
                 {
                     b.Property<Guid>("RoleId")
@@ -143,6 +187,12 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("skill_id");
 
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -162,6 +212,68 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ux_skills_name_normalized");
 
                     b.ToTable("skills", (string)null);
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.SkillCategory", b =>
+                {
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("category_id");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("display_order");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("NameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name_normalized");
+
+                    b.HasKey("CategoryId");
+
+                    b.HasIndex("NameNormalized")
+                        .IsUnique()
+                        .HasDatabaseName("ux_skill_categories_name_normalized");
+
+                    b.ToTable("skill_categories", (string)null);
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.SkillCategorySkill", b =>
+                {
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("category_id");
+
+                    b.Property<Guid>("SkillId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("skill_id");
+
+                    b.HasKey("CategoryId", "SkillId");
+
+                    b.HasIndex("SkillId")
+                        .HasDatabaseName("ix_skill_category_skills_skill_id");
+
+                    b.ToTable("skill_category_skills", (string)null);
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.User", b =>
@@ -387,6 +499,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("preferred_role");
 
+                    b.Property<Guid?>("PreferredRoleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("preferred_role_id");
+
                     b.Property<string>("PreviousProjectsAndContribution")
                         .HasColumnType("text")
                         .HasColumnName("previous_projects_and_contribution");
@@ -419,6 +535,9 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnName("updated_at");
 
                     b.HasKey("UserId");
+
+                    b.HasIndex("PreferredRoleId")
+                        .HasDatabaseName("ix_user_profiles_preferred_role_id");
 
                     b.ToTable("user_profiles", null, t =>
                         {
@@ -492,6 +611,25 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("Role");
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.SkillCategorySkill", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.SkillCategory", "SkillCategory")
+                        .WithMany("SkillCategorySkills")
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Tindy.Application.Entities.Skill", "Skill")
+                        .WithMany("SkillCategorySkills")
+                        .HasForeignKey("SkillId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Skill");
+
+                    b.Navigation("SkillCategory");
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.UserCredential", b =>
                 {
                     b.HasOne("Tindy.Application.Entities.User", "User")
@@ -516,11 +654,18 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Tindy.Application.Entities.UserProfile", b =>
                 {
+                    b.HasOne("Tindy.Application.Entities.ProfessionalRole", "PreferredProfessionalRole")
+                        .WithMany("UserProfiles")
+                        .HasForeignKey("PreferredRoleId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Tindy.Application.Entities.User", "User")
                         .WithOne("Profile")
                         .HasForeignKey("Tindy.Application.Entities.UserProfile", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("PreferredProfessionalRole");
 
                     b.Navigation("User");
                 });
@@ -568,6 +713,11 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("RolePermissions");
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.ProfessionalRole", b =>
+                {
+                    b.Navigation("UserProfiles");
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.Role", b =>
                 {
                     b.Navigation("RolePermissions");
@@ -577,7 +727,14 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Tindy.Application.Entities.Skill", b =>
                 {
+                    b.Navigation("SkillCategorySkills");
+
                     b.Navigation("UserSkills");
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.SkillCategory", b =>
+                {
+                    b.Navigation("SkillCategorySkills");
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.User", b =>
