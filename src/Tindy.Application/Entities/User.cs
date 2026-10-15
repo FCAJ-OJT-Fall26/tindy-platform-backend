@@ -5,6 +5,12 @@ public class User
     public Guid UserId {get; set;}
     public string? Username {get; set;}
     public string? UsernameNormalized {get; set;}
+
+    // Private contact email; independent from Local password credentials.
+    // May be null when an OAuth provider returns no verified email.
+    public string? PrimaryEmail { get; set; }
+    public string? PrimaryEmailNormalized { get; set; }
+    public DateTime? PrimaryEmailVerifiedAt { get; set; }
     public string Status {get; set;} = null!;
     public bool IsOnboardingCompleted { get; set; } = false;
     public DateTime CreatedAt {get; set;} 

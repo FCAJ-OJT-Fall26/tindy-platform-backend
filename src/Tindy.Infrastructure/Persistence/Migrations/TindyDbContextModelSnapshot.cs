@@ -72,6 +72,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("ux_external_auth_accounts_provider_user");
 
+                    b.HasIndex("UserId", "Provider")
+                        .IsUnique()
+                        .HasDatabaseName("ux_external_auth_accounts_user_provider");
+
                     b.ToTable("external_auth_accounts", (string)null);
                 });
 
@@ -297,6 +301,20 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasDefaultValue(false)
                         .HasColumnName("is_onboarding_completed");
 
+                    b.Property<string>("PrimaryEmail")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("primary_email");
+
+                    b.Property<string>("PrimaryEmailNormalized")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("primary_email_normalized");
+
+                    b.Property<DateTime?>("PrimaryEmailVerifiedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("primary_email_verified_at");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(30)
@@ -318,6 +336,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnName("username_normalized");
 
                     b.HasKey("UserId");
+
+                    b.HasIndex("PrimaryEmailNormalized")
+                        .IsUnique()
+                        .HasDatabaseName("ux_users_primary_email_normalized");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("ix_users_status");

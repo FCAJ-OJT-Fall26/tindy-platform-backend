@@ -52,6 +52,11 @@ public class ExternalAuthAccountConfiguration
         .IsUnique()
         .HasDatabaseName("ux_external_auth_accounts_provider_user");
 
+        // MVP policy: one linked identity per provider for each Tindy user.
+        builder.HasIndex(x => new { x.UserId, x.Provider })
+            .IsUnique()
+            .HasDatabaseName("ux_external_auth_accounts_user_provider");
+
         builder.HasIndex(x => x.UserId)
             .HasDatabaseName("ix_external_auth_accounts_user_id");
 

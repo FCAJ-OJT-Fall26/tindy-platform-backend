@@ -25,6 +25,25 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasMaxLength(50)
             .IsRequired(false);
 
+        builder.Property(x => x.PrimaryEmail)
+            .HasColumnName("primary_email")
+            .HasMaxLength(255)
+            .IsRequired(false);
+
+        builder.Property(x => x.PrimaryEmailNormalized)
+            .HasColumnName("primary_email_normalized")
+            .HasMaxLength(255)
+            .IsRequired(false);
+
+        builder.Property(x => x.PrimaryEmailVerifiedAt)
+            .HasColumnName("primary_email_verified_at")
+            .IsRequired(false);
+
+        // PostgreSQL permits multiple NULL values in a unique index.
+        builder.HasIndex(x => x.PrimaryEmailNormalized)
+            .IsUnique()
+            .HasDatabaseName("ux_users_primary_email_normalized");
+
         builder.Property(x => x.Status)
             .HasColumnName("status")
             .HasMaxLength(30)

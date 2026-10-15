@@ -22,9 +22,14 @@ public sealed class AuthRepository : IAuthRepository
     // ===================================
     public async Task<bool> EmailExistsAsync(string emailNormalized, CancellationToken cancellationToken = default)
     {
-        return await _context.UserCredentials
+        // Check both tables while supporting existing Local Credential records.
+        // The new users index also protects against OAuth/Local email collisions.
+        return await _context.Users
             .AsNoTracking()
-            .AnyAsync(x => x.EmailNormalized == emailNormalized, cancellationToken);
+            .AnyAsync(x => x.PrimaryEmailNormalized == emailNormalized, cancellationToken)
+            || await _context.UserCredentials
+                .AsNoTracking()
+                .AnyAsync(x => x.EmailNormalized == emailNormalized, cancellationToken);
     }
 
     // ===================================
@@ -119,7 +124,7 @@ public sealed class AuthRepository : IAuthRepository
             {
                 SqlState: PostgresErrorCodes.UniqueViolation,
                 ConstraintName:
-                    "ux_user_credentials_email_normalized"
+                    "ux_user_credentials_email_normalized" or "ux_users_primary_email_normalized"
             })
         {
             throw new EmailAlreadyExistsException(ex);
