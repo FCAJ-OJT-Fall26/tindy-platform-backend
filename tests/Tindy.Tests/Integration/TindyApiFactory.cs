@@ -62,7 +62,8 @@ public sealed class TindyApiFactory : WebApplicationFactory<Program>, IAsyncLife
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<TindyDbContext>();
         await db.Database.MigrateAsync();
-        await RoleSeeder.SeedAsync(db);
+        // The test DbContext overrides production EF options: seed explicitly.
+        await TindySeedRunner.SeedAsync(db);
     }
 
     Task IAsyncLifetime.DisposeAsync() => StopAsync();

@@ -20,47 +20,40 @@ public sealed class OnboardingStep1Request
 
 public sealed class OnboardingStep2Request : IValidatableObject
 {
+    // IDs must come from GET /api/catalog/skills; users cannot create catalog skills.
     [Required]
     [MinLength(1)]
-    public List<string>? Skills { get; set; }
+    [MaxLength(30)]
+    public List<Guid>? SkillIds { get; set; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
-        if (Skills is null) yield break;
+        if (SkillIds is null) yield break;
 
-        if (Skills.Any(s => string.IsNullOrWhiteSpace(s) || s.Trim().Length > 100))
+        if (SkillIds.Contains(Guid.Empty))
         {
-            yield return new ValidationResult("Each skill must contain 1–100 valid characters.", new[] { nameof(Skills) });
+            yield return new ValidationResult(
+                "Each skill ID must be a non-empty UUID.",
+                new[] { nameof(SkillIds) });
         }
     }
 }
 
 public sealed class OnboardingStep3Request : IValidatableObject
 {
+    // Use GET /api/catalog/professional-roles to obtain this UUID.
     [Required]
-    public string? PreferredRole { get; set; }
+    public Guid? PreferredRoleId { get; set; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
-        if (PreferredRole is not null &&
-            !OnboardingAllowedRoles.Names.Any(x => string.Equals(x, PreferredRole.Trim(), StringComparison.OrdinalIgnoreCase)))
+        if (PreferredRoleId == Guid.Empty)
         {
-            yield return new ValidationResult("The preferred role is not in the list of supported roles.", new[] { nameof(PreferredRole) });
+            yield return new ValidationResult(
+                "Preferred role ID must be a non-empty UUID.",
+                new[] { nameof(PreferredRoleId) });
         }
     }
-}
-
-public static class OnboardingAllowedRoles
-{
-    public static readonly IReadOnlyList<string> Names =
-    [
-        "Backend Developer",
-        "Frontend Developer",
-        "Full-stack Developer",
-        "AI Engineer",
-        "Cloud Engineer",
-        "UI/UX Designer"
-    ];
 }
 
 public sealed class OnboardingStep4Request

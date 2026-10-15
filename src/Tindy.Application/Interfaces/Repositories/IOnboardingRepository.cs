@@ -10,9 +10,15 @@ public interface IOnboardingRepository
 
     Task<bool> UsernameExistsAsync(Guid exceptUserId, string usernameNormalized, CancellationToken cancellationToken = default);
 
-    // Must run inside ExecuteInTransactionAsync. Concurrent catalog creation
-    // is safe because PostgreSQL uses ON CONFLICT DO NOTHING.
-    Task<IReadOnlyList<Skill>> GetOrCreateSkillsAsync(IReadOnlyCollection<string> skillNames, CancellationToken cancellationToken = default);
+    // Only existing, active catalog skills may be selected.
+    Task<IReadOnlyList<Skill>> GetActiveSkillsByIdsAsync(
+        IReadOnlyCollection<Guid> skillIds,
+        CancellationToken cancellationToken = default);
+
+    // The catalog is system managed; a user can only choose an active role.
+    Task<ProfessionalRole?> GetActiveProfessionalRoleByIdAsync(
+        Guid roleId,
+        CancellationToken cancellationToken = default);
 
     void SyncUserSkills(UserProfile profile, IReadOnlyCollection<Skill> skills);
 

@@ -53,6 +53,9 @@ public static class ServicesCollectionExtensions
         // Onboarding repository
         services.AddScoped<IOnboardingRepository, OnboardingRepository>();
 
+        // Read-only catalog repository
+        services.AddScoped<ICatalogRepository, CatalogRepository>();
+
         // Lightweight read-only check for protected business APIs
         services.AddScoped<IOnboardingAccessReader, OnboardingAccessReader>();
 

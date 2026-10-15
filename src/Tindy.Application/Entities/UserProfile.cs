@@ -22,7 +22,9 @@ public class UserProfile
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public User User { get; set; } = null!;
-    public string? PreferredRole { get; set; }
+    public Guid? PreferredRoleId { get; set; }
+
+    public ProfessionalRole? PreferredProfessionalRole { get; set; }
     public string? ProfessionalInterests { get; set; }
     public string? LearningGoals { get; set; }
     public string? PreviousProjectsAndContribution { get; set; }

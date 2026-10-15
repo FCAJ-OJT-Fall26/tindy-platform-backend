@@ -39,6 +39,12 @@ public sealed class OnboardingService : IOnboardingService
         var user = await GetActiveUserAsync(userId, ct);
         var profile = RequireProfile(user);
 
+        var selectedSkills = profile.UserSkills
+            .OrderBy(x => x.Skill.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.SkillId)
+            .Select(x => new { x.SkillId, x.Skill.Name })
+            .ToArray();
+
         var data = new Dictionary<string, object>
         {
             ["1"] = new
@@ -49,12 +55,14 @@ public sealed class OnboardingService : IOnboardingService
             },
             ["2"] = new
             {
-                Skills = profile.UserSkills
-                    .Select(x => x.Skill.Name)
-                    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-                    .ToArray()
+                SkillIds = selectedSkills.Select(x => x.SkillId).ToArray(),
+                Skills = selectedSkills
             },
-            ["3"] = new { profile.PreferredRole },
+            ["3"] = new
+            {
+                profile.PreferredRoleId,
+                PreferredRole = profile.PreferredProfessionalRole?.Name
+            },
             ["4"] = new { profile.ProfessionalInterests, profile.LearningGoals },
             ["5"] = new { profile.AvailableHoursPerWeek },
             ["6"] = new { profile.PreviousProjectsAndContribution, profile.TechnologiesToLearn },
@@ -100,17 +108,22 @@ public sealed class OnboardingService : IOnboardingService
     // ===================================
     public Task<OnboardingSaveResponse> SaveStep2Async(Guid userId, OnboardingStep2Request request, CancellationToken ct = default)
     {
-        // Canonicalize once and share the resulting names among all users.
-        var names = request.Skills!
-            .Select(NormalizeSkillDisplayName)
-            .DistinctBy(x => x.ToLowerInvariant())
-            .ToArray();
+        // Model validation rejects null/empty/oversized lists and Guid.Empty.
+        // Duplicate IDs represent one skill only.
+        var skillIds = request.SkillIds!.Distinct().ToArray();
 
         return _repository.ExecuteInTransactionAsync(userId, async token =>
         {
             var user = await GetActiveUserAsync(userId, token);
             var profile = RequireProfile(user);
-            var skills = await _repository.GetOrCreateSkillsAsync(names, token);
+            var skills = await _repository.GetActiveSkillsByIdsAsync(skillIds, token);
+
+            // Do not modify user_skills or completion markers on invalid input.
+            if (skills.Count != skillIds.Length)
+            {
+                throw new BusinessRuleException(
+                    "One or more selected skills do not exist or are inactive.");
+            }
 
             _repository.SyncUserSkills(profile, skills);
             profile.UpdatedAt = DateTime.UtcNow;
@@ -125,9 +138,21 @@ public sealed class OnboardingService : IOnboardingService
     // ===================================
     public Task<OnboardingSaveResponse> SaveStep3Async(Guid userId, OnboardingStep3Request request, CancellationToken ct = default)
     {
-        var roleName = OnboardingAllowedRoles.Names.Single(x => string.Equals(x, request.PreferredRole!.Trim(), StringComparison.OrdinalIgnoreCase));
+        return _repository.ExecuteInTransactionAsync(userId, async token =>
+        {
+            var user = await GetActiveUserAsync(userId, token);
+            var profile = RequireProfile(user);
+            var role = await _repository.GetActiveProfessionalRoleByIdAsync(request.PreferredRoleId!.Value, token);
 
-        return SaveScalarStepAsync(userId, 3, (_, profile) => profile.PreferredRole = roleName, ct);
+            if (role is null)
+                throw new BusinessRuleException("Selected professional role does not exist or is inactive.");
+
+            profile.PreferredRoleId = role.ProfessionalRoleId;
+            profile.UpdatedAt = DateTime.UtcNow;
+            MarkStep(user, 3);
+            await _repository.SaveChangesAsync(token);
+            return Saved(user, 3);
+        }, ct);
     }
 
     // ===================================
@@ -201,9 +226,7 @@ public sealed class OnboardingService : IOnboardingService
             // ===================================
             // 2. VALIDATE STEPS 1-7
             // ===================================
-            var missingSteps = Enumerable.Range(1, 7)
-                .Where(step => !user.OnboardingSteps.Any(x => x.StepNumber == step) || !IsStepDataValid(step, user, profile))
-                .ToArray();
+            var missingSteps = MissingRequiredSteps(user, profile);
 
             if (missingSteps.Length > 0)
             {
@@ -269,9 +292,6 @@ public sealed class OnboardingService : IOnboardingService
     private static UserProfile RequireProfile(User user) =>
         user.Profile ?? throw new InvalidOperationException("User profile was not found.");
 
-    private static string NormalizeSkillDisplayName(string name) =>
-        Regex.Replace(name.Trim(), @"\s+", " ");
-
     private static string? NullIfBlank(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
@@ -289,17 +309,36 @@ public sealed class OnboardingService : IOnboardingService
             marker.CompletedAt = DateTime.UtcNow;
     }
 
-    private static int[] CompletedSteps(User user)
+    // A persisted step marker alone is not enough: related catalog/profile data
+    // must still be valid when the user asks to complete onboarding.
+    private static int[] MissingRequiredSteps(User user, UserProfile profile)
     {
-        var steps = user.OnboardingSteps.Select(x => x.StepNumber).ToList();
-        if (user.IsOnboardingCompleted)
-            steps.Add(8);
-        return steps.Distinct().OrderBy(x => x).ToArray();
+        var markedSteps = user.OnboardingSteps.Select(x => x.StepNumber).ToHashSet();
+        return Enumerable.Range(1, 7)
+            .Where(step => !markedSteps.Contains(step) || !IsStepDataValid(step, user, profile))
+            .ToArray();
     }
 
-    private static int NextStep(User user) =>
-        Enumerable.Range(1, 7)
-            .FirstOrDefault(x => !user.OnboardingSteps.Any(m => m.StepNumber == x), 8);
+    private static int[] CompletedSteps(User user)
+    {
+        // Completion is final. Catalog entries may later be disabled/deleted,
+        // without revoking an already completed user's onboarding status.
+        if (user.IsOnboardingCompleted)
+            return Enumerable.Range(1, 8).ToArray();
+
+        var missing = MissingRequiredSteps(user, RequireProfile(user)).ToHashSet();
+        return Enumerable.Range(1, 7)
+            .Where(step => !missing.Contains(step))
+            .ToArray();
+    }
+
+    private static int NextStep(User user)
+    {
+        if (user.IsOnboardingCompleted)
+            return 8;
+
+        return MissingRequiredSteps(user, RequireProfile(user)).FirstOrDefault(8);
+    }
 
     private static OnboardingSaveResponse Saved(User user, int step) =>
         new(step, CompletedSteps(user), NextStep(user), user.IsOnboardingCompleted);
@@ -320,10 +359,16 @@ public sealed class OnboardingService : IOnboardingService
                     !string.IsNullOrWhiteSpace(profile.University) &&
                     profile.University.Length <= 255;
             case 2:
+                // The skill FK proves a catalog link exists. Newly added links may not
+                // have their Skill navigation loaded in the same DbContext yet.
+                // Inactive skills selected earlier remain valid; new selections must be active.
                 return profile.UserSkills.Count > 0 &&
-                    profile.UserSkills.All(s => !string.IsNullOrWhiteSpace(s.Skill.Name) && s.Skill.Name.Length <= 100);
+                    profile.UserSkills.All(s => s.SkillId != Guid.Empty);
             case 3:
-                return OnboardingAllowedRoles.Names.Contains(profile.PreferredRole ?? string.Empty, StringComparer.Ordinal);
+                // The FK guarantees that an assigned role exists; navigation may not yet
+                // be populated in the same DbContext immediately after SaveStep3Async.
+                // Disabling a previously selected role does not invalidate onboarding.
+                return profile.PreferredRoleId.HasValue && profile.PreferredRoleId.Value != Guid.Empty;
             case 4:
                 return !string.IsNullOrWhiteSpace(profile.ProfessionalInterests) &&
                     !string.IsNullOrWhiteSpace(profile.LearningGoals);

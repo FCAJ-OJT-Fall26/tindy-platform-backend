@@ -94,9 +94,17 @@ public class UserProfileConfiguration
             .HasColumnName("updated_at");
 
 
-        builder.Property(x => x.PreferredRole)
-            .HasColumnName("preferred_role")
-            .HasMaxLength(100);
+        builder.Property(x => x.PreferredRoleId)
+            .HasColumnName("preferred_role_id")
+            .IsRequired(false);
+
+        builder.HasOne(x => x.PreferredProfessionalRole)
+            .WithMany(x => x.UserProfiles)
+            .HasForeignKey(x => x.PreferredRoleId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(x => x.PreferredRoleId)
+            .HasDatabaseName("ix_user_profiles_preferred_role_id");
 
         builder.Property(x => x.ProfessionalInterests)
             .HasColumnName("professional_interests")

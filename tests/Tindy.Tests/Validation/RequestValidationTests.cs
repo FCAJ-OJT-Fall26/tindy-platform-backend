@@ -64,7 +64,27 @@ public sealed class RequestValidationTests
     [Fact]
     public void Skills_Rejects_EmptyList()
     {
-        Assert.NotEmpty(Validate(new OnboardingStep2Request { Skills = [] }));
+        Assert.NotEmpty(Validate(new OnboardingStep2Request { SkillIds = [] }));
+    }
+
+    [Fact]
+    public void Skills_Rejects_EmptyGuid_And_OverThirtySelections()
+    {
+        Assert.NotEmpty(Validate(new OnboardingStep2Request { SkillIds = [Guid.Empty] }));
+        Assert.NotEmpty(Validate(new OnboardingStep2Request
+        {
+            SkillIds = Enumerable.Range(0, 31).Select(_ => Guid.NewGuid()).ToList()
+        }));
+        var validId = Guid.NewGuid();
+        Assert.Empty(Validate(new OnboardingStep2Request { SkillIds = [validId, validId] }));
+    }
+
+    [Fact]
+    public void PreferredRole_RequiresNonEmptyGuid()
+    {
+        Assert.NotEmpty(Validate(new OnboardingStep3Request()));
+        Assert.NotEmpty(Validate(new OnboardingStep3Request { PreferredRoleId = Guid.Empty }));
+        Assert.Empty(Validate(new OnboardingStep3Request { PreferredRoleId = Guid.NewGuid() }));
     }
 
     [Fact]
