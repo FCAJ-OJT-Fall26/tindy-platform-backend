@@ -58,10 +58,8 @@ public sealed class OnboardingStep3Request : IValidatableObject
 
 public sealed class OnboardingStep4Request
 {
-    [Required]
     public string? ProfessionalInterests { get; set; }
 
-    [Required]
     public string? LearningGoals { get; set; }
 }
 
@@ -74,10 +72,8 @@ public sealed class OnboardingStep5Request
 
 public sealed class OnboardingStep6Request
 {
-    [Required]
     public string? PreviousProjectsAndContribution { get; set; }
 
-    [Required]
     public string? TechnologiesToLearn { get; set; }
 }
 

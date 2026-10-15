@@ -162,8 +162,8 @@ public sealed class OnboardingService : IOnboardingService
     {
         return SaveScalarStepAsync(userId, 4, (_, profile) =>
         {
-            profile.ProfessionalInterests = request.ProfessionalInterests!.Trim();
-            profile.LearningGoals = request.LearningGoals!.Trim();
+            profile.ProfessionalInterests = NullIfBlank(request.ProfessionalInterests);
+            profile.LearningGoals = NullIfBlank(request.LearningGoals);
         }, ct);
     }
 
@@ -182,8 +182,8 @@ public sealed class OnboardingService : IOnboardingService
     {
         return SaveScalarStepAsync(userId, 6, (_, profile) =>
         {
-            profile.PreviousProjectsAndContribution = request.PreviousProjectsAndContribution!.Trim();
-            profile.TechnologiesToLearn = request.TechnologiesToLearn!.Trim();
+            profile.PreviousProjectsAndContribution = NullIfBlank(request.PreviousProjectsAndContribution);
+            profile.TechnologiesToLearn = NullIfBlank(request.TechnologiesToLearn);
         }, ct);
     }
 
@@ -370,13 +370,11 @@ public sealed class OnboardingService : IOnboardingService
                 // Disabling a previously selected role does not invalidate onboarding.
                 return profile.PreferredRoleId.HasValue && profile.PreferredRoleId.Value != Guid.Empty;
             case 4:
-                return !string.IsNullOrWhiteSpace(profile.ProfessionalInterests) &&
-                    !string.IsNullOrWhiteSpace(profile.LearningGoals);
+                return true;
             case 5:
                 return profile.AvailableHoursPerWeek is >= 1 and <= 40;
             case 6:
-                return !string.IsNullOrWhiteSpace(profile.PreviousProjectsAndContribution) &&
-                    !string.IsNullOrWhiteSpace(profile.TechnologiesToLearn);
+                return true;
             case 7:
                 return OnboardingStep7Request.IsWebUrlOrEmpty(profile.GithubUrl) &&
                     OnboardingStep7Request.IsWebUrlOrEmpty(profile.PersonalWebsiteUrl) &&
