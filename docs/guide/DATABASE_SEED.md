@@ -1,155 +1,80 @@
-# DATABASE_SEED — Tindy Backend
+# DATABASE_SEED — Tindy Backend (Catalog V1)
 
-> Quy ước **khởi tạo và đồng bộ dữ liệu mặc định** bằng EF Core 10 cho các thành viên team Tindy.
->
-> **Stack:** .NET 10 · EF Core 10 · PostgreSQL · PowerShell 7  
-> **Đối tượng:** Thành viên phát triển backend Tindy  
-> **Tài liệu liên quan:** [DATABASE_SETUP.md](./DATABASE_SETUP.md) · [DATABASE_RESET.md](./DATABASE_RESET.md)
+> **Phiên bản cập nhật:** Đối chiếu `tindy-backend-platform(20261015-022026).zip`, .NET 10, EF Core 10, PostgreSQL, PowerShell 7.  
+> **Mục tiêu:** Mỗi thành viên team có cùng **System Catalog** sau khi chạy migration + seeding; không tạo kỹ năng tự do từ Onboarding.
 
-## 1. Database Seeding là gì?
+## 1. Phân biệt Migration, Seeder và dữ liệu người dùng
 
-**Database Seeding** là quá trình đưa dữ liệu khởi tạo vào các bảng **sau khi bảng đã tồn tại**.
-
-| Thành phần | Vai trò | Ví dụ |
+| Công việc | Quản lý | Ví dụ |
 |---|---|---|
-| **EF Core Migration** | Thay đổi schema | Tạo `roles`, thêm cột cho `users` |
-| **Database Seeder** | Thêm/cập nhật dữ liệu khởi tạo | Role `Admin`, `User`; Permission; Skill |
-| **User/API** | Sinh dữ liệu nghiệp vụ khi dùng app | User đăng ký, cập nhật profile, nhắn tin |
+| **Migration** | EF Core Code First | Tạo `professional_roles`, `skill_categories`; thêm `skills.is_active` |
+| **System Seed Data** | Backend Infrastructure | Member role, danh mục nghề nghiệp, danh mục nhóm kỹ năng, kỹ năng và các quan hệ |
+| **User Data** | API nghiệp vụ | User, Profile, `user_skills`, tiến độ Onboarding |
 
-**Quan trọng:** Code First + Migration **không mặc định tự sinh Roles, Permissions, Skills** chỉ vì đã có Entity. Dữ liệu chỉ được thêm khi **team thực sự triển khai** logic seed và nó được thực thi.
+**Chỉ tạo bảng không có nghĩa dữ liệu seed sẽ tự xuất hiện.** Trong source hiện tại, việc seed đã được triển khai bằng `TindySeedRunner`, `UseSeeding()` và `UseAsyncSeeding()`.
 
----
+## 2. Dữ liệu được Seed hiện tại
 
-## 2. Tindy nên seed những dữ liệu nào?
+| Bảng | Seed hiện có | Số lượng mặc định |
+|---|---|---:|
+| `roles` | `Member` cho RBAC | 1 role mặc định (có thể có thêm role khác ngoài Seeder) |
+| `professional_roles` | Backend Developer, Frontend Developer, AI Engineer, ... | 11 |
+| `skill_categories` | Backend, Frontend, Mobile, Cloud & DevOps, AI, Database, UI/UX | 7 |
+| `skills` | C#, .NET, Java, Docker, AWS, PostgreSQL, React, ... | 49 |
+| `skill_category_skills` | Quan hệ Category ↔ Skill (N:N) | 54 |
 
-### A. Default / Reference Data
+Đây là **số lượng trong bộ seed**; tổng bản ghi thực tế có thể lớn hơn khi database đã chứa dữ liệu từ trước. `permissions` và `role_permissions` **chưa có Seeder trong bản source được kiểm tra**. Không mặc định seed `users`, `user_profiles`, `user_credentials`, `user_skills`, OAuth identities hoặc Profile Bio.
 
-Ví dụ dữ liệu có thể cần trên mọi môi trường (phụ thuộc schema thực tế):
-
-| Bảng | Ví dụ seed | Ghi chú |
-|---|---|---|
-| `roles` | `Admin`, `User` | Role mặc định cho Authentication/Authorization |
-| `permissions` | `user.read`, `user.update` | Theo danh sách quyền thực sự được chốt |
-| `skills` | `C#`, `Java`, `React`, `AWS` | Danh mục kỹ năng dùng chung |
-| Quan hệ role–permission | Permission được gán cho role | Chỉ seed sau khi role/permission tồn tại |
-
-Tên bảng, cột và giá trị trong bảng **chỉ là ví dụ**; phải đối chiếu với Entity/Configurations hiện hành trước khi viết Seeder. Không tự tạo quyền nghiệp vụ nếu team chưa thiết kế.
-
-### B. Development / Demo Data
-
-Ví dụ: User test, profile mẫu, project mẫu, dữ liệu UI demo.
-
-- **Tách rõ** khỏi Default Data.
-- Chỉ bật trong môi trường `Development` khi team thống nhất.
-- Không chứa user thật, mật khẩu thật, OAuth tokens, JWT signing keys hoặc dữ liệu nhạy cảm.
-- Nếu cần tài khoản test đăng nhập, mật khẩu phải được hash qua cơ chế password hasher chính thức; không commit mật khẩu thật hoặc hash không được quản trị.
-
-### C. Không seed mặc định
-
-Không mặc định seed `users`, `user_profiles`, `user_credentials`, `external_auth_accounts`, các phiên chat, dữ liệu giao dịch hoặc dữ liệu người dùng thật.
-
----
-
-## 3. Cơ chế được đề xuất cho Tindy
-
-**EF Core 10: `UseSeeding()` + `UseAsyncSeeding()`**.
-
-- `dotnet ef database update` gọi **`UseSeeding()` (đồng bộ)**.
-- `MigrateAsync()` gọi **`UseAsyncSeeding()` (bất đồng bộ)**.
-- Các seeding delegate có thể chạy **ngay cả khi không có Migration mới**.
-- Seeding sử dụng cơ chế migration locking của EF Core, tuy vậy vẫn phải kiểm tra tồn tại và đặt unique constraint ở database để tránh trùng dữ liệu.
-- Nếu project chỉ cài `UseAsyncSeeding()` mà không cài `UseSeeding()`, không nên kỳ vọng EF CLI sẽ seed.
-
-> **Trạng thái triển khai:** Tài liệu này mô tả **kiến trúc và quy trình được đề xuất**. Chỉ sau khi team đã thêm các Seeder và **đăng ký `UseSeeding`/`UseAsyncSeeding` đúng DbContext EF CLI đang khởi tạo**, lệnh `database update` mới tự động seed. **Không giả định repo hiện đã có các Seeder này.**
-
-### Cấu trúc thư mục gợi ý
+## 3. Vị trí source và thứ tự chạy
 
 ```text
-src/
-└── Tindy.Infrastructure/
-    └── Persistence/
-        ├── TindyDbContext.cs
-        ├── Configurations/
-        ├── Migrations/
-        └── Seeding/
-            ├── TindySeedRunner.cs
-            ├── RoleSeeder.cs
-            ├── PermissionSeeder.cs
-            └── SkillSeeder.cs
+src/Tindy.Infrastructure/
+├── Extensions/
+│   └── ServiceCollectionExtensions.cs   # đăng ký UseSeeding / UseAsyncSeeding
+└── Persistence/
+    ├── TindyDbContext.cs
+    ├── Migrations/
+    └── Seeding/
+        ├── TindySeedRunner.cs
+        ├── CatalogSeedData.cs
+        ├── RoleSeeder.cs
+        ├── ProfessionalRoleSeeder.cs
+        ├── SkillCategorySeeder.cs
+        ├── SkillSeeder.cs
+        └── SkillCategorySkillSeeder.cs
 ```
 
-Đường dẫn trên là **gợi ý**, không phải khẳng định source hiện tại có sẵn các file này.
+`TindySeedRunner` thực hiện:
 
-### Cách đăng ký (mã minh họa, phải triển khai thêm)
+1. `RoleSeeder`
+2. `ProfessionalRoleSeeder`
+3. `SkillCategorySeeder`
+4. `SkillSeeder`
+5. `SkillCategorySkillSeeder`
 
-Trong nơi Infrastructure đăng ký `TindyDbContext` (thường là `AddDbContext` / `AddInfrastructure`), ví dụ:
+**Vì sao cần thứ tự?** Bảng trung gian `skill_category_skills` phải tham chiếu đến Categories và Skills đã tồn tại.
 
-```csharp
-services.AddDbContext<TindyDbContext>(options =>
-{
-    options.UseNpgsql(connectionString);
+### Dữ liệu chuẩn nằm ở đâu?
 
-    options.UseSeeding((context, _) =>
-    {
-        // Phải tạo TindySeedRunner.Seed(DbContext) trong Infrastructure.
-        TindySeedRunner.Seed(context);
-    });
+`CatalogSeedData.cs` chứa:
 
-    options.UseAsyncSeeding(async (context, _, cancellationToken) =>
-    {
-        // Phải tạo TindySeedRunner.SeedAsync(DbContext, CancellationToken).
-        await TindySeedRunner.SeedAsync(context, cancellationToken);
-    });
-});
-```
+- `ProfessionalRoles`: UUID cố định, tên, mô tả và `display_order`.
+- `SkillCategories`: UUID cố định, tên, mô tả và `display_order`.
+- `Skills`: UUID cố định và tên.
+- `CategorySkills`: ánh xạ từ Category name sang danh sách Skill names.
+- Hàm chuẩn hóa tên `Normalize()` để so khớp `name_normalized`.
 
-**Đây không phải đoạn code copy-paste chạy ngay**: `TindySeedRunner` cần được team triển khai, `connectionString` lấy từ cấu hình dự án, và namespace/pattern đăng ký phải khớp source thực tế. Nếu project có `IDesignTimeDbContextFactory<TindyDbContext>`, bảo đảm options ở design time cũng có `UseSeeding()`; nếu không, `dotnet ef database update` có thể **không gọi Seeder**.
+**Quy tắc:** Không thay đổi UUID đã phát hành để tránh đứt các FK. Không tạo hai bản ghi cùng `name_normalized`. Một Skill có thể thuộc nhiều Category nhưng chỉ có một `skill_id`.
 
-### Logic Seeder: idempotent
+## 4. Cách chạy Seed Data trên PostgreSQL local
 
-Ví dụ pseudocode cho Role:
+**Điều kiện:** PostgreSQL local hoạt động, đã cấu hình `ConnectionStrings:DefaultConnection` cho môi trường `Development`; repository có đầy đủ migrations STEP 01 và STEP 05.
 
-```text
-RoleSeeder:
-  nếu role có mã "ADMIN" chưa tồn tại:
-      insert role "ADMIN"
-  nếu role có mã "USER" chưa tồn tại:
-      insert role "USER"
-  save changes
-```
-
-Nên dùng **business key ổn định** như `Code`, `NormalizedName` hoặc mã permission đã quy ước, thay vì so sánh mỗi lần bằng UUID ngẫu nhiên. Đặt unique index/constraint tương ứng nếu schema cho phép.
-
-**Seeder chạy lại không được:**
-
-- Thêm trùng Role/Permission/Skill.
-- Xóa hoặc ghi đè dữ liệu người dùng thật.
-- Reset toàn bộ database.
-- Tự động đổi quyền của người dùng khi chưa có yêu cầu nghiệp vụ được review.
-
-Nếu cần **sửa dữ liệu mặc định đã có**, phải viết logic update có chủ đích, có điều kiện và test tác động; thuật toán “nếu chưa có thì thêm” **không tự cập nhật các bản ghi đã tồn tại**.
-
----
-
-## 4. Flow dành cho thành viên mới clone repository
-
-Điều kiện: Đã setup PostgreSQL local và User Secrets theo [DATABASE_SETUP.md](./DATABASE_SETUP.md).
-
-### STEP 1 — Clone/Pull và restore
+Chạy tại root nơi có `Tindy.slnx`:
 
 ```powershell
-git clone https://github.com/FCAJ-OJT-Fall26/tindy-fcaj-platform.git
-cd tindy-fcaj-platform
+dotnet build .\Tindy.slnx
 
-dotnet restore
-dotnet build
-```
-
-Nếu đã clone, cập nhật branch theo Git workflow của team, không clone lại.
-
-### STEP 2 — Apply migrations + seed (nếu đã cấu hình)
-
-```powershell
 dotnet ef database update `
     --project .\src\Tindy.Infrastructure\Tindy.Infrastructure.csproj `
     --startup-project .\src\Tindy.Api\Tindy.Api.csproj `
@@ -157,175 +82,115 @@ dotnet ef database update `
     -- --environment Development
 ```
 
-Kết quả mong đợi:
+Trong repo hiện tại:
 
-1. Các Migration còn thiếu được áp dụng vào PostgreSQL local.
-2. `UseSeeding()` được gọi **nếu đã đăng ký**.
-3. Dữ liệu mặc định còn thiếu được thêm vào database.
-4. Dữ liệu đã tồn tại được giữ nguyên, miễn là Seeder/Migration không có logic phá hủy hay ghi đè.
+- EF CLI `dotnet ef database update` gọi `UseSeeding()` (đồng bộ).
+- `Database.MigrateAsync()` với DbContext dùng đúng production options gọi `UseAsyncSeeding()` (bất đồng bộ).
+- `dotnet ef database update` có thể chạy Seeder **ngay cả khi không có migration mới**.
+- Integration Test Factory **ghi đè cấu hình DbContext**, nên sau `MigrateAsync()` nó tự gọi `TindySeedRunner.SeedAsync(db)` riêng.
 
-> Đây **không phải** lệnh sao chép dữ liệu từ máy của leader. Chỉ những record được định nghĩa trong seed/migration hoặc nhập từ nguồn riêng mới có trong database local.
+Không cần Docker Desktop hoặc Dockerfile để chạy database update lên **PostgreSQL local**. Docker chỉ cần cho các Integration Tests dùng Testcontainers hoặc khi bạn muốn Dockerize ứng dụng.
 
----
+## 5. Kiểm tra kết quả bằng SQL
 
-## 5. Flow khi cần thêm một Skill/Role/Permission mới
-
-Ví dụ muốn seed thêm Skill `Docker`:
-
-1. Người phụ trách kiểm tra bảng `skills` đã tồn tại và có khóa nhận diện duy nhất.
-2. Thêm `Docker` vào danh sách trong `SkillSeeder`.
-3. Bổ sung logic kiểm tra tồn tại trước khi insert.
-4. Test trên database đã có dữ liệu, sau đó chạy **lặp lại lần 2** để xác nhận không sinh bản ghi trùng.
-5. Commit code Seeder → Push feature branch → Pull Request → leader review/merge.
-6. Thành viên khác pull code mới và chạy `database update`.
-
-**Không cần tạo Migration mới** nếu chỉ thay đổi dữ liệu trong `UseSeeding()` mà không đổi schema. Tuy nhiên, nếu thêm/sửa cột, constraint, table hoặc quan hệ thì **phải tạo Migration cho thay đổi schema**.
-
-### Trường hợp vừa thêm Column vừa seed dữ liệu
-
-Ví dụ thêm `last_login_at` vào `users` và thêm Skill `Docker`:
-
-**Người sửa schema:**
-
-```powershell
-# 1. Sửa Entity/Configuration, rồi tạo Migration
-dotnet ef migrations add AddUserLastLoginAt `
-    --project .\src\Tindy.Infrastructure\Tindy.Infrastructure.csproj `
-    --startup-project .\src\Tindy.Api\Tindy.Api.csproj `
-    --context TindyDbContext `
-    -- --environment Development
-
-# 2. Update Seeder để thêm Docker, sau đó apply
-dotnet ef database update `
-    --project .\src\Tindy.Infrastructure\Tindy.Infrastructure.csproj `
-    --startup-project .\src\Tindy.Api\Tindy.Api.csproj `
-    --context TindyDbContext `
-    -- --environment Development
-```
-
-Sau khi được merge, **thành viên khác chỉ cần pull và chạy `database update`**, không tạo lại Migration tương tự.
-
----
-
-## 6. Seed lại mà KHÔNG Drop Database
-
-Nếu muốn đồng bộ lại **dữ liệu mặc định** và giữ nguyên User/Profile/Project hiện có:
-
-```powershell
-dotnet ef database update `
-    --project .\src\Tindy.Infrastructure\Tindy.Infrastructure.csproj `
-    --startup-project .\src\Tindy.Api\Tindy.Api.csproj `
-    --context TindyDbContext `
-    -- --environment Development
-```
-
-Với `UseSeeding()` đã đăng ký, lệnh này chạy Seeder **kể cả khi không có Migration mới**.
-
-Ví dụ:
-
-```text
-Trước:
-roles: Admin, User
-skills: C#, Java
-users:  5 tài khoản test
-
-Thay đổi SkillSeeder: thêm Docker
-
-Sau database update:
-roles: Admin, User
-skills: C#, Java, Docker
-users:  5 tài khoản test (giữ nguyên nếu Seeder không tác động vào users)
-```
-
-**Lưu ý:** Chạy seed lại khác với **xóa hết row rồi nạp lại từ đầu**. Seeder dạng idempotent chỉ bổ sung/update theo logic đã viết; nó **không xóa các bản ghi cũ** nếu bạn không yêu cầu rõ. Muốn reset cả database thì xem [DATABASE_RESET.md](./DATABASE_RESET.md), chấp nhận mất toàn bộ dữ liệu cũ.
-
----
-
-## 7. Kiểm tra dữ liệu sau khi Seed
-
-Sử dụng pgAdmin hoặc SQL. Các tên dưới đây chỉ minh họa, sửa lại theo cấu hình entity/table thực tế:
+Dùng pgAdmin hoặc `psql` kết nối đúng database local:
 
 ```sql
--- Ví dụ: kiểm tra record được seed
-SELECT * FROM roles;
-SELECT * FROM permissions;
-SELECT * FROM skills;
-
--- Ví dụ: kiểm tra trùng tên role (nếu column thực tế tên 'name')
-SELECT name, COUNT(*)
-FROM roles
-GROUP BY name
-HAVING COUNT(*) > 1;
+SELECT 'professional_roles' AS table_name, COUNT(*) AS total
+FROM professional_roles
+UNION ALL SELECT 'skill_categories', COUNT(*) FROM skill_categories
+UNION ALL SELECT 'skills', COUNT(*) FROM skills
+UNION ALL SELECT 'skill_category_skills', COUNT(*) FROM skill_category_skills;
 ```
 
-Chạy `database update` **hai lần liên tiếp** để test tính idempotent. Số lượng dữ liệu mặc định **không được tăng bất thường** ở lần thứ hai.
+Với database chưa có Catalog trước đó, kết quả mặc định dự kiến là **11 / 7 / 49 / 54**. Kiểm tra danh sách:
 
-### Checklist test Seeder
+```sql
+SELECT professional_role_id, name, is_active
+FROM professional_roles
+ORDER BY display_order, name;
 
-- [ ] Database trống: seeding tạo đủ dữ liệu mặc định.
-- [ ] Database đã có data: seeding không tạo duplicate.
-- [ ] Chạy `database update` hai lần: kết quả ổn định.
-- [ ] Có User/Profile từ trước: seeding không xóa hoặc thay đổi ngoài ý muốn.
-- [ ] Các bảng quan hệ được seed theo đúng thứ tự phụ thuộc khóa ngoại.
-- [ ] Seed Development không chạy trên Production.
-- [ ] Seeder sync/async có hành vi tương đương (nếu cả hai được sử dụng).
+SELECT category_id, name, is_active
+FROM skill_categories
+ORDER BY display_order, name;
 
----
+SELECT sc.name AS category, s.name AS skill
+FROM skill_category_skills scs
+JOIN skill_categories sc ON sc.category_id = scs.category_id
+JOIN skills s ON s.skill_id = scs.skill_id
+ORDER BY sc.display_order, s.name;
+```
 
-## 8. Quy định team Tindy
+Kiểm tra migration:
 
-1. **Default Data** và **Development Data** phải tách logic rõ ràng; chỉ seed dữ liệu test khi environment cho phép.
-2. Seeder phải **idempotent**, dùng business key xác định tính duy nhất và có unique constraint khi phù hợp.
-3. Cần chốt quyền nghiệp vụ trước khi seed Permission hoặc role–permission; không tự cấp quyền cao cho user.
-4. Không commit credential thật, OAuth secret, token, email cá nhân hoặc dữ liệu người dùng thật vào seed.
-5. Chỉ thêm Migration nếu **schema** thay đổi. Thay đổi logic `UseSeeding()` thường **không cần Migration mới**.
-6. Seeder là source code, phải được commit và review như các thay đổi backend khác.
-7. Không tự động drop database hoặc truncate các bảng mỗi lần seed.
-8. Với Production, cần review dữ liệu seed và phương thức deploy; lệnh CLI local không phải quy trình triển khai production.
-9. Nếu seeding phụ thuộc schema đã bị rollback (ví dụ `database update 0`), cần xử lý tương thích; không dùng rollback về 0 để mô phỏng seeding thông thường.
-10. Không dùng `Database.EnsureCreated()`/`EnsureCreatedAsync()` thay cho Migrations khi project đã quản lý schema bằng EF Core Migrations.
+```sql
+SELECT "MigrationId"
+FROM "__EFMigrationsHistory"
+ORDER BY "MigrationId";
+```
 
----
+## 6. Seeder chạy lặp lại có tạo trùng không?
 
-## 9. FAQ
+**Mục tiêu thiết kế là idempotent:** Seeder tìm theo `name_normalized`, chỉ INSERT bản ghi chưa tồn tại. Bảng trung gian dùng cặp `(category_id, skill_id)` để tránh trùng.
 
-### `database update` chạy xong nhưng không có dữ liệu seed?
+Cách kiểm thử:
 
-Kiểm tra: đã code Seeder chưa, đã đăng ký `UseSeeding()` chưa, cấu hình EF CLI có dùng đúng `TindyDbContext` chưa, có `IDesignTimeDbContextFactory` riêng không, Seeder có điều kiện bỏ qua hay lỗi hay không.
+1. Chạy `dotnet ef database update` lần thứ nhất.
+2. Ghi số lượng của 4 bảng và các `skill_id` của Skill đang được User sử dụng.
+3. Chạy lại **cùng một lệnh**.
+4. Truy vấn lại: không có bản ghi trùng, liên kết `user_skills` vẫn đúng.
 
-### Nếu không có Migration mới thì Seeder có chạy không?
+**Lưu ý:** Seeder hiện tại **chỉ thêm dữ liệu thiếu**, không tự cập nhật `name`, `description`, `display_order` hoặc `is_active` của bản ghi đã tồn tại. Nếu đổi nhãn/mô tả hay cần disable Skill cũ, phải có kế hoạch cập nhật dữ liệu riêng (migration dữ liệu, admin job, script được review). Không sửa trực tiếp ID đã dùng ở Production.
 
-**Có**, nếu EF CLI sử dụng `UseSeeding()` và bạn gọi `dotnet ef database update`. Hành vi này được EF Core hỗ trợ kể cả khi không có migration nào cần apply.
+### Khi database đã có Skills cũ
 
-### Có cần chạy thêm `dotnet run` sau khi `database update` để seed không?
+`SkillSeeder` đối chiếu `name_normalized`: nếu PostgreSQL đã có một Skill tên tương ứng, Seeder **tái sử dụng `skill_id` đó**. `SkillCategorySkillSeeder` tra ID hiện có để tạo liên kết. Không xóa và tạo lại Skill cũ, nên liên kết trong `user_skills` không bị mất chỉ vì chạy lại Seeder.
 
-**Không cần** đối với Seeder tích hợp `UseSeeding()` khi đã cấu hình đúng. Không nên nhúng seed vào mỗi HTTP request.
+## 7. Thêm một Skill hoặc Category mới
 
-### Nếu sửa Seeder để thêm dữ liệu có cần tạo Migration?
+Ví dụ cần thêm `RabbitMQ` vào Backend Development và Cloud & DevOps:
 
-**Không**, nếu chỉ thêm/sửa logic seed và schema không thay đổi. Cần review nếu seed thay đổi dữ liệu hiện có.
+1. Kiểm tra Skill đã tồn tại chưa trong `CatalogSeedData.Skills` và PostgreSQL.
+2. Nếu là Skill mới: thêm **một** `NamedItem` có UUID mới **cố định** vào `CatalogSeedData.Skills`.
+3. Thêm tên Skill vào danh sách của các Categories cần thiết trong `CatalogSeedData.CategorySkills`.
+4. Tạo PR và review cùng team, đảm bảo normalization không trùng.
+5. Apply bằng `dotnet ef database update`, kiểm tra SQL.
+6. Commit cùng thay đổi Catalog và cập nhật tài liệu khi cần.
 
-### Drop Database xong seed có khôi phục User cũ không?
+Nếu chỉ thêm dữ liệu bằng Seeder đang có và không sửa schema thì **không cần migration mới**. Ngược lại, thay đổi Entity/cột/FK phải tạo migration.
 
-**Không.** Seeder chỉ phục hồi dữ liệu *được định nghĩa trong seed*. User/Profile/Chat cũ cần backup để khôi phục.
+### Không nên làm
 
-### Có thể dùng `HasData()` không?
+- Không cho người dùng Onboarding nhập Skill tự do rồi INSERT vào `skills`.
+- Không reset database hoặc `database drop` chỉ để cập nhật bộ Skills.
+- Không dùng `Guid.NewGuid()` mỗi lần seed để tạo ID cho cùng một danh mục chuẩn.
+- Không đổi tên thành Skill khác bằng cách tạo hàng mới mà không đánh giá dữ liệu tham chiếu.
+- Không seed User thật, mật khẩu, JWT signing key hoặc OAuth token vào Git.
 
-Có, nhưng `HasData()` là **model-managed data** với nhiều giới hạn và gắn thay đổi dữ liệu với Migrations. Đối với dữ liệu khởi tạo/logic phụ thuộc trạng thái database của Tindy, ưu tiên `UseSeeding()` và `UseAsyncSeeding()`.
+## 8. Nếu muốn xóa rồi tạo lại database Development
 
----
+Đây **không phải workflow bình thường**. `dotnet ef database drop` xóa cả schema và toàn bộ dữ liệu User trong database mục tiêu, còn file Migration trong repository vẫn giữ nguyên.
 
-## 10. Quick Reference — PowerShell 7
+Chỉ thực hiện sau khi chắc chắn đó là database Development riêng và đã backup dữ liệu quan trọng. Xem [DATABASE_RESET.md](./DATABASE_RESET.md). Để thêm/sửa catalog thông thường, **chỉ cần chạy `database update`**.
+
+## 9. Kiểm thử STEP 07 không cần Docker ngay
 
 ```powershell
-# Cập nhật schema và chạy UseSeeding (nếu đã cấu hình)
-dotnet ef database update `
-    --project .\src\Tindy.Infrastructure\Tindy.Infrastructure.csproj `
-    --startup-project .\src\Tindy.Api\Tindy.Api.csproj `
-    --context TindyDbContext `
-    -- --environment Development
+# Build
+dotnet build .\Tindy.slnx
+
+# Các bài kiểm thử không thuộc namespace Integration
+dotnet test .\tests\Tindy.Tests\Tindy.Tests.csproj `
+    --filter "FullyQualifiedName!~Integration"
 ```
 
-**Kết luận:** Dùng một lệnh `database update` để đồng bộ Migration + Default Seed **sau khi Seeder được triển khai**. Muốn giữ dữ liệu cũ thì **không Drop**; muốn làm lại toàn bộ local DB thì xem `DATABASE_RESET.md`.
+Sau đó dùng PostgreSQL local và Postman/Swagger để thử Catalog API, Onboarding Step 2 và Step 3. Các test trong `tests/Tindy.Tests/Integration/` dùng PostgreSQL Testcontainers và cần Docker Engine khi chạy tự động; chúng có thể được hoãn, nhưng **không ghi nhận là đã pass**.
 
-**Tham khảo chính thức:** [EF Core: Data Seeding](https://learn.microsoft.com/en-us/ef/core/modeling/data-seeding) · [EF Core: Applying Migrations](https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying) · [EF Core CLI](https://learn.microsoft.com/en-us/ef/core/cli/dotnet).
+## 10. Tài liệu liên quan
+
+- [DATABASE_SETUP.md](./DATABASE_SETUP.md): Tạo và cập nhật PostgreSQL local.
+- [DATABASE_RESET.md](./DATABASE_RESET.md): Reset database Development khi thực sự cần.
+- [ONBOARDING_API_IMPLEMENTATION.md](./ONBOARDING_API_IMPLEMENTATION.md): Contract chọn Skills/Preferred Roles bằng UUID.
+- `database/scripts/verify-catalog-schema.sql`: Script truy vấn chỉ đọc để kiểm tra STEP 07 (được thêm bằng patch STEP 07).
+
+> Tài liệu phản ánh code trong ZIP ngày 15/10/2026; kết quả `dotnet build`, SQL và tests vẫn cần xác minh trên môi trường của người phát triển.
