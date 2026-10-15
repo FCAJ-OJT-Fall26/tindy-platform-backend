@@ -39,6 +39,12 @@ public sealed class OnboardingService : IOnboardingService
         var user = await GetActiveUserAsync(userId, ct);
         var profile = RequireProfile(user);
 
+        var selectedSkills = profile.UserSkills
+            .OrderBy(x => x.Skill.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.SkillId)
+            .Select(x => new { x.SkillId, x.Skill.Name })
+            .ToArray();
+
         var data = new Dictionary<string, object>
         {
             ["1"] = new
@@ -49,10 +55,8 @@ public sealed class OnboardingService : IOnboardingService
             },
             ["2"] = new
             {
-                Skills = profile.UserSkills
-                    .Select(x => x.Skill.Name)
-                    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-                    .ToArray()
+                SkillIds = selectedSkills.Select(x => x.SkillId).ToArray(),
+                Skills = selectedSkills
             },
             ["3"] = new { profile.PreferredRole },
             ["4"] = new { profile.ProfessionalInterests, profile.LearningGoals },
@@ -100,17 +104,22 @@ public sealed class OnboardingService : IOnboardingService
     // ===================================
     public Task<OnboardingSaveResponse> SaveStep2Async(Guid userId, OnboardingStep2Request request, CancellationToken ct = default)
     {
-        // Canonicalize once and share the resulting names among all users.
-        var names = request.Skills!
-            .Select(NormalizeSkillDisplayName)
-            .DistinctBy(x => x.ToLowerInvariant())
-            .ToArray();
+        // Model validation rejects null/empty/oversized lists and Guid.Empty.
+        // Duplicate IDs represent one skill only.
+        var skillIds = request.SkillIds!.Distinct().ToArray();
 
         return _repository.ExecuteInTransactionAsync(userId, async token =>
         {
             var user = await GetActiveUserAsync(userId, token);
             var profile = RequireProfile(user);
-            var skills = await _repository.GetOrCreateSkillsAsync(names, token);
+            var skills = await _repository.GetActiveSkillsByIdsAsync(skillIds, token);
+
+            // Do not modify user_skills or completion markers on invalid input.
+            if (skills.Count != skillIds.Length)
+            {
+                throw new BusinessRuleException(
+                    "One or more selected skills do not exist or are inactive.");
+            }
 
             _repository.SyncUserSkills(profile, skills);
             profile.UpdatedAt = DateTime.UtcNow;
@@ -268,9 +277,6 @@ public sealed class OnboardingService : IOnboardingService
 
     private static UserProfile RequireProfile(User user) =>
         user.Profile ?? throw new InvalidOperationException("User profile was not found.");
-
-    private static string NormalizeSkillDisplayName(string name) =>
-        Regex.Replace(name.Trim(), @"\s+", " ");
 
     private static string? NullIfBlank(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

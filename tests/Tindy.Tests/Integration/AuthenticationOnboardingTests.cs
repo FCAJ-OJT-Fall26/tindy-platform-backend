@@ -66,10 +66,21 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
         Assert.Equal(HttpStatusCode.UnprocessableEntity, premature.StatusCode);
         await AssertErrorAsync(premature, "ONBOARDING_INCOMPLETE");
 
+        Guid dotNetSkillId;
+        Guid postgresSkillId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<TindyDbContext>();
+            dotNetSkillId = await db.Skills.Where(x => x.NameNormalized == ".net")
+                .Select(x => x.SkillId).SingleAsync();
+            postgresSkillId = await db.Skills.Where(x => x.NameNormalized == "postgresql")
+                .Select(x => x.SkillId).SingleAsync();
+        }
+
         var steps = new (int Number, object Body)[]
         {
             (1, new { username, display_name = "Step 14 Test", university = "FPT University" }),
-            (2, new { skills = new[] { ".NET", "PostgreSQL", ".NET" } }),
+            (2, new { skill_ids = new[] { dotNetSkillId, postgresSkillId, dotNetSkillId } }),
             (3, new { preferred_role = "Backend Developer" }),
             (4, new { professional_interests = "Cloud", learning_goals = "Build useful APIs" }),
             (5, new { available_hours_per_week = 10 }),

@@ -20,17 +20,21 @@ public sealed class OnboardingStep1Request
 
 public sealed class OnboardingStep2Request : IValidatableObject
 {
+    // IDs must come from GET /api/catalog/skills; users cannot create catalog skills.
     [Required]
     [MinLength(1)]
-    public List<string>? Skills { get; set; }
+    [MaxLength(30)]
+    public List<Guid>? SkillIds { get; set; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
-        if (Skills is null) yield break;
+        if (SkillIds is null) yield break;
 
-        if (Skills.Any(s => string.IsNullOrWhiteSpace(s) || s.Trim().Length > 100))
+        if (SkillIds.Contains(Guid.Empty))
         {
-            yield return new ValidationResult("Each skill must contain 1–100 valid characters.", new[] { nameof(Skills) });
+            yield return new ValidationResult(
+                "Each skill ID must be a non-empty UUID.",
+                new[] { nameof(SkillIds) });
         }
     }
 }

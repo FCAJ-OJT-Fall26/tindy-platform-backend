@@ -28,30 +28,14 @@ public sealed class OnboardingRepository : IOnboardingRepository
     public Task<bool> UsernameExistsAsync(Guid exceptUserId, string usernameNormalized, CancellationToken cancellationToken = default) =>
         _context.Users.AsNoTracking().AnyAsync(x => x.UserId != exceptUserId && x.UsernameNormalized == usernameNormalized, cancellationToken);
 
-    public async Task<IReadOnlyList<Skill>> GetOrCreateSkillsAsync(IReadOnlyCollection<string> skillNames, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Skill>> GetActiveSkillsByIdsAsync(
+        IReadOnlyCollection<Guid> skillIds,
+        CancellationToken cancellationToken = default)
     {
-        var result = new List<Skill>(skillNames.Count);
-
-        foreach (var name in skillNames)
-        {
-            var normalized = name.ToLowerInvariant();
-
-            // PostgreSQL UPSERT prevents races when multiple users add a new
-            // catalog skill at the same time. SQL interpolation is parameterized.
-            await _context.Database.ExecuteSqlInterpolatedAsync(
-                $"""
-                INSERT INTO skills (skill_id, name, name_normalized)
-                VALUES ({Guid.NewGuid()}, {name}, {normalized})
-                ON CONFLICT (name_normalized) DO NOTHING
-                """, cancellationToken);
-
-            var skill = await _context.Skills
-                .SingleAsync(x => x.NameNormalized == normalized, cancellationToken);
-
-            result.Add(skill);
-        }
-
-        return result;
+        return await _context.Skills
+            .AsNoTracking()
+            .Where(x => x.IsActive && skillIds.Contains(x.SkillId))
+            .ToListAsync(cancellationToken);
     }
 
     public void SyncUserSkills(UserProfile profile, IReadOnlyCollection<Skill> skills)
