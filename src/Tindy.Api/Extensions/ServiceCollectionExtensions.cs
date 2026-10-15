@@ -224,6 +224,9 @@ public static class ServiceCollectionExtensions
         // Onboarding application service
         services.AddScoped<IOnboardingService, OnboardingService>();
 
+        // Read-only catalog application service (available before onboarding completion)
+        services.AddScoped<ICatalogService, CatalogService>();
+
 
 
 
