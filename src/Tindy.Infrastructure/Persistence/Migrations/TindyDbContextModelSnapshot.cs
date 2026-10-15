@@ -494,11 +494,6 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("phone_number");
 
-                    b.Property<string>("PreferredRole")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("preferred_role");
-
                     b.Property<Guid?>("PreferredRoleId")
                         .HasColumnType("uuid")
                         .HasColumnName("preferred_role_id");

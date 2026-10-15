@@ -80,6 +80,14 @@ public sealed class RequestValidationTests
     }
 
     [Fact]
+    public void PreferredRole_RequiresNonEmptyGuid()
+    {
+        Assert.NotEmpty(Validate(new OnboardingStep3Request()));
+        Assert.NotEmpty(Validate(new OnboardingStep3Request { PreferredRoleId = Guid.Empty }));
+        Assert.Empty(Validate(new OnboardingStep3Request { PreferredRoleId = Guid.NewGuid() }));
+    }
+
+    [Fact]
     public void Step7_AllowsBothLinksNull()
     {
         Assert.Empty(Validate(new OnboardingStep7Request { GithubUrl = null, PersonalWebsiteUrl = null }));

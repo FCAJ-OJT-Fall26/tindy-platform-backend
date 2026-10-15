@@ -22,9 +22,6 @@ public class UserProfile
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public User User { get; set; } = null!;
-    // Legacy value retained until STEP 05 performs data backfill.
-    public string? PreferredRole { get; set; }
-
     public Guid? PreferredRoleId { get; set; }
 
     public ProfessionalRole? PreferredProfessionalRole { get; set; }

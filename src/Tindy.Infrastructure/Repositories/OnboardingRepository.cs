@@ -18,6 +18,8 @@ public sealed class OnboardingRepository : IOnboardingRepository
             .Include(x => x.Profile)
                 .ThenInclude(x => x!.UserSkills)
                     .ThenInclude(x => x.Skill)
+            .Include(x => x.Profile)
+                .ThenInclude(x => x!.PreferredProfessionalRole)
             .Include(x => x.Credential)
             .Include(x => x.UserRoles)
                 .ThenInclude(x => x.Role)
@@ -37,6 +39,13 @@ public sealed class OnboardingRepository : IOnboardingRepository
             .Where(x => x.IsActive && skillIds.Contains(x.SkillId))
             .ToListAsync(cancellationToken);
     }
+
+    public Task<ProfessionalRole?> GetActiveProfessionalRoleByIdAsync(
+        Guid roleId,
+        CancellationToken cancellationToken = default) =>
+        _context.ProfessionalRoles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ProfessionalRoleId == roleId && x.IsActive, cancellationToken);
 
     public void SyncUserSkills(UserProfile profile, IReadOnlyCollection<Skill> skills)
     {

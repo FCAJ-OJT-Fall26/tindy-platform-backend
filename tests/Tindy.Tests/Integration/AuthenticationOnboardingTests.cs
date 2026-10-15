@@ -66,22 +66,40 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
         Assert.Equal(HttpStatusCode.UnprocessableEntity, premature.StatusCode);
         await AssertErrorAsync(premature, "ONBOARDING_INCOMPLETE");
 
+
         Guid dotNetSkillId;
         Guid postgresSkillId;
-        using (var scope = _factory.Services.CreateScope())
+        Guid backendRoleId;
+
+        using (var catalogScope = _factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<TindyDbContext>();
-            dotNetSkillId = await db.Skills.Where(x => x.NameNormalized == ".net")
-                .Select(x => x.SkillId).SingleAsync();
-            postgresSkillId = await db.Skills.Where(x => x.NameNormalized == "postgresql")
-                .Select(x => x.SkillId).SingleAsync();
+            var catalogDb = catalogScope.ServiceProvider
+                .GetRequiredService<TindyDbContext>();
+
+            // Get Skill IDs
+            dotNetSkillId = await catalogDb.Skills
+                .Where(x => x.NameNormalized == ".net")
+                .Select(x => x.SkillId)
+                .SingleAsync();
+
+            postgresSkillId = await catalogDb.Skills
+                .Where(x => x.NameNormalized == "postgresql")
+                .Select(x => x.SkillId)
+                .SingleAsync();
+
+            // Get Professional Role ID
+            backendRoleId = await catalogDb.ProfessionalRoles
+                .Where(x => x.NameNormalized == "backend developer")
+                .Select(x => x.ProfessionalRoleId)
+                .SingleAsync();
         }
+
 
         var steps = new (int Number, object Body)[]
         {
             (1, new { username, display_name = "Step 14 Test", university = "FPT University" }),
             (2, new { skill_ids = new[] { dotNetSkillId, postgresSkillId, dotNetSkillId } }),
-            (3, new { preferred_role = "Backend Developer" }),
+            (3, new { preferred_role_id = backendRoleId }),
             (4, new { professional_interests = "Cloud", learning_goals = "Build useful APIs" }),
             (5, new { available_hours_per_week = 10 }),
             (6, new { previous_projects_and_contribution = "Built an API", technologies_to_learn = "Docker" }),
@@ -133,6 +151,7 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
         Assert.True(stored.IsOnboardingCompleted);
         Assert.Equal(username, stored.Username);
         Assert.Equal(bio, stored.Profile!.Bio);
+        Assert.Equal(backendRoleId, stored.Profile.PreferredRoleId);
         Assert.Equal(7, stored.OnboardingSteps.Count);
         Assert.Equal(2, stored.Profile.UserSkills.Count); // duplicates removed
         Assert.Single(await db.UserCredentials.Where(x => x.EmailNormalized == email).ToListAsync());
@@ -145,13 +164,19 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
         var email = $"race.{Guid.NewGuid():N}@example.com";
         var body1 = new
         {
-            display_name = "User One", university = "FPT University",
-            email, password = "Password123!", accept_terms = true
+            display_name = "User One",
+            university = "FPT University",
+            email,
+            password = "Password123!",
+            accept_terms = true
         };
         var body2 = new
         {
-            display_name = "User Two", university = "FPT University",
-            email = email.ToUpperInvariant(), password = "Password123!", accept_terms = true
+            display_name = "User Two",
+            university = "FPT University",
+            email = email.ToUpperInvariant(),
+            password = "Password123!",
+            accept_terms = true
         };
 
         var responses = await Task.WhenAll(client.PostAsJsonAsync("/api/auth/register", body1), client.PostAsJsonAsync("/api/auth/register", body2));
@@ -171,8 +196,11 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
         var email = $"disabled.{Guid.NewGuid():N}@example.com";
         var registration = await client.PostAsJsonAsync("/api/auth/register", new
         {
-            display_name = "Blocked User", university = "FPT University",
-            email, password = "Password123!", accept_terms = true
+            display_name = "Blocked User",
+            university = "FPT University",
+            email,
+            password = "Password123!",
+            accept_terms = true
         });
         Assert.Equal(HttpStatusCode.Created, registration.StatusCode);
         using var body = await ReadJsonAsync(registration);
@@ -200,8 +228,11 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
 
         var invalid = await client.PostAsJsonAsync("/api/auth/register", new
         {
-            display_name = "", university = "", email = "not-an-email",
-            password = "weak", accept_terms = false
+            display_name = "",
+            university = "",
+            email = "not-an-email",
+            password = "weak",
+            accept_terms = false
         });
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
         await AssertErrorAsync(invalid, "VALIDATION_FAILED");

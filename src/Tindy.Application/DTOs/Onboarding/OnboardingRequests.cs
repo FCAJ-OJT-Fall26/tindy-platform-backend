@@ -41,30 +41,19 @@ public sealed class OnboardingStep2Request : IValidatableObject
 
 public sealed class OnboardingStep3Request : IValidatableObject
 {
+    // Use GET /api/catalog/professional-roles to obtain this UUID.
     [Required]
-    public string? PreferredRole { get; set; }
+    public Guid? PreferredRoleId { get; set; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
-        if (PreferredRole is not null &&
-            !OnboardingAllowedRoles.Names.Any(x => string.Equals(x, PreferredRole.Trim(), StringComparison.OrdinalIgnoreCase)))
+        if (PreferredRoleId == Guid.Empty)
         {
-            yield return new ValidationResult("The preferred role is not in the list of supported roles.", new[] { nameof(PreferredRole) });
+            yield return new ValidationResult(
+                "Preferred role ID must be a non-empty UUID.",
+                new[] { nameof(PreferredRoleId) });
         }
     }
-}
-
-public static class OnboardingAllowedRoles
-{
-    public static readonly IReadOnlyList<string> Names =
-    [
-        "Backend Developer",
-        "Frontend Developer",
-        "Full-stack Developer",
-        "AI Engineer",
-        "Cloud Engineer",
-        "UI/UX Designer"
-    ];
 }
 
 public sealed class OnboardingStep4Request

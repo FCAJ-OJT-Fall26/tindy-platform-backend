@@ -58,7 +58,11 @@ public sealed class OnboardingService : IOnboardingService
                 SkillIds = selectedSkills.Select(x => x.SkillId).ToArray(),
                 Skills = selectedSkills
             },
-            ["3"] = new { profile.PreferredRole },
+            ["3"] = new
+            {
+                profile.PreferredRoleId,
+                PreferredRole = profile.PreferredProfessionalRole?.Name
+            },
             ["4"] = new { profile.ProfessionalInterests, profile.LearningGoals },
             ["5"] = new { profile.AvailableHoursPerWeek },
             ["6"] = new { profile.PreviousProjectsAndContribution, profile.TechnologiesToLearn },
@@ -134,9 +138,21 @@ public sealed class OnboardingService : IOnboardingService
     // ===================================
     public Task<OnboardingSaveResponse> SaveStep3Async(Guid userId, OnboardingStep3Request request, CancellationToken ct = default)
     {
-        var roleName = OnboardingAllowedRoles.Names.Single(x => string.Equals(x, request.PreferredRole!.Trim(), StringComparison.OrdinalIgnoreCase));
+        return _repository.ExecuteInTransactionAsync(userId, async token =>
+        {
+            var user = await GetActiveUserAsync(userId, token);
+            var profile = RequireProfile(user);
+            var role = await _repository.GetActiveProfessionalRoleByIdAsync(request.PreferredRoleId!.Value, token);
 
-        return SaveScalarStepAsync(userId, 3, (_, profile) => profile.PreferredRole = roleName, ct);
+            if (role is null)
+                throw new BusinessRuleException("Selected professional role does not exist or is inactive.");
+
+            profile.PreferredRoleId = role.ProfessionalRoleId;
+            profile.UpdatedAt = DateTime.UtcNow;
+            MarkStep(user, 3);
+            await _repository.SaveChangesAsync(token);
+            return Saved(user, 3);
+        }, ct);
     }
 
     // ===================================
@@ -329,7 +345,9 @@ public sealed class OnboardingService : IOnboardingService
                 return profile.UserSkills.Count > 0 &&
                     profile.UserSkills.All(s => !string.IsNullOrWhiteSpace(s.Skill.Name) && s.Skill.Name.Length <= 100);
             case 3:
-                return OnboardingAllowedRoles.Names.Contains(profile.PreferredRole ?? string.Empty, StringComparer.Ordinal);
+                // An already-selected role remains valid even if the catalog later disables it.
+                // New selections are restricted to IsActive=true in SaveStep3Async.
+                return profile.PreferredRoleId.HasValue && profile.PreferredProfessionalRole is not null;
             case 4:
                 return !string.IsNullOrWhiteSpace(profile.ProfessionalInterests) &&
                     !string.IsNullOrWhiteSpace(profile.LearningGoals);

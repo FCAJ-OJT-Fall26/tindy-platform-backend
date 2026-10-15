@@ -1,0 +1,352 @@
+diff --git a/src/Tindy.Application/DTOs/Onboarding/OnboardingRequests.cs b/src/Tindy.Application/DTOs/Onboarding/OnboardingRequests.cs
+index 8268d4b..d578cf0 100644
+--- a/src/Tindy.Application/DTOs/Onboarding/OnboardingRequests.cs
++++ b/src/Tindy.Application/DTOs/Onboarding/OnboardingRequests.cs
+@@ -41,32 +41,21 @@ public sealed class OnboardingStep2Request : IValidatableObject
+ 
+ public sealed class OnboardingStep3Request : IValidatableObject
+ {
++    // Use GET /api/catalog/professional-roles to obtain this UUID.
+     [Required]
+-    public string? PreferredRole { get; set; }
++    public Guid? PreferredRoleId { get; set; }
+ 
+     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+     {
+-        if (PreferredRole is not null &&
+-            !OnboardingAllowedRoles.Names.Any(x => string.Equals(x, PreferredRole.Trim(), StringComparison.OrdinalIgnoreCase)))
++        if (PreferredRoleId == Guid.Empty)
+         {
+-            yield return new ValidationResult("The preferred role is not in the list of supported roles.", new[] { nameof(PreferredRole) });
++            yield return new ValidationResult(
++                "Preferred role ID must be a non-empty UUID.",
++                new[] { nameof(PreferredRoleId) });
+         }
+     }
+ }
+ 
+-public static class OnboardingAllowedRoles
+-{
+-    public static readonly IReadOnlyList<string> Names =
+-    [
+-        "Backend Developer",
+-        "Frontend Developer",
+-        "Full-stack Developer",
+-        "AI Engineer",
+-        "Cloud Engineer",
+-        "UI/UX Designer"
+-    ];
+-}
+-
+ public sealed class OnboardingStep4Request
+ {
+     [Required]
+diff --git a/src/Tindy.Application/Entities/UserProfile.cs b/src/Tindy.Application/Entities/UserProfile.cs
+index b0e94ec..f578f91 100644
+--- a/src/Tindy.Application/Entities/UserProfile.cs
++++ b/src/Tindy.Application/Entities/UserProfile.cs
+@@ -22,9 +22,6 @@ public class UserProfile
+     public DateTime CreatedAt { get; set; }
+     public DateTime? UpdatedAt { get; set; }
+     public User User { get; set; } = null!;
+-    // Legacy value retained until STEP 05 performs data backfill.
+-    public string? PreferredRole { get; set; }
+-
+     public Guid? PreferredRoleId { get; set; }
+ 
+     public ProfessionalRole? PreferredProfessionalRole { get; set; }
+diff --git a/src/Tindy.Application/Interfaces/Repositories/IOnboardingRepository.cs b/src/Tindy.Application/Interfaces/Repositories/IOnboardingRepository.cs
+index 6e22056..f7a268e 100644
+--- a/src/Tindy.Application/Interfaces/Repositories/IOnboardingRepository.cs
++++ b/src/Tindy.Application/Interfaces/Repositories/IOnboardingRepository.cs
+@@ -15,6 +15,11 @@ public interface IOnboardingRepository
+         IReadOnlyCollection<Guid> skillIds,
+         CancellationToken cancellationToken = default);
+ 
++    // The catalog is system managed; a user can only choose an active role.
++    Task<ProfessionalRole?> GetActiveProfessionalRoleByIdAsync(
++        Guid roleId,
++        CancellationToken cancellationToken = default);
++
+     void SyncUserSkills(UserProfile profile, IReadOnlyCollection<Skill> skills);
+ 
+     Task SaveChangesAsync(CancellationToken cancellationToken = default);
+diff --git a/src/Tindy.Application/Services/OnboardingService.cs b/src/Tindy.Application/Services/OnboardingService.cs
+index f28da36..7d15dee 100644
+--- a/src/Tindy.Application/Services/OnboardingService.cs
++++ b/src/Tindy.Application/Services/OnboardingService.cs
+@@ -58,7 +58,11 @@ public sealed class OnboardingService : IOnboardingService
+                 SkillIds = selectedSkills.Select(x => x.SkillId).ToArray(),
+                 Skills = selectedSkills
+             },
+-            ["3"] = new { profile.PreferredRole },
++            ["3"] = new
++            {
++                profile.PreferredRoleId,
++                PreferredRole = profile.PreferredProfessionalRole?.Name
++            },
+             ["4"] = new { profile.ProfessionalInterests, profile.LearningGoals },
+             ["5"] = new { profile.AvailableHoursPerWeek },
+             ["6"] = new { profile.PreviousProjectsAndContribution, profile.TechnologiesToLearn },
+@@ -134,9 +138,21 @@ public sealed class OnboardingService : IOnboardingService
+     // ===================================
+     public Task<OnboardingSaveResponse> SaveStep3Async(Guid userId, OnboardingStep3Request request, CancellationToken ct = default)
+     {
+-        var roleName = OnboardingAllowedRoles.Names.Single(x => string.Equals(x, request.PreferredRole!.Trim(), StringComparison.OrdinalIgnoreCase));
++        return _repository.ExecuteInTransactionAsync(userId, async token =>
++        {
++            var user = await GetActiveUserAsync(userId, token);
++            var profile = RequireProfile(user);
++            var role = await _repository.GetActiveProfessionalRoleByIdAsync(request.PreferredRoleId!.Value, token);
++
++            if (role is null)
++                throw new BusinessRuleException("Selected professional role does not exist or is inactive.");
+ 
+-        return SaveScalarStepAsync(userId, 3, (_, profile) => profile.PreferredRole = roleName, ct);
++            profile.PreferredRoleId = role.ProfessionalRoleId;
++            profile.UpdatedAt = DateTime.UtcNow;
++            MarkStep(user, 3);
++            await _repository.SaveChangesAsync(token);
++            return Saved(user, 3);
++        }, ct);
+     }
+ 
+     // ===================================
+@@ -329,7 +345,9 @@ public sealed class OnboardingService : IOnboardingService
+                 return profile.UserSkills.Count > 0 &&
+                     profile.UserSkills.All(s => !string.IsNullOrWhiteSpace(s.Skill.Name) && s.Skill.Name.Length <= 100);
+             case 3:
+-                return OnboardingAllowedRoles.Names.Contains(profile.PreferredRole ?? string.Empty, StringComparer.Ordinal);
++                // An already-selected role remains valid even if the catalog later disables it.
++                // New selections are restricted to IsActive=true in SaveStep3Async.
++                return profile.PreferredRoleId.HasValue && profile.PreferredProfessionalRole is not null;
+             case 4:
+                 return !string.IsNullOrWhiteSpace(profile.ProfessionalInterests) &&
+                     !string.IsNullOrWhiteSpace(profile.LearningGoals);
+diff --git a/src/Tindy.Infrastructure/Persistence/Configurations/UserProfileConfiguration.cs b/src/Tindy.Infrastructure/Persistence/Configurations/UserProfileConfiguration.cs
+index 6d1dadf..a0c92b2 100644
+--- a/src/Tindy.Infrastructure/Persistence/Configurations/UserProfileConfiguration.cs
++++ b/src/Tindy.Infrastructure/Persistence/Configurations/UserProfileConfiguration.cs
+@@ -94,11 +94,6 @@ public class UserProfileConfiguration
+             .HasColumnName("updated_at");
+ 
+ 
+-        // Keep the legacy text column until STEP 05.
+-        builder.Property(x => x.PreferredRole)
+-            .HasColumnName("preferred_role")
+-            .HasMaxLength(100);
+-
+         builder.Property(x => x.PreferredRoleId)
+             .HasColumnName("preferred_role_id")
+             .IsRequired(false);
+diff --git a/src/Tindy.Infrastructure/Repositories/OnboardingRepository.cs b/src/Tindy.Infrastructure/Repositories/OnboardingRepository.cs
+index 0a79331..3454780 100644
+--- a/src/Tindy.Infrastructure/Repositories/OnboardingRepository.cs
++++ b/src/Tindy.Infrastructure/Repositories/OnboardingRepository.cs
+@@ -18,6 +18,8 @@ public sealed class OnboardingRepository : IOnboardingRepository
+             .Include(x => x.Profile)
+                 .ThenInclude(x => x!.UserSkills)
+                     .ThenInclude(x => x.Skill)
++            .Include(x => x.Profile)
++                .ThenInclude(x => x!.PreferredProfessionalRole)
+             .Include(x => x.Credential)
+             .Include(x => x.UserRoles)
+                 .ThenInclude(x => x.Role)
+@@ -38,6 +40,13 @@ public sealed class OnboardingRepository : IOnboardingRepository
+             .ToListAsync(cancellationToken);
+     }
+ 
++    public Task<ProfessionalRole?> GetActiveProfessionalRoleByIdAsync(
++        Guid roleId,
++        CancellationToken cancellationToken = default) =>
++        _context.ProfessionalRoles
++            .AsNoTracking()
++            .FirstOrDefaultAsync(x => x.ProfessionalRoleId == roleId && x.IsActive, cancellationToken);
++
+     public void SyncUserSkills(UserProfile profile, IReadOnlyCollection<Skill> skills)
+     {
+         var requiredIds = skills.Select(x => x.SkillId).ToHashSet();
+diff --git a/tests/Tindy.Tests/Integration/AuthenticationOnboardingTests.cs b/tests/Tindy.Tests/Integration/AuthenticationOnboardingTests.cs
+index f506eac..74207b9 100644
+--- a/tests/Tindy.Tests/Integration/AuthenticationOnboardingTests.cs
++++ b/tests/Tindy.Tests/Integration/AuthenticationOnboardingTests.cs
+@@ -77,11 +77,20 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
+                 .Select(x => x.SkillId).SingleAsync();
+         }
+ 
++        Guid backendRoleId;
++        using (var scope = _factory.Services.CreateScope())
++        {
++            var db = scope.ServiceProvider.GetRequiredService<TindyDbContext>();
++            backendRoleId = await db.ProfessionalRoles
++                .Where(x => x.NameNormalized == "backend developer")
++                .Select(x => x.ProfessionalRoleId).SingleAsync();
++        }
++
+         var steps = new (int Number, object Body)[]
+         {
+             (1, new { username, display_name = "Step 14 Test", university = "FPT University" }),
+             (2, new { skill_ids = new[] { dotNetSkillId, postgresSkillId, dotNetSkillId } }),
+-            (3, new { preferred_role = "Backend Developer" }),
++            (3, new { preferred_role_id = backendRoleId }),
+             (4, new { professional_interests = "Cloud", learning_goals = "Build useful APIs" }),
+             (5, new { available_hours_per_week = 10 }),
+             (6, new { previous_projects_and_contribution = "Built an API", technologies_to_learn = "Docker" }),
+@@ -133,6 +142,7 @@ public sealed class AuthenticationOnboardingTests : IClassFixture<TindyApiFactor
+         Assert.True(stored.IsOnboardingCompleted);
+         Assert.Equal(username, stored.Username);
+         Assert.Equal(bio, stored.Profile!.Bio);
++        Assert.Equal(backendRoleId, stored.Profile.PreferredRoleId);
+         Assert.Equal(7, stored.OnboardingSteps.Count);
+         Assert.Equal(2, stored.Profile.UserSkills.Count); // duplicates removed
+         Assert.Single(await db.UserCredentials.Where(x => x.EmailNormalized == email).ToListAsync());
+diff --git a/tests/Tindy.Tests/Integration/OnboardingPreferredRoleCatalogTests.cs b/tests/Tindy.Tests/Integration/OnboardingPreferredRoleCatalogTests.cs
+new file mode 100644
+index 0000000..a80a335
+--- /dev/null
++++ b/tests/Tindy.Tests/Integration/OnboardingPreferredRoleCatalogTests.cs
+@@ -0,0 +1,125 @@
++using System.Net;
++using System.Net.Http.Headers;
++using System.Net.Http.Json;
++using System.Text.Json;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.DependencyInjection;
++using Tindy.Infrastructure.Persistence;
++using Tindy.Application.Entities;
++using Xunit;
++
++namespace Tindy.Tests.Integration;
++
++public sealed class OnboardingPreferredRoleCatalogTests : IClassFixture<TindyApiFactory>
++{
++    private readonly TindyApiFactory _factory;
++
++    public OnboardingPreferredRoleCatalogTests(TindyApiFactory factory) => _factory = factory;
++
++    [Fact]
++    public async Task Step3_ValidRole_StoresForeignKey_AndReturnsDraft()
++    {
++        using var client = await RegisterAuthorizedClientAsync();
++        Guid backendId;
++        using (var scope = _factory.Services.CreateScope())
++        {
++            var db = scope.ServiceProvider.GetRequiredService<TindyDbContext>();
++            backendId = await db.ProfessionalRoles.Where(x => x.NameNormalized == "backend developer")
++                .Select(x => x.ProfessionalRoleId).SingleAsync();
++        }
++
++        var save = await client.PutAsJsonAsync("/api/me/onboarding/3", new { preferred_role_id = backendId });
++        Assert.Equal(HttpStatusCode.OK, save.StatusCode);
++
++        var draft = await client.GetAsync("/api/me/onboarding");
++        Assert.Equal(HttpStatusCode.OK, draft.StatusCode);
++        using var json = JsonDocument.Parse(await draft.Content.ReadAsStringAsync());
++        var step3 = json.RootElement.GetProperty("data").GetProperty("step_data").GetProperty("3");
++        Assert.Equal(backendId, step3.GetProperty("preferred_role_id").GetGuid());
++        Assert.Equal("Backend Developer", step3.GetProperty("preferred_role").GetString());
++        Assert.Contains(3, json.RootElement.GetProperty("data").GetProperty("completed_steps")
++            .EnumerateArray().Select(x => x.GetInt32()));
++    }
++
++    [Fact]
++    public async Task Step3_UnknownOrInactiveRole_DoesNotOverwriteExistingSelection()
++    {
++        using var client = await RegisterAuthorizedClientAsync();
++        Guid backendId;
++        Guid inactiveId;
++        using (var scope = _factory.Services.CreateScope())
++        {
++            var db = scope.ServiceProvider.GetRequiredService<TindyDbContext>();
++            backendId = await db.ProfessionalRoles.Where(x => x.NameNormalized == "backend developer")
++                .Select(x => x.ProfessionalRoleId).SingleAsync();
++            inactiveId = Guid.NewGuid();
++            var name = "Temporarily Inactive Role " + inactiveId.ToString("N");
++            db.ProfessionalRoles.Add(new ProfessionalRole
++            {
++                ProfessionalRoleId = inactiveId,
++                Name = name,
++                NameNormalized = name.ToLowerInvariant(),
++                IsActive = true
++            });
++            await db.SaveChangesAsync();
++            // Force false to avoid an EF default-TRUE insert ambiguity.
++            await db.Database.ExecuteSqlInterpolatedAsync(
++                $"UPDATE professional_roles SET is_active = FALSE WHERE professional_role_id = {inactiveId}");
++        }
++
++        Assert.Equal(HttpStatusCode.OK,
++            (await client.PutAsJsonAsync("/api/me/onboarding/3", new { preferred_role_id = backendId })).StatusCode);
++
++        var unknown = await client.PutAsJsonAsync("/api/me/onboarding/3", new { preferred_role_id = Guid.NewGuid() });
++        Assert.Equal(HttpStatusCode.UnprocessableEntity, unknown.StatusCode);
++        await AssertErrorAsync(unknown, "BUSINESS_RULE_VIOLATION");
++
++        var inactive = await client.PutAsJsonAsync("/api/me/onboarding/3", new { preferred_role_id = inactiveId });
++        Assert.Equal(HttpStatusCode.UnprocessableEntity, inactive.StatusCode);
++        await AssertErrorAsync(inactive, "BUSINESS_RULE_VIOLATION");
++
++        var draft = await client.GetAsync("/api/me/onboarding");
++        using var json = JsonDocument.Parse(await draft.Content.ReadAsStringAsync());
++        Assert.Equal(backendId, json.RootElement.GetProperty("data").GetProperty("step_data")
++            .GetProperty("3").GetProperty("preferred_role_id").GetGuid());
++    }
++
++    [Fact]
++    public async Task Step3_RejectsMissingEmptyAndLegacyStringPayloads()
++    {
++        using var client = await RegisterAuthorizedClientAsync();
++        foreach (var payload in new object[]
++        {
++            new { preferred_role_id = (Guid?)null },
++            new { preferred_role_id = Guid.Empty },
++            new { preferred_role = "Backend Developer" }
++        })
++        {
++            var response = await client.PutAsJsonAsync("/api/me/onboarding/3", payload);
++            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
++            await AssertErrorAsync(response, "VALIDATION_FAILED");
++        }
++    }
++
++    private async Task<HttpClient> RegisterAuthorizedClientAsync()
++    {
++        var client = _factory.CreateHttpsClient();
++        var response = await client.PostAsJsonAsync("/api/auth/register", new
++        {
++            display_name = "Role Test", university = "FPT University",
++            email = $"step3.{Guid.NewGuid():N}@example.com",
++            password = "Password123!", accept_terms = true
++        });
++        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
++        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
++        var token = json.RootElement.GetProperty("data").GetProperty("access_token").GetString();
++        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
++        return client;
++    }
++
++    private static async Task AssertErrorAsync(HttpResponseMessage response, string errorCode)
++    {
++        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
++        Assert.Equal(errorCode, json.RootElement.GetProperty("error_code").GetString());
++    }
++}
+diff --git a/tests/Tindy.Tests/Validation/RequestValidationTests.cs b/tests/Tindy.Tests/Validation/RequestValidationTests.cs
+index 3b6a216..6a944ea 100644
+--- a/tests/Tindy.Tests/Validation/RequestValidationTests.cs
++++ b/tests/Tindy.Tests/Validation/RequestValidationTests.cs
+@@ -79,6 +79,14 @@ public sealed class RequestValidationTests
+         Assert.Empty(Validate(new OnboardingStep2Request { SkillIds = [validId, validId] }));
+     }
+ 
++    [Fact]
++    public void PreferredRole_RequiresNonEmptyGuid()
++    {
++        Assert.NotEmpty(Validate(new OnboardingStep3Request()));
++        Assert.NotEmpty(Validate(new OnboardingStep3Request { PreferredRoleId = Guid.Empty }));
++        Assert.Empty(Validate(new OnboardingStep3Request { PreferredRoleId = Guid.NewGuid() }));
++    }
++
+     [Fact]
+     public void Step7_AllowsBothLinksNull()
+     {

@@ -15,6 +15,11 @@ public interface IOnboardingRepository
         IReadOnlyCollection<Guid> skillIds,
         CancellationToken cancellationToken = default);
 
+    // The catalog is system managed; a user can only choose an active role.
+    Task<ProfessionalRole?> GetActiveProfessionalRoleByIdAsync(
+        Guid roleId,
+        CancellationToken cancellationToken = default);
+
     void SyncUserSkills(UserProfile profile, IReadOnlyCollection<Skill> skills);
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);

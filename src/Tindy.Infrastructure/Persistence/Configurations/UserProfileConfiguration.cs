@@ -94,11 +94,6 @@ public class UserProfileConfiguration
             .HasColumnName("updated_at");
 
 
-        // Keep the legacy text column until STEP 05.
-        builder.Property(x => x.PreferredRole)
-            .HasColumnName("preferred_role")
-            .HasMaxLength(100);
-
         builder.Property(x => x.PreferredRoleId)
             .HasColumnName("preferred_role_id")
             .IsRequired(false);
