@@ -50,6 +50,9 @@ public static class ServicesCollectionExtensions
         // ===================================
         services.AddScoped<IAuthRepository, AuthRepository>();
 
+        // External identity persistence (STEP 03)
+        services.AddScoped<IExternalAuthRepository, ExternalAuthRepository>();
+
         // Onboarding repository
         services.AddScoped<IOnboardingRepository, OnboardingRepository>();
 

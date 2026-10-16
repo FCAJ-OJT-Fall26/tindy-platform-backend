@@ -224,6 +224,9 @@ public static class ServiceCollectionExtensions
         // ===================================
         services.AddScoped<IAuthService, AuthService>();
 
+        // External identity business logic (STEP 03, no OAuth endpoints yet)
+        services.AddScoped<IExternalAuthService, ExternalAuthService>();
+
         // Onboarding application service
         services.AddScoped<IOnboardingService, OnboardingService>();
 
