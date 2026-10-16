@@ -188,7 +188,10 @@ public static class ServiceCollectionExtensions
                     OnForbidden = context =>
                         WriteAuthenticationProblemAsync(context.HttpContext, StatusCodes.Status403Forbidden, "Forbidden", "You do not have permission to access this resource.", "AUTH_FORBIDDEN")
                 };
-            });
+            })
+            // OAuth is opt-in and uses a dedicated temporary cookie.
+            // The default authentication scheme stays JWT Bearer.
+            .AddTindyExternalOAuth(configuration);
 
         // ===================================
         // 6. AUTHORIZATION
