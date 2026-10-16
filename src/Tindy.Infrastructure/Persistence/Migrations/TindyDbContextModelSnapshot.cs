@@ -598,6 +598,91 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.ToTable("user_skills", (string)null);
                 });
 
+            modelBuilder.Entity("Tindy.Infrastructure.Persistence.Models.OAuthLinkTransaction", b =>
+                {
+                    b.Property<Guid>("TransactionId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("transaction_id");
+
+                    b.Property<string>("CompletionTicketHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("completion_ticket_hash");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("display_name");
+
+                    b.Property<bool>("EmailVerified")
+                        .HasColumnType("boolean")
+                        .HasColumnName("email_verified");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("ProviderEmail")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("provider_email");
+
+                    b.Property<string>("ProviderUserId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("provider_user_id");
+
+                    b.Property<string>("ProviderUsername")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("provider_username");
+
+                    b.Property<string>("StartTicketHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("start_ticket_hash");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("TransactionId");
+
+                    b.HasIndex("CompletionTicketHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_oauth_link_transactions_completion_hash");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("ix_oauth_link_transactions_expires_at");
+
+                    b.HasIndex("StartTicketHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_oauth_link_transactions_start_hash");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_oauth_link_transactions_user_id");
+
+                    b.ToTable("oauth_link_transactions", (string)null);
+                });
+
             modelBuilder.Entity("Tindy.Infrastructure.Persistence.Models.OAuthLoginTicket", b =>
                 {
                     b.Property<string>("TicketHash")
@@ -752,6 +837,15 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("Skill");
 
                     b.Navigation("UserProfile");
+                });
+
+            modelBuilder.Entity("Tindy.Infrastructure.Persistence.Models.OAuthLinkTransaction", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Tindy.Infrastructure.Persistence.Models.OAuthLoginTicket", b =>

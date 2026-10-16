@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -84,33 +83,9 @@ public sealed class OAuthController : ControllerBase
                 (provider != ExternalAuthProviders.Google && provider != ExternalAuthProviders.GitHub))
                 return SafeFrontendError("oauth_failed");
 
-            // Never populate identity from browser input. Only validated middleware claims.
-            var principal = remote.Principal;
-            var id = principal.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (string.IsNullOrWhiteSpace(id)) return SafeFrontendError("oauth_failed");
-
-            var providerEmail = principal.FindFirstValue(ClaimTypes.Email);
-            var verified = false;
-            if (provider == ExternalAuthProviders.Google)
-            {
-                verified = IsTrue(principal.FindFirstValue("tindy:google_verified_v2")) ||
-                           IsTrue(principal.FindFirstValue("tindy:google_verified_v3"));
-            }
-            else
-            {
-                var verifiedGitHub = principal.FindFirstValue("tindy:github_verified_email");
-                if (!string.IsNullOrWhiteSpace(verifiedGitHub))
-                {
-                    providerEmail = verifiedGitHub;
-                    verified = true;
-                }
-            }
-
-            var identity = new AuthenticatedExternalIdentity(provider, id,
-                principal.FindFirstValue(ClaimTypes.Name),
-                provider == ExternalAuthProviders.GitHub
-                    ? principal.FindFirstValue(ClaimTypes.Name) : null,
-                providerEmail, verified);
+            // Read only claims validated by the Google/GitHub middleware.
+            var identity = AuthenticatedExternalIdentityReader.Read(remote.Principal, provider);
+            if (identity is null) return SafeFrontendError("oauth_failed");
 
             string ticket;
             try
@@ -172,6 +147,4 @@ public sealed class OAuthController : ControllerBase
         return origins[0].TrimEnd('/') + "/auth/oauth/callback";
     }
 
-    private static bool IsTrue(string? value) =>
-        string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
 }

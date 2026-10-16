@@ -228,6 +228,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IExternalAuthService, ExternalAuthService>();
 
         services.AddScoped<IOAuthLoginFlowService, OAuthLoginFlowService>();
+        services.AddScoped<IAccountConnectionsService, AccountConnectionsService>();
 
         // Onboarding application service
         services.AddScoped<IOnboardingService, OnboardingService>();

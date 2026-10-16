@@ -35,6 +35,7 @@ public class TindyDbContext : DbContext
         => Set<ExternalAuthAccount>();
 
     public DbSet<OAuthLoginTicket> OAuthLoginTickets => Set<OAuthLoginTicket>();
+    public DbSet<OAuthLinkTransaction> OAuthLinkTransactions => Set<OAuthLinkTransaction>();
 
 
     public DbSet<ProfessionalRole> ProfessionalRoles

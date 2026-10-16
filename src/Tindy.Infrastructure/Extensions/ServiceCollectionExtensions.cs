@@ -54,6 +54,8 @@ public static class ServicesCollectionExtensions
         services.AddScoped<IExternalAuthRepository, ExternalAuthRepository>();
 
         services.AddScoped<IOAuthLoginTicketStore, OAuthLoginTicketStore>();
+        services.AddScoped<IOAuthLinkTransactionStore, OAuthLinkTransactionStore>();
+        services.AddScoped<IAccountConnectionsRepository, AccountConnectionsRepository>();
 
         // Onboarding repository
         services.AddScoped<IOnboardingRepository, OnboardingRepository>();
