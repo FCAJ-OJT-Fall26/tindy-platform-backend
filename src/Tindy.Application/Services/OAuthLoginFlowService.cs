@@ -66,6 +66,7 @@ public sealed class OAuthLoginFlowService : IOAuthLoginFlowService
         var jwt = _jwt.GenerateAccessToken(user.UserId, roles);
         return new OAuthExchangeResponse(jwt.AccessToken, jwt.TokenType, jwt.ExpiresIn,
             new OAuthExchangeUser(user.UserId, user.Profile.DisplayName,
+                user.Profile.University ?? string.Empty,
                 user.PrimaryEmail, user.Username, user.Status, roles,
                 user.IsOnboardingCompleted),
             user.IsOnboardingCompleted ? "/discover" : "/onboarding");

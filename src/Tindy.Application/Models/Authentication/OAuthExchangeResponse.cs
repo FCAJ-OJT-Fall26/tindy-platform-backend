@@ -10,6 +10,7 @@ public sealed record OAuthExchangeResponse(
 public sealed record OAuthExchangeUser(
     Guid UserId,
     string DisplayName,
+    string University,
     string? Email,
     string? Username,
     string Status,

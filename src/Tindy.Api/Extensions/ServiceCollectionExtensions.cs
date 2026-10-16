@@ -212,11 +212,17 @@ public static class ServiceCollectionExtensions
             // explicitly decorated with [AllowAnonymous] or an exception policy.
             options.FallbackPolicy = completedOnboardingPolicy;
 
-            // Limited access for /me, onboarding and logout.
-            options.AddPolicy(OnboardingPolicies.AuthenticatedOnly, new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme).RequireAuthenticatedUser().Build());
+            // OAuth-only users can access /me, onboarding, logout and connections
+            // before finishing onboarding, but suspended/deleted users cannot.
+            options.AddPolicy(OnboardingPolicies.AuthenticatedOnly,
+                new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme)
+                    .RequireAuthenticatedUser()
+                    .AddRequirements(new ActiveAccountRequirement())
+                    .Build());
         });
 
         services.AddScoped<IAuthorizationHandler, OnboardingCompletedHandler>();
+        services.AddScoped<IAuthorizationHandler, ActiveAccountHandler>();
         services.AddSingleton<IAuthorizationMiddlewareResultHandler, OnboardingAuthorizationResultHandler>();
 
         // ===================================

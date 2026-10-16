@@ -1,0 +1,381 @@
+diff --git a/docs/guide/OAUTH_STEP06_JWT_ONBOARDING.md b/docs/guide/OAUTH_STEP06_JWT_ONBOARDING.md
+new file mode 100644
+index 0000000..cc502b4
+--- /dev/null
++++ b/docs/guide/OAUTH_STEP06_JWT_ONBOARDING.md
+@@ -0,0 +1,116 @@
++# Tindy — STEP 06: Integrate JWT Authorization And Onboarding
++
++> **Scope:** Bản rà soát/chỉnh sửa nhỏ, tiếp nối STEP 04–05. Giữ nguyên JWT Bearer và 8 bước onboarding của Tindy. **Không migration, không sửa Local Register/Login, không thêm OAuth endpoint.**
++
++## 1. Kết quả audit source hiện tại
++
++| Quy tắc | Source hiện tại | Kết luận |
++|---|---|---|
++| Local & OAuth cấp JWT dùng chung `IJwtTokenService` | `AuthService` / `OAuthLoginFlowService` | Đã đạt; không thay token service |
++| JWT `sub`, `role`, issuer, audience, thời hạn | `JwtTokenService` + `AddJwtBearer` | Đã đồng nhất; giữ nguyên |
++| Chặn inactive/deleted và thiếu roles **trước OAuth ticket exchange phát JWT** | `OAuthLoginFlowService.ExchangeAsync` | Đã đạt; giữ nguyên |
++| Chặn inactive/deleted trước Local Login phát JWT | `AuthService.LoginAsync` | Đã đạt; giữ nguyên |
++| OAuth-only không cần Local Credential | `OnboardingService.GetCurrentUserAsync` (`PrimaryEmail ?? Credential?.Email`) | Đã đạt; giữ nguyên |
++| OAuth User mới đi `/onboarding`, User cũ hoàn thành đi `/discover` | `ExternalAuthService` và `OAuthLoginFlowService` | Đã đạt; giữ nguyên |
++| Bio chưa có AI để `null` | `ExternalAuthService` và `OnboardingService` | Đã đạt; giữ nguyên |
++| Default / fallback policy chặn User chưa hoàn thành onboarding | `ServiceCollectionExtensions` / `OnboardingCompletedHandler` | Đã đạt; giữ nguyên |
++| `AuthenticatedOnly` kiểm tra **User vẫn active** | Policy cũ chỉ kiểm tra JWT | **Bổ sung `ActiveAccountRequirement` và handler** |
++| OAuth Exchange response giống Local Login | OAuth response chưa có `university` | **Bổ sung trường `university`**, giữ trường cũ |
++
++Trong Tindy, onboarding gồm **7 API lưu bước 1–7 và API Complete (bước 8)**. Không cần tạo bản ghi `user_onboarding_steps` số 8; kiểm tra hoàn thành dựa trên `users.is_onboarding_completed`.
++
++## 2. Thay đổi mã nguồn
++
++| File | Thay đổi |
++|---|---|
++| `src/Tindy.Api/Authorization/ActiveAccountRequirement.cs` | Điều kiện account đang hoạt động (mới) |
++| `src/Tindy.Api/Authorization/ActiveAccountHandler.cs` | Đọc trạng thái thực từ DB bằng `IOnboardingAccessReader`; pending onboarding vẫn được vào các API setup; blocked/deleted thì không (mới) |
++| `src/Tindy.Api/Authorization/OnboardingPolicies.cs` | Giải thích lại ý nghĩa `AuthenticatedOnly` |
++| `src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs` | Thêm requirement vào named policy và register authorization handler; **không thay JWT default**, default/fallback onboarding policies |
++| `src/Tindy.Application/Models/Authentication/OAuthExchangeResponse.cs` | Bổ sung `University` vào `OAuthExchangeUser` |
++| `src/Tindy.Application/Services/OAuthLoginFlowService.cs` | Điền `University` từ `UserProfile`, dùng `string.Empty` nếu người dùng chưa onboarding |
++| `tests/Tindy.Tests/Security/ActiveAccountHandlerTests.cs` | Unit tests cho trạng thái active/onboarding/blocked/bad claims |
++| `tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs` | Test OAuth-only thiếu email + trường University + thiếu Profile |
++
++### Thay đổi API có chủ ý
++
++- OAuth exchange **bổ sung** trường `data.user.university` (chuỗi trống khi chưa có). Không xóa/đổi kiểu các trường cũ; `data.user.email` vẫn nullable.
++- API dùng `AuthenticatedOnly` (`/api/me`, onboarding, logout, các API account connections) từ nay yêu cầu **JWT hợp lệ + User active trong database**, nhưng **không yêu cầu** hoàn thành onboarding. JWT của tài khoản suspended/deleted/missing sẽ bị từ chối (thường là HTTP 403 do đã authenticate nhưng không đủ điều kiện). Đây là thay đổi bảo mật có chủ ý, không phải đổi schema.
++- JWT hiện có **không bị thu hồi/blacklist** khi logout; các API có policy DB sẽ kiểm tra trạng thái hiện tại. Không thay token lifetime/issuer/audience/signature.
++
++### Giữ nguyên
++
++- Endpoint/DTO `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`.
++- Google/GitHub callback, ticket exchange, linking/unlinking.
++- `JwtTokenService`, `JwtBearerDefaults.AuthenticationScheme`, `NameClaimType = "sub"`, `RoleClaimType = "role"`.
++- Onboarding yêu cầu 8 bước; `Bio = null` hợp lệ khi chưa có AI.
++- Các API `[AllowAnonymous]` cho Register/Login/OAuth start + callback/exchange và public catalogs như source đang cấu hình.
++
++## 3. Áp dụng patch từ root backend trong PowerShell 7
++
++**Điều kiện:** Source của bạn đã có STEP 05 (và migration STEP 05 đã được xử lý nếu bạn sử dụng linking). Nếu STEP 05 chưa được áp dụng, **không** ép patch này vào source cũ; hãy kiểm tra lại thứ tự trước.
++
++```powershell
++cd "D:\FPT\Semester 6\OJT\aws\tindy-platform\tindy-backend-platform"
++git status
++git -c core.whitespace=cr-at-eol apply --check .\Tindy_STEP06_JWT_Authorization_Onboarding.patch
++git -c core.whitespace=cr-at-eol apply .\Tindy_STEP06_JWT_Authorization_Onboarding.patch
++
++dotnet build .\Tindy.slnx
++```
++
++Patch không chứa migration. **Không chạy** `dotnet ef migrations add`, `database drop` hoặc `database update` cho riêng STEP 06.
++
++## 4. Kiểm thử không cần Docker
++
++```powershell
++dotnet test .\tests\Tindy.Tests\Tindy.Tests.csproj `
++    --filter "FullyQualifiedName~ActiveAccountHandlerTests|FullyQualifiedName~OAuthLoginFlowServiceTests|FullyQualifiedName~CryptoTests"
++
++git -c core.whitespace=cr-at-eol diff --check
++git status
++git diff --stat
++```
++
++### Manual API smoke tests qua Postman
++
++1. **Local login:** `POST https://localhost:7190/api/auth/login` xác nhận JWT vẫn có, `redirect_to` phù hợp; không gửi token vào chat.
++2. **OAuth exchange:** đăng nhập Google/GitHub lấy ticket, `POST /api/auth/oauth/exchange` với ticket mới, xác nhận `data.user.university` có mặt, `email` có thể null, `redirect_to=/onboarding` với User mới.
++3. **`GET /api/me`:** sử dụng Bearer JWT OAuth-only khi chưa onboarding. Phải trả 200, kể cả không có `user_credentials`.
++4. **`GET /api/dev/auth-check`:** với JWT User active chưa onboarding trả 200 trong Development (policy `AuthenticatedOnly`).
++5. **`GET /api/dev/onboarding-gate-check`:** với JWT User chưa onboarding trả 403 và `ONBOARDING_REQUIRED`; sau khi hoàn thành onboarding 8 bước trả 200 (Dev only).
++6. **User bị khóa/xóa mềm:** dùng JWT đã cấp trước đó đến `/api/me` hoặc `/api/auth/connections`: phải bị từ chối sau khi status đổi trong DB, ngay cả JWT chưa hết hạn. *Chỉ thử trên tài khoản test* và khôi phục trạng thái sau đó.
++7. **No-token:** gọi `/api/me` trả 401. Account Connections chỉ chạy được sau khi STEP 05 có migration/database đúng.
++
++Lưu ý: Test manual trong Development không chứng minh mọi race condition. Integration Tests/Testcontainers/PostgreSQL concurrency tests giữ lại cho STEP 08 theo thỏa thuận.
++
++## 5. Definition of Done
++
++- [ ] Patch apply thành công trên source sau STEP 05, không đè code local team đang chỉnh.
++- [ ] `dotnet build .\Tindy.slnx` thành công.
++- [ ] Scoped Unit Tests xanh (không cần Docker).
++- [ ] Local register/login JWT không đổi.
++- [ ] OAuth exchange trả cùng Bearer JWT scheme; response thêm `university` mà không mất các trường cũ.
++- [ ] OAuth-only User (không Credential, không email) đọc `/api/me` không null-reference.
++- [ ] `AuthenticatedOnly`: User chưa onboarding nhưng active được vào API setup, User blocked/deleted không được vào.
++- [ ] Default & fallback policy vẫn chặn API business khi onboarding chưa xong.
++- [ ] Git diff đã review, commit chỉ chứa STEP 06.
++
++## 6. Commit
++
++```powershell
++git add src/Tindy.Api/Authorization/ActiveAccountRequirement.cs `
++        src/Tindy.Api/Authorization/ActiveAccountHandler.cs `
++        src/Tindy.Api/Authorization/OnboardingPolicies.cs `
++        src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs `
++        src/Tindy.Application/Models/Authentication/OAuthExchangeResponse.cs `
++        src/Tindy.Application/Services/OAuthLoginFlowService.cs `
++        tests/Tindy.Tests/Security/ActiveAccountHandlerTests.cs `
++        tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs `
++        docs/guide/OAUTH_STEP06_JWT_ONBOARDING.md
++
++git diff --cached --stat
++git commit -m "feat(auth): unify oauth jwt and onboarding behavior"
++```
++
++**Không commit** file `.patch`, token, Client Secret hay file SQL/ log tạm ở root.
+diff --git a/src/Tindy.Api/Authorization/ActiveAccountHandler.cs b/src/Tindy.Api/Authorization/ActiveAccountHandler.cs
+new file mode 100644
+index 0000000..5e3ca03
+--- /dev/null
++++ b/src/Tindy.Api/Authorization/ActiveAccountHandler.cs
+@@ -0,0 +1,41 @@
++using Microsoft.AspNetCore.Authorization;
++using Tindy.Application.Interfaces.Repositories;
++using Tindy.Application.Models.Authorization;
++
++namespace Tindy.Api.Authorization;
++
++/// <summary>
++/// Re-checks the current account state from the database on every
++/// AuthenticatedOnly request. An unexpired JWT is not sufficient for
++/// a suspended, soft-deleted or missing account.
++/// </summary>
++public sealed class ActiveAccountHandler : AuthorizationHandler<ActiveAccountRequirement>
++{
++    private readonly IOnboardingAccessReader _reader;
++
++    public ActiveAccountHandler(IOnboardingAccessReader reader) => _reader = reader;
++
++    protected override async Task HandleRequirementAsync(
++        AuthorizationHandlerContext context, ActiveAccountRequirement requirement)
++    {
++        if (context.User.Identity?.IsAuthenticated != true ||
++            !Guid.TryParse(context.User.FindFirst("sub")?.Value, out var userId) ||
++            userId == Guid.Empty)
++        {
++            return;
++        }
++
++        var cancellationToken = (context.Resource as HttpContext)?.RequestAborted
++            ?? CancellationToken.None;
++        var status = await _reader.GetStatusAsync(userId, cancellationToken);
++
++        if (status is OnboardingAccessStatus.Completed or OnboardingAccessStatus.Incomplete)
++        {
++            context.Succeed(requirement);
++        }
++        else
++        {
++            context.Fail();
++        }
++    }
++}
+diff --git a/src/Tindy.Api/Authorization/ActiveAccountRequirement.cs b/src/Tindy.Api/Authorization/ActiveAccountRequirement.cs
+new file mode 100644
+index 0000000..843f5ef
+--- /dev/null
++++ b/src/Tindy.Api/Authorization/ActiveAccountRequirement.cs
+@@ -0,0 +1,11 @@
++using Microsoft.AspNetCore.Authorization;
++
++namespace Tindy.Api.Authorization;
++
++/// <summary>
++/// Allows valid Tindy JWTs to use setup APIs only while the account exists
++/// and remains active (onboarding completion is not required).
++/// </summary>
++public sealed class ActiveAccountRequirement : IAuthorizationRequirement
++{
++}
+diff --git a/src/Tindy.Api/Authorization/OnboardingPolicies.cs b/src/Tindy.Api/Authorization/OnboardingPolicies.cs
+index 7ae94d7..2724e0e 100644
+--- a/src/Tindy.Api/Authorization/OnboardingPolicies.cs
++++ b/src/Tindy.Api/Authorization/OnboardingPolicies.cs
+@@ -2,7 +2,8 @@ namespace Tindy.Api.Authorization;
+ 
+ public static class OnboardingPolicies
+ {
+-    // For current-user and onboarding setup endpoints, and logout.
++    // JWT + active account, without requiring completed onboarding.
++    // Used by current-user/onboarding, logout, and OAuth account connections.
+     public const string AuthenticatedOnly = "AuthenticatedOnly";
+ 
+     // Error code returned when valid JWT is used before completing onboarding.
+diff --git a/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs b/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
+index 1f49caa..004da68 100644
+--- a/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
++++ b/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
+@@ -212,11 +212,17 @@ public static class ServiceCollectionExtensions
+             // explicitly decorated with [AllowAnonymous] or an exception policy.
+             options.FallbackPolicy = completedOnboardingPolicy;
+ 
+-            // Limited access for /me, onboarding and logout.
+-            options.AddPolicy(OnboardingPolicies.AuthenticatedOnly, new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme).RequireAuthenticatedUser().Build());
++            // OAuth-only users can access /me, onboarding, logout and connections
++            // before finishing onboarding, but suspended/deleted users cannot.
++            options.AddPolicy(OnboardingPolicies.AuthenticatedOnly,
++                new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme)
++                    .RequireAuthenticatedUser()
++                    .AddRequirements(new ActiveAccountRequirement())
++                    .Build());
+         });
+ 
+         services.AddScoped<IAuthorizationHandler, OnboardingCompletedHandler>();
++        services.AddScoped<IAuthorizationHandler, ActiveAccountHandler>();
+         services.AddSingleton<IAuthorizationMiddlewareResultHandler, OnboardingAuthorizationResultHandler>();
+ 
+         // ===================================
+diff --git a/src/Tindy.Application/Models/Authentication/OAuthExchangeResponse.cs b/src/Tindy.Application/Models/Authentication/OAuthExchangeResponse.cs
+index 2795e67..cb2cdb7 100644
+--- a/src/Tindy.Application/Models/Authentication/OAuthExchangeResponse.cs
++++ b/src/Tindy.Application/Models/Authentication/OAuthExchangeResponse.cs
+@@ -10,6 +10,7 @@ public sealed record OAuthExchangeResponse(
+ public sealed record OAuthExchangeUser(
+     Guid UserId,
+     string DisplayName,
++    string University,
+     string? Email,
+     string? Username,
+     string Status,
+diff --git a/src/Tindy.Application/Services/OAuthLoginFlowService.cs b/src/Tindy.Application/Services/OAuthLoginFlowService.cs
+index 0c12695..4f17864 100644
+--- a/src/Tindy.Application/Services/OAuthLoginFlowService.cs
++++ b/src/Tindy.Application/Services/OAuthLoginFlowService.cs
+@@ -66,6 +66,7 @@ public sealed class OAuthLoginFlowService : IOAuthLoginFlowService
+         var jwt = _jwt.GenerateAccessToken(user.UserId, roles);
+         return new OAuthExchangeResponse(jwt.AccessToken, jwt.TokenType, jwt.ExpiresIn,
+             new OAuthExchangeUser(user.UserId, user.Profile.DisplayName,
++                user.Profile.University ?? string.Empty,
+                 user.PrimaryEmail, user.Username, user.Status, roles,
+                 user.IsOnboardingCompleted),
+             user.IsOnboardingCompleted ? "/discover" : "/onboarding");
+diff --git a/tests/Tindy.Tests/Security/ActiveAccountHandlerTests.cs b/tests/Tindy.Tests/Security/ActiveAccountHandlerTests.cs
+new file mode 100644
+index 0000000..4319be3
+--- /dev/null
++++ b/tests/Tindy.Tests/Security/ActiveAccountHandlerTests.cs
+@@ -0,0 +1,79 @@
++using System.Security.Claims;
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Http;
++using Tindy.Api.Authorization;
++using Tindy.Application.Interfaces.Repositories;
++using Tindy.Application.Models.Authorization;
++using Xunit;
++
++namespace Tindy.Tests.Security;
++
++/// <summary>Fast authorization tests without Docker or PostgreSQL.</summary>
++public sealed class ActiveAccountHandlerTests
++{
++    private static readonly Guid UserId = Guid.NewGuid();
++
++    [Theory]
++    [InlineData(OnboardingAccessStatus.Incomplete)]
++    [InlineData(OnboardingAccessStatus.Completed)]
++    public async Task ActiveUser_IsAuthorized_RegardlessOfOnboarding(OnboardingAccessStatus status)
++    {
++        var reader = new FakeReader(status);
++        var context = NewContext(ValidPrincipal());
++
++        await new ActiveAccountHandler(reader).HandleAsync(context);
++
++        Assert.True(context.HasSucceeded);
++        Assert.Equal(UserId, reader.ReadFor);
++    }
++
++    [Fact]
++    public async Task SuspendedOrDeletedUser_IsDenied_EvenWithValidJwtClaims()
++    {
++        var reader = new FakeReader(OnboardingAccessStatus.InactiveOrMissing);
++        var context = NewContext(ValidPrincipal());
++
++        await new ActiveAccountHandler(reader).HandleAsync(context);
++
++        Assert.False(context.HasSucceeded);
++        Assert.True(context.HasFailed);
++    }
++
++    [Theory]
++    [InlineData(false, "")]
++    [InlineData(true, "invalid-uuid")]
++    [InlineData(true, "00000000-0000-0000-0000-000000000000")]
++    public async Task UnauthenticatedOrMalformedSub_IsDeniedWithoutDatabaseCall(bool authenticated, string sub)
++    {
++        var claims = string.IsNullOrWhiteSpace(sub) ? Array.Empty<Claim>() : new[] { new Claim("sub", sub) };
++        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, authenticated ? "Bearer" : null));
++        var reader = new FakeReader(OnboardingAccessStatus.Completed);
++        var context = NewContext(principal);
++
++        await new ActiveAccountHandler(reader).HandleAsync(context);
++
++        Assert.False(context.HasSucceeded);
++        Assert.Null(reader.ReadFor);
++    }
++
++    private static AuthorizationHandlerContext NewContext(ClaimsPrincipal principal) =>
++        new(new IAuthorizationRequirement[] { new ActiveAccountRequirement() },
++            principal, new DefaultHttpContext());
++
++    private static ClaimsPrincipal ValidPrincipal() =>
++        new(new ClaimsIdentity(new[]
++        {
++            new Claim("sub", UserId.ToString("D")),
++            new Claim("role", "member")
++        }, "Bearer"));
++
++    private sealed class FakeReader(OnboardingAccessStatus status) : IOnboardingAccessReader
++    {
++        public Guid? ReadFor { get; private set; }
++        public Task<OnboardingAccessStatus> GetStatusAsync(Guid userId, CancellationToken cancellationToken = default)
++        {
++            ReadFor = userId;
++            return Task.FromResult(status);
++        }
++    }
++}
+diff --git a/tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs b/tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs
+index 9bd6fc3..182f5ec 100644
+--- a/tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs
++++ b/tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs
+@@ -42,6 +42,7 @@ public sealed class OAuthLoginFlowServiceTests
+         Assert.Equal("Bearer", result.TokenType);
+         Assert.Equal("/onboarding", result.RedirectTo);
+         Assert.False(result.User.IsOnboardingCompleted);
++        Assert.Equal(string.Empty, result.User.University);
+         Assert.Equal(user.UserId, jwt.IssuedFor);
+         Assert.Equal("member", Assert.Single(jwt.Roles!));
+     }
+@@ -55,6 +56,35 @@ public sealed class OAuthLoginFlowServiceTests
+         Assert.Equal("/discover", result.RedirectTo);
+     }
+ 
++    [Fact]
++    public async Task OAuthOnlyUser_NoLocalCredentialAndNoEmail_CanExchange()
++    {
++        var user = MakeUser();
++        user.PrimaryEmail = null;
++        user.Credential = null;
++        user.Profile!.University = "FPT University";
++
++        var response = await MakeService(new FakeUsers(user), new FakeTickets(user.UserId),
++            new FakeExternalAuth(), new FakeJwt()).ExchangeAsync("valid");
++
++        Assert.Null(response.User.Email);
++        Assert.Null(response.User.Username);
++        Assert.Equal("FPT University", response.User.University);
++        Assert.Equal("/onboarding", response.RedirectTo);
++    }
++
++    [Fact]
++    public async Task MissingProfile_CannotIssueJwt()
++    {
++        var user = MakeUser();
++        user.Profile = null;
++        var jwt = new FakeJwt();
++        await Assert.ThrowsAsync<InvalidCredentialsException>(() =>
++            MakeService(new FakeUsers(user), new FakeTickets(user.UserId),
++                new FakeExternalAuth(), jwt).ExchangeAsync("valid"));
++        Assert.Null(jwt.IssuedFor);
++    }
++
+     [Fact]
+     public async Task ReplayedTicket_IsRejected()
+     {

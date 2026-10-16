@@ -42,6 +42,7 @@ public sealed class OAuthLoginFlowServiceTests
         Assert.Equal("Bearer", result.TokenType);
         Assert.Equal("/onboarding", result.RedirectTo);
         Assert.False(result.User.IsOnboardingCompleted);
+        Assert.Equal(string.Empty, result.User.University);
         Assert.Equal(user.UserId, jwt.IssuedFor);
         Assert.Equal("member", Assert.Single(jwt.Roles!));
     }
@@ -53,6 +54,35 @@ public sealed class OAuthLoginFlowServiceTests
         var result = await MakeService(new FakeUsers(user), new FakeTickets(user.UserId),
             new FakeExternalAuth(), new FakeJwt()).ExchangeAsync("valid");
         Assert.Equal("/discover", result.RedirectTo);
+    }
+
+    [Fact]
+    public async Task OAuthOnlyUser_NoLocalCredentialAndNoEmail_CanExchange()
+    {
+        var user = MakeUser();
+        user.PrimaryEmail = null;
+        user.Credential = null;
+        user.Profile!.University = "FPT University";
+
+        var response = await MakeService(new FakeUsers(user), new FakeTickets(user.UserId),
+            new FakeExternalAuth(), new FakeJwt()).ExchangeAsync("valid");
+
+        Assert.Null(response.User.Email);
+        Assert.Null(response.User.Username);
+        Assert.Equal("FPT University", response.User.University);
+        Assert.Equal("/onboarding", response.RedirectTo);
+    }
+
+    [Fact]
+    public async Task MissingProfile_CannotIssueJwt()
+    {
+        var user = MakeUser();
+        user.Profile = null;
+        var jwt = new FakeJwt();
+        await Assert.ThrowsAsync<InvalidCredentialsException>(() =>
+            MakeService(new FakeUsers(user), new FakeTickets(user.UserId),
+                new FakeExternalAuth(), jwt).ExchangeAsync("valid"));
+        Assert.Null(jwt.IssuedFor);
     }
 
     [Fact]
