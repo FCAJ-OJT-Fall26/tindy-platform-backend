@@ -188,7 +188,10 @@ public static class ServiceCollectionExtensions
                     OnForbidden = context =>
                         WriteAuthenticationProblemAsync(context.HttpContext, StatusCodes.Status403Forbidden, "Forbidden", "You do not have permission to access this resource.", "AUTH_FORBIDDEN")
                 };
-            });
+            })
+            // OAuth is opt-in and uses a dedicated temporary cookie.
+            // The default authentication scheme stays JWT Bearer.
+            .AddTindyExternalOAuth(configuration);
 
         // ===================================
         // 6. AUTHORIZATION
@@ -209,17 +212,29 @@ public static class ServiceCollectionExtensions
             // explicitly decorated with [AllowAnonymous] or an exception policy.
             options.FallbackPolicy = completedOnboardingPolicy;
 
-            // Limited access for /me, onboarding and logout.
-            options.AddPolicy(OnboardingPolicies.AuthenticatedOnly, new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme).RequireAuthenticatedUser().Build());
+            // OAuth-only users can access /me, onboarding, logout and connections
+            // before finishing onboarding, but suspended/deleted users cannot.
+            options.AddPolicy(OnboardingPolicies.AuthenticatedOnly,
+                new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme)
+                    .RequireAuthenticatedUser()
+                    .AddRequirements(new ActiveAccountRequirement())
+                    .Build());
         });
 
         services.AddScoped<IAuthorizationHandler, OnboardingCompletedHandler>();
+        services.AddScoped<IAuthorizationHandler, ActiveAccountHandler>();
         services.AddSingleton<IAuthorizationMiddlewareResultHandler, OnboardingAuthorizationResultHandler>();
 
         // ===================================
         // AUTHENTICATION APPLICATION SERVICE
         // ===================================
         services.AddScoped<IAuthService, AuthService>();
+
+        // External identity business logic (STEP 03, no OAuth endpoints yet)
+        services.AddScoped<IExternalAuthService, ExternalAuthService>();
+
+        services.AddScoped<IOAuthLoginFlowService, OAuthLoginFlowService>();
+        services.AddScoped<IAccountConnectionsService, AccountConnectionsService>();
 
         // Onboarding application service
         services.AddScoped<IOnboardingService, OnboardingService>();
@@ -249,6 +264,24 @@ public static class ServiceCollectionExtensions
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
+
+            // Limit start/challenge redirects as well as ticket-exchange attempts.
+            options.AddPolicy("oauth-start", context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 20, Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0, AutoReplenishment = true
+                }));
+
+            // OAuth ticket exchange: rate-limit invalid/replayed ticket attempts.
+            options.AddPolicy("oauth-exchange", context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10, Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0, AutoReplenishment = true
+                }));
 
             // ===================================
             // 2. CUSTOM 429 ERROR RESPONSE

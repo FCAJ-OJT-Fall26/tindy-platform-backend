@@ -1,6 +1,6 @@
 namespace Tindy.Application.DTOs.Onboarding;
 
-public sealed record CurrentUserResponse(Guid UserId, string? Username, string DisplayName, string? University, string Email, string Status, IReadOnlyCollection<string> Roles, bool IsOnboardingCompleted);
+public sealed record CurrentUserResponse(Guid UserId, string? Username, string DisplayName, string? University, string? Email, string Status, IReadOnlyCollection<string> Roles, bool IsOnboardingCompleted);
 
 public sealed record OnboardingDraftResponse(int TotalSteps, IReadOnlyList<int> CompletedSteps, int CurrentStep, bool IsOnboardingCompleted, IReadOnlyDictionary<string, object> StepData);
 

@@ -20,7 +20,9 @@ public sealed class OnboardingService : IOnboardingService
     {
         var user = await GetActiveUserAsync(userId, ct);
         var profile = RequireProfile(user);
-        var credential = user.Credential ?? throw new InvalidOperationException("User credential was not found.");
+        // OAuth-only users intentionally do not have Local credentials.
+        // Fallback supports pre-migration Local rows during gradual rollout.
+        var contactEmail = user.PrimaryEmail ?? user.Credential?.Email;
 
         var roles = user.UserRoles
             .Select(x => x.Role.RoleName)
@@ -28,7 +30,7 @@ public sealed class OnboardingService : IOnboardingService
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
 
-        return new CurrentUserResponse(user.UserId, user.Username, profile.DisplayName, profile.University, credential.Email, user.Status, roles, user.IsOnboardingCompleted);
+        return new CurrentUserResponse(user.UserId, user.Username, profile.DisplayName, profile.University, contactEmail, user.Status, roles, user.IsOnboardingCompleted);
     }
 
     // ===================================

@@ -82,6 +82,12 @@ public sealed class AuthService : IAuthService
             Username = null,
             UsernameNormalized = null,
 
+            // Local email is the initial private contact email.
+            // Local registration does not verify ownership yet.
+            PrimaryEmail = email,
+            PrimaryEmailNormalized = emailNormalized,
+            PrimaryEmailVerifiedAt = null,
+
             Status = "active",
             IsOnboardingCompleted = false,
 
