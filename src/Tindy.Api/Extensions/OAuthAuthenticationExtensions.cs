@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using System.Net.Http.Headers;
 using System.Security.Claims;
@@ -33,6 +34,12 @@ public static class OAuthAuthenticationExtensions
         var gitHubClientSecret = RequireSecret(configuration, "OAuth:GitHub:ClientSecret");
 
         ValidateFrontendOriginAllowlist(configuration);
+
+        // The third-party GitHub handler uses a category outside Microsoft.AspNetCore.
+        // Its inherited remote-failure Information log can contain provider response
+        // bodies before OnRemoteFailure sanitizes the HTTP response.
+        builder.Services.AddLogging(logging =>
+            logging.AddFilter("AspNet.Security.OAuth.GitHub", LogLevel.Warning));
 
         return builder
             // Only used to transfer an authenticated external principal after the
@@ -171,11 +178,16 @@ public static class OAuthAuthenticationExtensions
         context.Response.StatusCode = StatusCodes.Status400BadRequest;
         context.Response.Headers["Cache-Control"] = "no-store";
         context.Response.Headers["Referrer-Policy"] = "no-referrer";
-        return context.Response.WriteAsJsonAsync(new
+        var problem = new ProblemDetails
         {
-            success = false,
-            error_code = "OAUTH_HANDSHAKE_FAILED",
-            message = "External sign-in was cancelled or could not be completed."
-        });
+            Status = StatusCodes.Status400BadRequest,
+            Title = "Bad Request",
+            Detail = "External sign-in was cancelled or could not be completed.",
+            Instance = context.Request.Path
+        };
+        problem.Extensions["error_code"] = "OAUTH_HANDSHAKE_FAILED";
+        return context.Response.WriteAsJsonAsync(problem,
+            options: null, contentType: "application/problem+json",
+            cancellationToken: context.HttpContext.RequestAborted);
     }
 }

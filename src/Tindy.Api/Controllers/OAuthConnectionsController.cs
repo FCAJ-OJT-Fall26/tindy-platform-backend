@@ -36,7 +36,7 @@ public sealed class OAuthConnectionsController : ControllerBase
     {
         NoCache();
         var data = await _connections.GetAsync(CurrentUserId(), cancellationToken);
-        return Ok(new { success = true, data });
+        return Ok(new { success = true, message = "Account connections retrieved successfully.", data });
     }
 
     [HttpPost("{provider}/start")]
@@ -46,12 +46,12 @@ public sealed class OAuthConnectionsController : ControllerBase
     {
         NoCache();
         if (!Enabled()) return Unavailable();
-        if (!TryProvider(provider, out var normalized)) return BadRequest(new { success = false, message = "Unsupported provider." });
+        if (!TryProvider(provider, out var normalized)) return UnsupportedProvider();
         var startToken = await _connections.BeginAsync(CurrentUserId(), normalized, cancellationToken);
         var url = Url.ActionLink(nameof(LinkChallenge), "OAuthConnections",
             new { provider = normalized.ToLowerInvariant(), request = startToken });
         if (url is null) throw new InvalidOperationException("Cannot construct OAuth linking URL.");
-        return Ok(new { success = true, data = new { authorization_url = url } });
+        return Ok(new { success = true, message = "Account linking authorization is ready.", data = new { authorization_url = url } });
     }
 
     // Browser navigation cannot carry JWT Authorization header. This one-time
@@ -64,10 +64,14 @@ public sealed class OAuthConnectionsController : ControllerBase
     {
         NoCache();
         if (!Enabled()) return Unavailable();
-        if (!TryProvider(provider, out var normalized)) return BadRequest(new { success = false, message = "Unsupported provider." });
+        if (!TryProvider(provider, out var normalized)) return UnsupportedProvider();
         if (await _schemes.GetSchemeAsync(normalized) is null) return Unavailable();
         var transactionId = await _connections.BeginChallengeAsync(request, normalized, cancellationToken);
-        if (!transactionId.HasValue) return BadRequest(new { success = false, message = "Link request expired or already used." });
+        if (!transactionId.HasValue) return Problem(
+            statusCode: StatusCodes.Status400BadRequest,
+            title: "Bad Request",
+            detail: "Link request expired or already used.",
+            extensions: new Dictionary<string, object?> { ["error_code"] = "OAUTH_LINK_REQUEST_INVALID" });
         await HttpContext.SignOutAsync(OAuthAuthenticationExtensions.ExternalCookieScheme);
         var properties = new AuthenticationProperties
         {
@@ -124,9 +128,9 @@ public sealed class OAuthConnectionsController : ControllerBase
     public async Task<IActionResult> Unlink(string provider, CancellationToken cancellationToken)
     {
         NoCache();
-        if (!TryProvider(provider, out var normalized)) return BadRequest(new { success = false, message = "Unsupported provider." });
+        if (!TryProvider(provider, out var normalized)) return UnsupportedProvider();
         await _connections.UnlinkAsync(CurrentUserId(), normalized, cancellationToken);
-        return Ok(new { success = true, message = "Provider disconnected." });
+        return Ok(new { success = true, message = "Provider disconnected.", data = (object?)null });
     }
 
     private Guid CurrentUserId()
@@ -137,8 +141,17 @@ public sealed class OAuthConnectionsController : ControllerBase
     }
 
     private bool Enabled() => _configuration.GetValue<bool>("OAuth:Enabled");
-    private ObjectResult Unavailable() => StatusCode(StatusCodes.Status503ServiceUnavailable,
-        new { success = false, message = "OAuth is unavailable." });
+    private ObjectResult Unavailable() => Problem(
+        statusCode: StatusCodes.Status503ServiceUnavailable,
+        title: "Service Unavailable",
+        detail: "OAuth is unavailable.",
+        extensions: new Dictionary<string, object?> { ["error_code"] = "OAUTH_UNAVAILABLE" });
+
+    private ObjectResult UnsupportedProvider() => Problem(
+        statusCode: StatusCodes.Status400BadRequest,
+        title: "Bad Request",
+        detail: "Unsupported provider.",
+        extensions: new Dictionary<string, object?> { ["error_code"] = "OAUTH_PROVIDER_UNSUPPORTED" });
 
     private static bool TryProvider(string value, out string provider)
     {

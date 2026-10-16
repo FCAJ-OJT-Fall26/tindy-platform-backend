@@ -41,14 +41,16 @@ public sealed class ExternalAuthServiceTests
         Assert.Equal(1, repository.SaveCount);
     }
 
-    [Fact]
-    public async Task SecondSignIn_ResolvesSameUserIdWithoutDuplicate()
+    [Theory]
+    [InlineData("Google", "google-repeat")]
+    [InlineData("GitHub", "github-repeat")]
+    public async Task SecondSignIn_ResolvesSameUserIdWithoutDuplicate(string provider, string providerId)
     {
         var repository = new InMemoryExternalAuthRepository();
         var service = new ExternalAuthService(repository);
-        var initial = await service.ResolveSignInAsync(Identity());
+        var initial = await service.ResolveSignInAsync(Identity(provider, providerId));
 
-        var repeated = await service.ResolveSignInAsync(Identity(email: "changed@example.com"));
+        var repeated = await service.ResolveSignInAsync(Identity(provider, providerId, email: "changed@example.com"));
 
         Assert.Equal(initial.UserId, repeated.UserId);
         Assert.False(repeated.IsNewUser);
@@ -67,7 +69,12 @@ public sealed class ExternalAuthServiceTests
         Assert.True(result.IsNewUser);
         Assert.Null(result.PrimaryEmail);
         Assert.Equal("Tindy Member", result.DisplayName);
-        Assert.Null(Assert.Single(repository.Users).PrimaryEmailNormalized);
+        var user = Assert.Single(repository.Users);
+        Assert.Null(user.PrimaryEmailNormalized);
+        Assert.Null(user.Credential);
+        Assert.NotNull(user.Profile);
+        Assert.Single(user.UserRoles);
+        Assert.Equal(RoleNames.Member, Assert.Single(result.Roles));
         Assert.Equal("GitHub", Assert.Single(repository.Users[0].ExternalAuthAccounts).Provider);
     }
 
@@ -109,6 +116,7 @@ public sealed class ExternalAuthServiceTests
 
     [Theory]
     [InlineData("disabled", false)]
+    [InlineData("suspended", false)]
     [InlineData("active", true)]
     public async Task ExistingSuspendedOrDeletedUser_CannotSignIn(string status, bool deleted)
     {
@@ -161,6 +169,63 @@ public sealed class ExternalAuthServiceTests
         Assert.Equal(2, repository.SaveCount);
         Assert.Single(repository.Users);
         Assert.Equal(2, repository.Users[0].ExternalAuthAccounts.Count);
+    }
+
+    [Theory]
+    [InlineData("Google", "google-local-link")]
+    [InlineData("GitHub", "github-local-link")]
+    public async Task LocalUser_CanExplicitlyLinkProvider_WithoutChangingPasswordOrEmail(
+        string provider, string providerId)
+    {
+        var repository = new InMemoryExternalAuthRepository();
+        var userId = Guid.NewGuid();
+        var credential = new UserCredential
+        {
+            UserCredentialId = Guid.NewGuid(), UserId = userId,
+            Email = "local@example.com", EmailNormalized = "local@example.com",
+            PasswordHash = "existing-local-password-hash"
+        };
+        var local = new User
+        {
+            UserId = userId, Status = "active", PrimaryEmail = "local@example.com",
+            PrimaryEmailNormalized = "local@example.com", Credential = credential,
+            Profile = new UserProfile { UserId = userId, DisplayName = "Local User" },
+            UserRoles = [new UserRole { UserId = userId, Role = repository.Role! }]
+        };
+        repository.Users.Add(local);
+
+        // Explicit linking permits the same email; it never replaces the local login.
+        var linked = await new ExternalAuthService(repository).LinkAsync(userId,
+            Identity(provider, providerId, "local@example.com"));
+
+        Assert.True(linked);
+        Assert.Same(credential, local.Credential);
+        Assert.Equal("local@example.com", local.PrimaryEmail);
+        var account = Assert.Single(local.ExternalAuthAccounts);
+        Assert.Equal(userId, account.UserId);
+        Assert.Equal(provider, account.Provider);
+        Assert.Equal(providerId, account.ProviderUserId);
+        Assert.Single(repository.Users);
+        Assert.Equal(1, repository.SaveCount);
+    }
+
+    [Theory]
+    [InlineData("suspended", false)]
+    [InlineData("active", true)]
+    public async Task SuspendedOrDeletedUser_CannotLinkAnotherProvider(string status, bool deleted)
+    {
+        var repository = new InMemoryExternalAuthRepository();
+        var service = new ExternalAuthService(repository);
+        var original = await service.ResolveSignInAsync(Identity());
+        var user = Assert.Single(repository.Users);
+        user.Status = status;
+        user.DeletedAt = deleted ? DateTime.UtcNow : null;
+
+        await Assert.ThrowsAsync<InvalidCredentialsException>(() => service.LinkAsync(original.UserId,
+            Identity("GitHub", "new-identity", null, false)));
+
+        Assert.Single(user.ExternalAuthAccounts);
+        Assert.Equal(1, repository.SaveCount);
     }
 
     [Fact]

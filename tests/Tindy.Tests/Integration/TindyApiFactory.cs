@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
@@ -33,21 +34,24 @@ public sealed class TindyApiFactory : WebApplicationFactory<Program>, IAsyncLife
     {
         builder.UseEnvironment("Development");
 
-        builder.ConfigureAppConfiguration((_, config) =>
-        {
-            config.AddInMemoryCollection(new Dictionary<string, string?>
+        var settings = new Dictionary<string, string?>
             {
                 ["Jwt:Issuer"] = "Tindy.Api",
                 ["Jwt:Audience"] = "Tindy.Client",
                 ["Jwt:AccessTokenLifetimeMinutes"] = "60",
                 ["Jwt:ClockSkewSeconds"] = "0",
                 ["Jwt:SigningKey"] = _jwtKey,
-                ["ConnectionStrings:DefaultConnection"] = _postgres.GetConnectionString()
-            });
-        });
+                ["ConnectionStrings:DefaultConnection"] = _postgres.GetConnectionString(),
+                ["OAuth:Enabled"] = "false"
+            };
+        // Authentication captures its settings during Program startup. Supply them
+        // before startup as well as through the runtime configuration provider.
+        foreach (var (key, value) in settings) builder.UseSetting(key, value);
+        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(settings));
 
         builder.ConfigureTestServices(services =>
         {
+            services.AddDataProtection().UseEphemeralDataProtectionProvider();
             services.RemoveAll<DbContextOptions<TindyDbContext>>();
             services.RemoveAll<TindyDbContext>();
             services.AddDbContext<TindyDbContext>(options => options.UseNpgsql(_postgres.GetConnectionString()));

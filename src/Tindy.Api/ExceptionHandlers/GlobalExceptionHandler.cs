@@ -37,7 +37,10 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         // 2. Logging
         if (statusCode >= 500)
         {
-            _logger.LogError(exception, "Unhandled exception occurred. TraceId: {TraceId}", httpContext.TraceIdentifier);
+            // Provider/HTTP/database exceptions can include credentials or token payloads.
+            // Keep an operational identifier without serializing exception text or inner exceptions.
+            _logger.LogError("Unhandled exception occurred. Exception: {ExceptionType}, TraceId: {TraceId}",
+                exception.GetType().Name, httpContext.TraceIdentifier);
         }
         else
         {
@@ -108,7 +111,8 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         httpContext.Response.ContentType =
             "application/problem+json";
 
-        await httpContext.Response.WriteAsJsonAsync(problemDetails, cancellationToken);
+        await httpContext.Response.WriteAsJsonAsync(problemDetails,
+            options: null, contentType: "application/problem+json", cancellationToken: cancellationToken);
 
         // 6. Exception was handled
         return true;

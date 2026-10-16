@@ -45,8 +45,7 @@ public sealed class OAuthController : ControllerBase
         if (!_configuration.GetValue<bool>("OAuth:Enabled") ||
             await _schemes.GetSchemeAsync(provider) is null)
         {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable,
-                new { success = false, message = "OAuth sign-in is unavailable." });
+            return Unavailable();
         }
 
         // Prevent a prior remote principal from being mistaken for this new challenge.
@@ -68,8 +67,7 @@ public sealed class OAuthController : ControllerBase
     public async Task<IActionResult> Complete(CancellationToken cancellationToken)
     {
         if (!_configuration.GetValue<bool>("OAuth:Enabled"))
-            return StatusCode(StatusCodes.Status503ServiceUnavailable,
-                new { success = false, message = "OAuth sign-in is unavailable." });
+            return Unavailable();
 
         Response.Headers.CacheControl = "no-store";
         Response.Headers["Referrer-Policy"] = "no-referrer";
@@ -127,8 +125,7 @@ public sealed class OAuthController : ControllerBase
         Response.Headers.CacheControl = "no-store";
         Response.Headers["Pragma"] = "no-cache";
         if (!_configuration.GetValue<bool>("OAuth:Enabled"))
-            return StatusCode(StatusCodes.Status503ServiceUnavailable,
-                new { success = false, message = "OAuth sign-in is unavailable." });
+            return Unavailable();
 
         var result = await _flow.ExchangeAsync(request.Ticket, cancellationToken);
         return Ok(new { success = true, message = "Logged in successfully.", data = result });
@@ -136,6 +133,12 @@ public sealed class OAuthController : ControllerBase
 
     private IActionResult SafeFrontendError(string code) =>
         Redirect(FrontendCallbackBase() + "?error=" + Uri.EscapeDataString(code));
+
+    private ObjectResult Unavailable() => Problem(
+        statusCode: StatusCodes.Status503ServiceUnavailable,
+        title: "Service Unavailable",
+        detail: "OAuth sign-in is unavailable.",
+        extensions: new Dictionary<string, object?> { ["error_code"] = "OAUTH_UNAVAILABLE" });
 
     private string FrontendCallbackBase()
     {

@@ -106,6 +106,39 @@ public sealed class OAuthLoginFlowServiceTests
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t\r\n")]
+    public async Task BlankTicket_IsRejectedBeforeAccessingStore(string ticket)
+    {
+        var user = MakeUser();
+        var tickets = new FakeTickets(user.UserId);
+        var jwt = new FakeJwt();
+        var service = MakeService(new FakeUsers(user), tickets, new FakeExternalAuth(), jwt);
+
+        await Assert.ThrowsAsync<InvalidCredentialsException>(() => service.ExchangeAsync(ticket));
+
+        Assert.Equal(0, tickets.ConsumeCount);
+        Assert.Null(jwt.IssuedFor);
+    }
+
+    [Fact]
+    public async Task TicketRejectedForInactiveUser_RemainsSpentAfterAccountIsReactivated()
+    {
+        var user = MakeUser(status: "suspended");
+        var tickets = new FakeTickets(user.UserId);
+        var jwt = new FakeJwt();
+        var service = MakeService(new FakeUsers(user), tickets, new FakeExternalAuth(), jwt);
+
+        await Assert.ThrowsAsync<InvalidCredentialsException>(() => service.ExchangeAsync("valid"));
+        user.Status = "active";
+        await Assert.ThrowsAsync<InvalidCredentialsException>(() => service.ExchangeAsync("valid"));
+
+        Assert.Equal(2, tickets.ConsumeCount);
+        Assert.Null(jwt.IssuedFor);
+    }
+
+    [Theory]
     [InlineData("suspended", false)]
     [InlineData("active", true)]
     public async Task DisabledOrDeletedUser_CannotExchange(string status, bool deleted)
@@ -147,6 +180,7 @@ public sealed class OAuthLoginFlowServiceTests
     {
         private Guid? _remaining = firstTicket;
         public Guid? IssuedFor { get; private set; }
+        public int ConsumeCount { get; private set; }
         public Task<string> IssueAsync(Guid userId, CancellationToken token = default)
         {
             IssuedFor = userId;
@@ -154,6 +188,7 @@ public sealed class OAuthLoginFlowServiceTests
         }
         public Task<Guid?> ConsumeAsync(string ticket, CancellationToken token = default)
         {
+            ConsumeCount++;
             var current = _remaining;
             _remaining = null;
             return Task.FromResult(current);
