@@ -598,6 +598,35 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.ToTable("user_skills", (string)null);
                 });
 
+            modelBuilder.Entity("Tindy.Infrastructure.Persistence.Models.OAuthLoginTicket", b =>
+                {
+                    b.Property<string>("TicketHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("ticket_hash");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("TicketHash");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("ix_oauth_login_tickets_expires_at");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("oauth_login_tickets", (string)null);
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.ExternalAuthAccount", b =>
                 {
                     b.HasOne("Tindy.Application.Entities.User", "User")
@@ -723,6 +752,15 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("Skill");
 
                     b.Navigation("UserProfile");
+                });
+
+            modelBuilder.Entity("Tindy.Infrastructure.Persistence.Models.OAuthLoginTicket", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.Permission", b =>

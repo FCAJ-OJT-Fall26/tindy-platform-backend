@@ -1,3 +1,4 @@
+using Tindy.Infrastructure.Persistence.Models;
 using Microsoft.EntityFrameworkCore;
 using Tindy.Application.Entities;
 
@@ -32,6 +33,8 @@ public class TindyDbContext : DbContext
 
     public DbSet<ExternalAuthAccount> ExternalAuthAccounts
         => Set<ExternalAuthAccount>();
+
+    public DbSet<OAuthLoginTicket> OAuthLoginTickets => Set<OAuthLoginTicket>();
 
 
     public DbSet<ProfessionalRole> ProfessionalRoles

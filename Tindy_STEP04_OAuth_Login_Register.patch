@@ -1,0 +1,965 @@
+diff --git a/docs/guide/OAUTH_STEP04_LOGIN_REGISTER.md b/docs/guide/OAUTH_STEP04_LOGIN_REGISTER.md
+new file mode 100644
+index 0000000..0950013
+--- /dev/null
++++ b/docs/guide/OAUTH_STEP04_LOGIN_REGISTER.md
+@@ -0,0 +1,178 @@
++# Tindy — STEP 04: Google / GitHub OAuth Login & Register
++
++**Mục tiêu:** Kết nối các OAuth providers đã cấu hình ở STEP 02 với `ExternalAuthService` (STEP 03), đăng nhập/đăng ký OAuth-only, chuyển tiếp phiên đăng nhập bằng one-time ticket, sau đó phát JWT Bearer Tindy qua endpoint exchange.
++
++> STEP 04 **không triển khai** Account Linking (STEP 05) hay giao diện callback (STEP 07). Không cần Docker hay integration tests ở giai đoạn này theo yêu cầu; tuy nhiên trước khi merge production vẫn phải chạy test an toàn.
++
++## A. Các quyết định kiến trúc cần xác nhận
++
++1. **Vẫn dùng JWT Bearer**, không chuyển toàn bộ hệ thống sang cookie authentication. Cookie `Tindy.External` chỉ sống trong khoảng thời gian thực hiện OAuth handshake.
++2. **Dùng PostgreSQL cho one-time ticket** (hỗ trợ nhiều ECS/Fargate instances). Cần migration `Auth_CreateOAuthLoginTickets` vì thêm entity/table `oauth_login_tickets`.
++3. Ticket có **32 byte ngẫu nhiên**, **TTL 90 giây**, lưu **SHA-256 hash** phía server; bước exchange tiêu thụ ticket bằng PostgreSQL `DELETE` có điều kiện, đảm bảo một request thắng.
++4. Redirect frontend cố định bằng `OAuth:Frontend:AllowedOrigins:0` + `/auth/oauth/callback#ticket=...`, không lấy `returnUrl` do client gửi. Fragment `#ticket=` không gửi đến frontend server trong HTTP request, nhưng vẫn cần frontend xóa khỏi history ngay khi xử lý (STEP 07).
++5. Email OAuth dùng làm `PrimaryEmail` **chỉ khi provider xác nhận verified**. Google đọc `verified_email`/`email_verified`; GitHub sử dụng API `/user/emails` với scope `user:email` để kiểm tra `verified`. Thiếu email verified: OAuth-only vẫn có thể đăng ký với `PrimaryEmail = null`.
++6. Nếu provider identity chưa liên kết mà email verified trùng Local/Tindy User: **conflict**, yêu cầu linking thủ công ở STEP 05. Không tự động merge.
++7. Callback ngoài middleware: `/signin-google`, `/signin-github` **giữ nguyên**. Controller chỉ xử lý `/api/auth/oauth/complete` sau callback middleware.
++8. Frontend hiện chưa có `/auth/oauth/callback`: khi test thủ công cần **copy ticket trong fragment từ browser URL** hoặc tạo trang test tạm ở frontend (không thuộc STEP 04). Không có JWT hoặc access token Google/GitHub trong redirect URL.
++
++## B. Các file thay đổi
++
++| Layer | Đường dẫn (tương đối root) | Lý do |
++|---|---|---|
++| API | `src/Tindy.Api/Controllers/OAuthController.cs` | challenge, xử lý remote auth result, ticket exchange |
++| API | `src/Tindy.Api/Extensions/OAuthAuthenticationExtensions.cs` | map Google verification / gọi GitHub verified emails bằng server-to-server |
++| API | `src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs` | DI OAuth flow service và rate-limit exchange |
++| Application | `src/Tindy.Application/Interfaces/Repositories/IOAuthLoginTicketStore.cs` | contract lưu/tiêu thụ ticket |
++| Application | `src/Tindy.Application/Interfaces/Services/IOAuthLoginFlowService.cs` | contract nghiệp vụ exchange |
++| Application | `src/Tindy.Application/Services/OAuthLoginFlowService.cs` | phối hợp ExternalAuthService, ticket, JWT, trạng thái User |
++| Application | `src/Tindy.Application/Models/Authentication/OAuthExchangeResponse.cs` | response cùng kiểu JWT Login của Tindy, email nullable |
++| Application | `src/Tindy.Application/DTOs/Authentication/OAuthExchangeRequest.cs` | validate ticket request |
++| Infrastructure | `src/Tindy.Infrastructure/Persistence/Models/OAuthLoginTicket.cs` | transient persistent identity for ticket hash |
++| Infrastructure | `src/Tindy.Infrastructure/Persistence/Configurations/OAuthLoginTicketConfiguration.cs` | EF mapping |
++| Infrastructure | `src/Tindy.Infrastructure/Repositories/OAuthLoginTicketStore.cs` | PostgreSQL atomic one-time ticket |
++| Infrastructure | `src/Tindy.Infrastructure/Persistence/TindyDbContext.cs` | thêm DbSet ticket |
++| Infrastructure | `src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs` | đăng ký ticket store |
++| Unit tests | `tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs` | kiểm tra flow không cần Docker |
++
++Không sửa `AuthController`, Local Register/Login/Logout, `JwtTokenService`, JWT Bearer scheme, các Authorization policies hoặc schema User/Credential. **Không sửa migrations cũ đã được apply/shared**.
++
++## C. Áp dụng patch tại PowerShell 7
++
++```powershell
++cd "D:\FPT\Semester 6\OJT\aws\tindy-platform\tindy-backend-platform"
++git status
++git -c core.whitespace=cr-at-eol apply --check .\Tindy_STEP04_OAuth_Login_Register.patch
++git -c core.whitespace=cr-at-eol apply .\Tindy_STEP04_OAuth_Login_Register.patch
++dotnet build .\Tindy.slnx
++```
++
++Nếu `git apply --check` có conflict, **dừng lại và gửi output**; STEP 04 được dựng trên baseline STEP 01 + STEP 02 + STEP 03 đã áp dụng, không nên `--force` hoặc ghi đè file.
++
++## D. Tạo migration mới (BẮT BUỘC trước khi chạy endpoint OAuth)
++
++Sau khi build thành công, tạo migration bằng EF Core trên source thật (để EF Core tự đồng bộ Designer/Snapshot và các migrations riêng có từ team):
++
++```powershell
++dotnet ef migrations add Auth_CreateOAuthLoginTickets `
++    --project .\src\Tindy.Infrastructure\Tindy.Infrastructure.csproj `
++    --startup-project .\src\Tindy.Api\Tindy.Api.csproj `
++    --context TindyDbContext `
++    --output-dir Persistence/Migrations `
++    -- --environment Development
++```
++
++Xem `Up()` phải tạo `oauth_login_tickets` có:
++
++- `ticket_hash` (varchar(64), PK), **không lưu raw ticket**.
++- `user_id` (uuid, FK tới `users`), `created_at`, `expires_at` (timestamptz).
++- Index `ix_oauth_login_tickets_expires_at`.
++
++Xem `Down()` drop đúng bảng/index. **Không chạy `database drop` vì STEP 04 không cần reset DB.** Sau khi review migration:
++
++```powershell
++dotnet ef database update `
++    --project .\src\Tindy.Infrastructure\Tindy.Infrastructure.csproj `
++    --startup-project .\src\Tindy.Api\Tindy.Api.csproj `
++    --context TindyDbContext `
++    -- --environment Development
++```
++
++Trong PostgreSQL:
++
++```sql
++\d oauth_login_tickets
++SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY "MigrationId";
++```
++
++> Vì bản ZIP backend được tải trước khi bạn tự chạy migrations STEP 01–03, patch này **không chứa migration được scaffold sẵn**. Để tránh làm hỏng snapshot thực tế trên máy bạn, nên tạo migration bằng câu lệnh ở trên. Gửi lại `Up()` và `Down()` trước khi update nếu muốn mình review.
++
++## E. API contract và flow
++
++| Method | Endpoint | Mô tả |
++|---|---|---|
++| GET | `/api/auth/google` | Bắt đầu Challenge Google |
++| GET | `/api/auth/github` | Bắt đầu Challenge GitHub |
++| GET | `/signin-google` | OAuth middleware callback, không phải controller |
++| GET | `/signin-github` | OAuth middleware callback, không phải controller |
++| GET | `/api/auth/oauth/complete` | Nhận external temporary cookie, resolve User, redirect với ticket |
++| POST | `/api/auth/oauth/exchange` | Consume ticket, kiểm tra User mới nhất, trả JWT Tindy |
++
++Ví dụ Request exchange (không dùng ticket đã hết hạn):
++
++```http
++POST https://localhost:7190/api/auth/oauth/exchange
++Content-Type: application/json
++
++{"ticket":"<ticket-from-url-fragment>"}
++```
++
++Response mẫu:
++
++```json
++{
++  "success": true,
++  "message": "Logged in successfully.",
++  "data": {
++    "access_token": "<tindy-jwt>",
++    "token_type": "Bearer",
++    "expires_in": 3600,
++    "user": {
++      "user_id": "<uuid>",
++      "display_name": "Example",
++      "email": null,
++      "username": null,
++      "status": "active",
++      "roles": ["member"],
++      "is_onboarding_completed": false
++    },
++    "redirect_to": "/onboarding"
++  }
++}
++```
++
++Local JWT và OAuth JWT đều do `IJwtTokenService` tạo ra.
++
++## F. Manual test không cần Docker
++
++1. Kiểm tra `OAuth:Enabled=true`, Client ID, Client Secret đã đặt bằng User Secrets; callback GitHub `https://localhost:7190/signin-github` và Google `https://localhost:7190/signin-google` khớp chính xác với provider settings.
++2. Trong Development `OAuth:Frontend:AllowedOrigins:0 = http://localhost:8443` (hoặc đúng Vite origin trên máy); backend HTTPS chạy ở 7190, `https://localhost:7190/api/auth/github` mở trong **browser**.
++3. Sau khi login provider, backend redirect về `http://localhost:8443/auth/oauth/callback#ticket=...` (frontend chưa có trang này thì có thể báo 404, song URL trong address bar vẫn có ticket). Copy ticket **riêng**, không gửi lên Git hoặc chat, không chia sẻ ảnh có ticket.
++4. Postman: `POST /api/auth/oauth/exchange` body JSON `{"ticket":"..."}` → kỳ vọng 200 và `data.access_token`.
++5. Gọi exchange lại cùng ticket → 401. Chờ 90 giây rồi đổi ticket chưa dùng → 401.
++6. Login cùng GitHub ID lần 2 → nhận cùng `user_id`; User OAuth-only không có record `user_credentials`.
++7. User lần đầu nhận `redirect_to: "/onboarding"`; đã hoàn thành onboarding nhận `"/discover"`.
++8. Local Register/Login và JWT onboarding vẫn hoạt động. Tài khoản disabled/deleted không exchange được.
++9. Khi email verified trùng tài khoản khác chưa link → frontend nhận `?error=account_link_required`, không tự động merge.
++
++Không paste ticket/JWT/client secret vào ảnh hoặc logs gửi người khác. Ticket nằm trong fragment chỉ 90 giây, nhưng vẫn là credential trong thời gian đó.
++
++## G. Unit tests không cần Docker
++
++```powershell
++dotnet test .\tests\Tindy.Tests\Tindy.Tests.csproj `
++    --filter "FullyQualifiedName~OAuthLoginFlowServiceTests"
++```
++
++Test trên kiểm tra phát JWT sau tiêu thụ ticket, replay, invalid/expired, status user, roles, onboarding, BeginTicket. **Chưa thay thế** được integration test kiểm tra PostgreSQL atomic deletion với 2 requests đồng thời; hoãn các bài test đó sang STEP 08 như đã thống nhất.
++
++## H. Tiêu chí DONE / Commit
++
++- [ ] `dotnet build .\Tindy.slnx` thành công.
++- [ ] Migration mới chính xác và áp dụng thành công lên **Development** DB.
++- [ ] Google/GitHub browser handshake thành công với `OAuth:Enabled=true`.
++- [ ] OAuth Register tạo `User + UserProfile + UserRole + ExternalAuthAccount`, **không** tạo `UserCredential`.
++- [ ] OAuth Login lần 2 ánh xạ cùng `UserId`.
++- [ ] Ticket chỉ dùng 1 lần, quá hạn bị từ chối, JWT không đi qua URL.
++- [ ] 401/409/conflict được xử lý an toàn; missing GitHub email không gây lỗi.
++- [ ] Local Register/Login/JWT/Onboarding không regress (manual smoke test).
++- [ ] Review `git -c core.whitespace=cr-at-eol diff --check`, `git status`, không commit `.patch`, secret, output SQL debug.
++
++```powershell
++git status
++git -c core.whitespace=cr-at-eol diff --check
++git add src/ tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs docs/guide/OAUTH_STEP04_LOGIN_REGISTER.md
++git diff --cached --stat
++git commit -m "feat(auth): implement oauth login registration and ticket exchange"
++```
++
++Chưa làm STEP 05 (link/unlink) hoặc STEP 07 (frontend). **Bổ sung chia sẻ DataProtection key ring** khi deploy nhiều ECS/Fargate instances để OAuth correlation và temporary external cookie hoạt động khi redirect qua instance khác; PostgreSQL chia sẻ ticket **không tự giải quyết vấn đề DataProtection**.
+diff --git a/src/Tindy.Api/Controllers/OAuthController.cs b/src/Tindy.Api/Controllers/OAuthController.cs
+new file mode 100644
+index 0000000..cbb73ab
+--- /dev/null
++++ b/src/Tindy.Api/Controllers/OAuthController.cs
+@@ -0,0 +1,177 @@
++using System.Security.Claims;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Mvc;
++using Microsoft.AspNetCore.RateLimiting;
++using Tindy.Api.Extensions;
++using Tindy.Application.Constants;
++using Tindy.Application.DTOs.Authentication;
++using Tindy.Application.Exceptions;
++using Tindy.Application.Interfaces.Services;
++using Tindy.Application.Models.Authentication;
++
++namespace Tindy.Api.Controllers;
++
++/// <summary>
++/// STEP 04: server-side OAuth code flow, short-lived one-time ticket, JWT exchange.
++/// Middleware owns /signin-google and /signin-github; these are NOT MVC routes.
++/// </summary>
++[ApiController]
++[Route("api/auth")]
++[AllowAnonymous]
++public sealed class OAuthController : ControllerBase
++{
++    private readonly IOAuthLoginFlowService _flow;
++    private readonly IConfiguration _configuration;
++    private readonly IAuthenticationSchemeProvider _schemes;
++
++    public OAuthController(IOAuthLoginFlowService flow, IConfiguration configuration,
++        IAuthenticationSchemeProvider schemes)
++    {
++        _flow = flow;
++        _configuration = configuration;
++        _schemes = schemes;
++    }
++
++    [HttpGet("google")]
++    [EnableRateLimiting("oauth-start")]
++    public Task<IActionResult> Google() => StartAsync(ExternalAuthProviders.Google);
++
++    [HttpGet("github")]
++    [EnableRateLimiting("oauth-start")]
++    public Task<IActionResult> GitHub() => StartAsync(ExternalAuthProviders.GitHub);
++
++    private async Task<IActionResult> StartAsync(string provider)
++    {
++        if (!_configuration.GetValue<bool>("OAuth:Enabled") ||
++            await _schemes.GetSchemeAsync(provider) is null)
++        {
++            return StatusCode(StatusCodes.Status503ServiceUnavailable,
++                new { success = false, message = "OAuth sign-in is unavailable." });
++        }
++
++        // Prevent a prior remote principal from being mistaken for this new challenge.
++        await HttpContext.SignOutAsync(OAuthAuthenticationExtensions.ExternalCookieScheme);
++        var properties = new AuthenticationProperties
++        {
++            RedirectUri = Url.ActionLink(nameof(Complete), "OAuth")
++                ?? "/api/auth/oauth/complete"
++        };
++        properties.Items["tindy:provider"] = provider;
++        // Correlation and state are protected by the OAuth middleware.
++        Response.Headers.CacheControl = "no-store";
++        Response.Headers["Referrer-Policy"] = "no-referrer";
++        return Challenge(properties, provider);
++    }
++
++    /// <summary>Invoked AFTER middleware consumes provider code at /signin-xxx.</summary>
++    [HttpGet("oauth/complete")]
++    public async Task<IActionResult> Complete(CancellationToken cancellationToken)
++    {
++        if (!_configuration.GetValue<bool>("OAuth:Enabled"))
++            return StatusCode(StatusCodes.Status503ServiceUnavailable,
++                new { success = false, message = "OAuth sign-in is unavailable." });
++
++        Response.Headers.CacheControl = "no-store";
++        Response.Headers["Referrer-Policy"] = "no-referrer";
++        Response.Headers["Pragma"] = "no-cache";
++        try
++        {
++            var remote = await HttpContext.AuthenticateAsync(
++                OAuthAuthenticationExtensions.ExternalCookieScheme);
++            if (!remote.Succeeded || remote.Principal is null ||
++                remote.Properties?.Items.TryGetValue("tindy:provider", out var provider) != true ||
++                (provider != ExternalAuthProviders.Google && provider != ExternalAuthProviders.GitHub))
++                return SafeFrontendError("oauth_failed");
++
++            // Never populate identity from browser input. Only validated middleware claims.
++            var principal = remote.Principal;
++            var id = principal.FindFirstValue(ClaimTypes.NameIdentifier);
++            if (string.IsNullOrWhiteSpace(id)) return SafeFrontendError("oauth_failed");
++
++            var providerEmail = principal.FindFirstValue(ClaimTypes.Email);
++            var verified = false;
++            if (provider == ExternalAuthProviders.Google)
++            {
++                verified = IsTrue(principal.FindFirstValue("tindy:google_verified_v2")) ||
++                           IsTrue(principal.FindFirstValue("tindy:google_verified_v3"));
++            }
++            else
++            {
++                var verifiedGitHub = principal.FindFirstValue("tindy:github_verified_email");
++                if (!string.IsNullOrWhiteSpace(verifiedGitHub))
++                {
++                    providerEmail = verifiedGitHub;
++                    verified = true;
++                }
++            }
++
++            var identity = new AuthenticatedExternalIdentity(provider, id,
++                principal.FindFirstValue(ClaimTypes.Name),
++                provider == ExternalAuthProviders.GitHub
++                    ? principal.FindFirstValue(ClaimTypes.Name) : null,
++                providerEmail, verified);
++
++            string ticket;
++            try
++            {
++                ticket = await _flow.BeginTicketAsync(identity, cancellationToken);
++            }
++            catch (ConflictException)
++            {
++                // Never merge by email; frontend should direct the user to sign in
++                // to their existing Tindy account before explicit linking (STEP 05).
++                return SafeFrontendError("account_link_required");
++            }
++            catch (InvalidCredentialsException)
++            {
++                return SafeFrontendError("account_unavailable");
++            }
++
++            // Fragment isn't sent to the frontend web server in an HTTP request.
++            // It must be immediately removed from browser history by STEP 07 frontend.
++            return Redirect(FrontendCallbackBase() + "#ticket=" + Uri.EscapeDataString(ticket));
++        }
++        finally
++        {
++            // Never keep a provider sign-in cookie beyond the OAuth handshake.
++            if (_configuration.GetValue<bool>("OAuth:Enabled") &&
++                await _schemes.GetSchemeAsync(OAuthAuthenticationExtensions.ExternalCookieScheme) is not null)
++                await HttpContext.SignOutAsync(OAuthAuthenticationExtensions.ExternalCookieScheme);
++        }
++    }
++
++    [HttpPost("oauth/exchange")]
++    [EnableRateLimiting("oauth-exchange")]
++    [ProducesResponseType(StatusCodes.Status200OK)]
++    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
++    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
++    public async Task<IActionResult> Exchange([FromBody] OAuthExchangeRequest request,
++        CancellationToken cancellationToken)
++    {
++        Response.Headers.CacheControl = "no-store";
++        Response.Headers["Pragma"] = "no-cache";
++        if (!_configuration.GetValue<bool>("OAuth:Enabled"))
++            return StatusCode(StatusCodes.Status503ServiceUnavailable,
++                new { success = false, message = "OAuth sign-in is unavailable." });
++
++        var result = await _flow.ExchangeAsync(request.Ticket, cancellationToken);
++        return Ok(new { success = true, message = "Logged in successfully.", data = result });
++    }
++
++    private IActionResult SafeFrontendError(string code) =>
++        Redirect(FrontendCallbackBase() + "?error=" + Uri.EscapeDataString(code));
++
++    private string FrontendCallbackBase()
++    {
++        // A fixed server-configured allowlist entry, never an arbitrary returnUrl.
++        var origins = _configuration.GetSection("OAuth:Frontend:AllowedOrigins")
++            .Get<string[]>() ?? Array.Empty<string>();
++        if (origins.Length == 0)
++            throw new InvalidOperationException("OAuth frontend allowlist is not configured.");
++        return origins[0].TrimEnd('/') + "/auth/oauth/callback";
++    }
++
++    private static bool IsTrue(string? value) =>
++        string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
++}
+diff --git a/src/Tindy.Api/Extensions/OAuthAuthenticationExtensions.cs b/src/Tindy.Api/Extensions/OAuthAuthenticationExtensions.cs
+index 1a29e8d..603d55e 100644
+--- a/src/Tindy.Api/Extensions/OAuthAuthenticationExtensions.cs
++++ b/src/Tindy.Api/Extensions/OAuthAuthenticationExtensions.cs
+@@ -1,6 +1,9 @@
+ using Microsoft.AspNetCore.Authentication;
+ using Microsoft.AspNetCore.Authentication.Cookies;
+ using Microsoft.Extensions.Configuration;
++using System.Net.Http.Headers;
++using System.Security.Claims;
++using System.Text.Json;
+ 
+ namespace Tindy.Api.Extensions;
+ 
+@@ -51,6 +54,10 @@ public static class OAuthAuthenticationExtensions
+                 options.SignInScheme = ExternalCookieScheme;
+                 options.CallbackPath = "/signin-google";
+                 options.SaveTokens = false;
++                // Google userinfo response may use either key depending on endpoint version.
++                // Never infer verification from the presence of a nonempty email.
++                options.ClaimActions.MapJsonKey("tindy:google_verified_v2", "verified_email");
++                options.ClaimActions.MapJsonKey("tindy:google_verified_v3", "email_verified");
+ 
+                 ConfigureCorrelationCookie(options);
+                 options.Events.OnRemoteFailure = HandleRemoteFailureAsync;
+@@ -71,6 +78,37 @@ public static class OAuthAuthenticationExtensions
+                 }
+ 
+                 ConfigureCorrelationCookie(options);
++                options.Events.OnCreatingTicket = async context =>
++                {
++                    // GitHub's public email claim may be absent or unverified.
++                    // Ask /user/emails and mark an email verified ONLY when confirmed.
++                    using var request = new HttpRequestMessage(HttpMethod.Get,
++                        "https://api.github.com/user/emails");
++                    request.Headers.Authorization =
++                        new AuthenticationHeaderValue("Bearer", context.AccessToken);
++                    request.Headers.UserAgent.ParseAdd("Tindy-Backend/1.0");
++                    request.Headers.Accept.ParseAdd("application/vnd.github+json");
++                    using var response = await context.Backchannel.SendAsync(request,
++                        context.HttpContext.RequestAborted);
++                    if (!response.IsSuccessStatusCode) return; // Treat unknown as unverified.
++                    await using var stream = await response.Content.ReadAsStreamAsync(
++                        context.HttpContext.RequestAborted);
++                    using var json = await JsonDocument.ParseAsync(stream,
++                        cancellationToken: context.HttpContext.RequestAborted);
++                    if (json.RootElement.ValueKind != JsonValueKind.Array) return;
++                    var verified = json.RootElement.EnumerateArray()
++                        .Where(x => x.TryGetProperty("verified", out var v) &&
++                                    v.ValueKind == JsonValueKind.True &&
++                                    x.TryGetProperty("email", out var e) &&
++                                    e.ValueKind == JsonValueKind.String)
++                        .OrderByDescending(x => x.TryGetProperty("primary", out var p) &&
++                                                p.ValueKind == JsonValueKind.True)
++                        .FirstOrDefault();
++                    if (verified.ValueKind != JsonValueKind.Object) return;
++                    var email = verified.GetProperty("email").GetString();
++                    if (string.IsNullOrWhiteSpace(email)) return;
++                    context.Identity?.AddClaim(new Claim("tindy:github_verified_email", email));
++                };
+                 options.Events.OnRemoteFailure = HandleRemoteFailureAsync;
+             });
+     }
+@@ -132,6 +170,7 @@ public static class OAuthAuthenticationExtensions
+         context.HandleResponse();
+         context.Response.StatusCode = StatusCodes.Status400BadRequest;
+         context.Response.Headers["Cache-Control"] = "no-store";
++        context.Response.Headers["Referrer-Policy"] = "no-referrer";
+         return context.Response.WriteAsJsonAsync(new
+         {
+             success = false,
+diff --git a/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs b/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
+index 41bed42..4a5fb9f 100644
+--- a/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
++++ b/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
+@@ -227,6 +227,8 @@ public static class ServiceCollectionExtensions
+         // External identity business logic (STEP 03, no OAuth endpoints yet)
+         services.AddScoped<IExternalAuthService, ExternalAuthService>();
+ 
++        services.AddScoped<IOAuthLoginFlowService, OAuthLoginFlowService>();
++
+         // Onboarding application service
+         services.AddScoped<IOnboardingService, OnboardingService>();
+ 
+@@ -256,6 +258,24 @@ public static class ServiceCollectionExtensions
+                 AutoReplenishment = true
+             }));
+ 
++            // Limit start/challenge redirects as well as ticket-exchange attempts.
++            options.AddPolicy("oauth-start", context => RateLimitPartition.GetFixedWindowLimiter(
++                partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
++                factory: _ => new FixedWindowRateLimiterOptions
++                {
++                    PermitLimit = 20, Window = TimeSpan.FromMinutes(1),
++                    QueueLimit = 0, AutoReplenishment = true
++                }));
++
++            // OAuth ticket exchange: rate-limit invalid/replayed ticket attempts.
++            options.AddPolicy("oauth-exchange", context => RateLimitPartition.GetFixedWindowLimiter(
++                partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
++                factory: _ => new FixedWindowRateLimiterOptions
++                {
++                    PermitLimit = 10, Window = TimeSpan.FromMinutes(1),
++                    QueueLimit = 0, AutoReplenishment = true
++                }));
++
+             // ===================================
+             // 2. CUSTOM 429 ERROR RESPONSE
+             // ===================================
+diff --git a/src/Tindy.Application/DTOs/Authentication/OAuthExchangeRequest.cs b/src/Tindy.Application/DTOs/Authentication/OAuthExchangeRequest.cs
+new file mode 100644
+index 0000000..cd0ff73
+--- /dev/null
++++ b/src/Tindy.Application/DTOs/Authentication/OAuthExchangeRequest.cs
+@@ -0,0 +1,6 @@
++using System.ComponentModel.DataAnnotations;
++
++namespace Tindy.Application.DTOs.Authentication;
++
++public sealed record OAuthExchangeRequest(
++    [property: Required, MaxLength(256)] string Ticket);
+diff --git a/src/Tindy.Application/Interfaces/Repositories/IOAuthLoginTicketStore.cs b/src/Tindy.Application/Interfaces/Repositories/IOAuthLoginTicketStore.cs
+new file mode 100644
+index 0000000..1193a29
+--- /dev/null
++++ b/src/Tindy.Application/Interfaces/Repositories/IOAuthLoginTicketStore.cs
+@@ -0,0 +1,11 @@
++namespace Tindy.Application.Interfaces.Repositories;
++
++/// <summary>
++/// Distributed, short-lived one-time ticket store. Never persists raw bearer tickets.
++/// The ticket is not a JWT or a Google/GitHub access token.
++/// </summary>
++public interface IOAuthLoginTicketStore
++{
++    Task<string> IssueAsync(Guid userId, CancellationToken cancellationToken = default);
++    Task<Guid?> ConsumeAsync(string ticket, CancellationToken cancellationToken = default);
++}
+diff --git a/src/Tindy.Application/Interfaces/Services/IOAuthLoginFlowService.cs b/src/Tindy.Application/Interfaces/Services/IOAuthLoginFlowService.cs
+new file mode 100644
+index 0000000..a8a4c93
+--- /dev/null
++++ b/src/Tindy.Application/Interfaces/Services/IOAuthLoginFlowService.cs
+@@ -0,0 +1,11 @@
++using Tindy.Application.Models.Authentication;
++
++namespace Tindy.Application.Interfaces.Services;
++
++public interface IOAuthLoginFlowService
++{
++    Task<string> BeginTicketAsync(AuthenticatedExternalIdentity identity,
++        CancellationToken cancellationToken = default);
++    Task<OAuthExchangeResponse> ExchangeAsync(string ticket,
++        CancellationToken cancellationToken = default);
++}
+diff --git a/src/Tindy.Application/Models/Authentication/OAuthExchangeResponse.cs b/src/Tindy.Application/Models/Authentication/OAuthExchangeResponse.cs
+new file mode 100644
+index 0000000..2795e67
+--- /dev/null
++++ b/src/Tindy.Application/Models/Authentication/OAuthExchangeResponse.cs
+@@ -0,0 +1,17 @@
++namespace Tindy.Application.Models.Authentication;
++
++public sealed record OAuthExchangeResponse(
++    string AccessToken,
++    string TokenType,
++    int ExpiresIn,
++    OAuthExchangeUser User,
++    string RedirectTo);
++
++public sealed record OAuthExchangeUser(
++    Guid UserId,
++    string DisplayName,
++    string? Email,
++    string? Username,
++    string Status,
++    IReadOnlyCollection<string> Roles,
++    bool IsOnboardingCompleted);
+diff --git a/src/Tindy.Application/Services/OAuthLoginFlowService.cs b/src/Tindy.Application/Services/OAuthLoginFlowService.cs
+new file mode 100644
+index 0000000..0c12695
+--- /dev/null
++++ b/src/Tindy.Application/Services/OAuthLoginFlowService.cs
+@@ -0,0 +1,73 @@
++using Tindy.Application.Entities;
++using Tindy.Application.Exceptions;
++using Tindy.Application.Interfaces.Repositories;
++using Tindy.Application.Interfaces.Services;
++using Tindy.Application.Models.Authentication;
++
++namespace Tindy.Application.Services;
++
++/// <summary>
++/// Uses verified external identities from the server-side OAuth middleware only.
++/// Token is issued only after a single-use ticket is consumed and the User re-checked.
++/// </summary>
++public sealed class OAuthLoginFlowService : IOAuthLoginFlowService
++{
++    private readonly IExternalAuthService _externalAuth;
++    private readonly IExternalAuthRepository _users;
++    private readonly IOAuthLoginTicketStore _tickets;
++    private readonly IJwtTokenService _jwt;
++
++    public OAuthLoginFlowService(
++        IExternalAuthService externalAuth, IExternalAuthRepository users,
++        IOAuthLoginTicketStore tickets, IJwtTokenService jwt)
++    {
++        _externalAuth = externalAuth;
++        _users = users;
++        _tickets = tickets;
++        _jwt = jwt;
++    }
++
++    public async Task<string> BeginTicketAsync(AuthenticatedExternalIdentity identity,
++        CancellationToken cancellationToken = default)
++    {
++        var signIn = await _externalAuth.ResolveSignInAsync(identity, cancellationToken);
++        return await _tickets.IssueAsync(signIn.UserId, cancellationToken);
++    }
++
++    public async Task<OAuthExchangeResponse> ExchangeAsync(string ticket,
++        CancellationToken cancellationToken = default)
++    {
++        if (string.IsNullOrWhiteSpace(ticket))
++            throw new InvalidCredentialsException();
++
++        // Consume first: invalid, expired or previously consumed ticket has no UserId.
++        var userId = await _tickets.ConsumeAsync(ticket, cancellationToken);
++        if (!userId.HasValue)
++            throw new InvalidCredentialsException();
++
++        // Re-query current account status/roles/onboarding (never trust ticket-stored roles).
++        var user = await _users.GetUserByIdAsync(userId.Value, cancellationToken)
++            ?? throw new InvalidCredentialsException();
++        if (user.DeletedAt.HasValue ||
++            !string.Equals(user.Status, "active", StringComparison.OrdinalIgnoreCase) ||
++            user.Profile is null)
++            throw new InvalidCredentialsException();
++
++        var roles = user.UserRoles
++            .Select(x => x.Role?.RoleName)
++            .OfType<string>()
++            .Where(x => !string.IsNullOrWhiteSpace(x))
++            .Distinct(StringComparer.Ordinal)
++            .OrderBy(x => x, StringComparer.Ordinal)
++            .ToArray();
++        if (roles.Length == 0)
++            throw new InvalidCredentialsException();
++
++        var jwt = _jwt.GenerateAccessToken(user.UserId, roles);
++        return new OAuthExchangeResponse(jwt.AccessToken, jwt.TokenType, jwt.ExpiresIn,
++            new OAuthExchangeUser(user.UserId, user.Profile.DisplayName,
++                user.PrimaryEmail, user.Username, user.Status, roles,
++                user.IsOnboardingCompleted),
++            user.IsOnboardingCompleted ? "/discover" : "/onboarding");
++    }
++}
+diff --git a/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs b/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
+index f3b985e..31392bc 100644
+--- a/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
++++ b/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
+@@ -53,6 +53,8 @@ public static class ServicesCollectionExtensions
+         // External identity persistence (STEP 03)
+         services.AddScoped<IExternalAuthRepository, ExternalAuthRepository>();
+ 
++        services.AddScoped<IOAuthLoginTicketStore, OAuthLoginTicketStore>();
++
+         // Onboarding repository
+         services.AddScoped<IOnboardingRepository, OnboardingRepository>();
+ 
+diff --git a/src/Tindy.Infrastructure/Persistence/Configurations/OAuthLoginTicketConfiguration.cs b/src/Tindy.Infrastructure/Persistence/Configurations/OAuthLoginTicketConfiguration.cs
+new file mode 100644
+index 0000000..bf904da
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Persistence/Configurations/OAuthLoginTicketConfiguration.cs
+@@ -0,0 +1,21 @@
++using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Metadata.Builders;
++using Tindy.Infrastructure.Persistence.Models;
++
++namespace Tindy.Infrastructure.Persistence.Configurations;
++
++public sealed class OAuthLoginTicketConfiguration : IEntityTypeConfiguration<OAuthLoginTicket>
++{
++    public void Configure(EntityTypeBuilder<OAuthLoginTicket> builder)
++    {
++        builder.ToTable("oauth_login_tickets");
++        builder.HasKey(x => x.TicketHash);
++        builder.Property(x => x.TicketHash).HasColumnName("ticket_hash").HasMaxLength(64);
++        builder.Property(x => x.UserId).HasColumnName("user_id").IsRequired();
++        builder.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
++        builder.Property(x => x.ExpiresAt).HasColumnName("expires_at").IsRequired();
++        builder.HasIndex(x => x.ExpiresAt).HasDatabaseName("ix_oauth_login_tickets_expires_at");
++        builder.HasOne<Tindy.Application.Entities.User>().WithMany()
++            .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
++    }
++}
+diff --git a/src/Tindy.Infrastructure/Persistence/Models/OAuthLoginTicket.cs b/src/Tindy.Infrastructure/Persistence/Models/OAuthLoginTicket.cs
+new file mode 100644
+index 0000000..9e28922
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Persistence/Models/OAuthLoginTicket.cs
+@@ -0,0 +1,12 @@
++namespace Tindy.Infrastructure.Persistence.Models;
++
++/// <summary>
++/// Only a SHA-256 hash is persisted. Raw ticket never leaves the browser and exchange response.
++/// </summary>
++public sealed class OAuthLoginTicket
++{
++    public string TicketHash { get; set; } = null!;
++    public Guid UserId { get; set; }
++    public DateTime CreatedAt { get; set; }
++    public DateTime ExpiresAt { get; set; }
++}
+diff --git a/src/Tindy.Infrastructure/Persistence/TindyDbContext.cs b/src/Tindy.Infrastructure/Persistence/TindyDbContext.cs
+index f59677d..107232f 100644
+--- a/src/Tindy.Infrastructure/Persistence/TindyDbContext.cs
++++ b/src/Tindy.Infrastructure/Persistence/TindyDbContext.cs
+@@ -1,3 +1,4 @@
++using Tindy.Infrastructure.Persistence.Models;
+ using Microsoft.EntityFrameworkCore;
+ using Tindy.Application.Entities;
+ 
+@@ -33,6 +34,8 @@ public class TindyDbContext : DbContext
+     public DbSet<ExternalAuthAccount> ExternalAuthAccounts
+         => Set<ExternalAuthAccount>();
+ 
++    public DbSet<OAuthLoginTicket> OAuthLoginTickets => Set<OAuthLoginTicket>();
++
+ 
+     public DbSet<ProfessionalRole> ProfessionalRoles
+         => Set<ProfessionalRole>();
+diff --git a/src/Tindy.Infrastructure/Repositories/OAuthLoginTicketStore.cs b/src/Tindy.Infrastructure/Repositories/OAuthLoginTicketStore.cs
+new file mode 100644
+index 0000000..a94eb29
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Repositories/OAuthLoginTicketStore.cs
+@@ -0,0 +1,74 @@
++using System.Security.Cryptography;
++using Microsoft.EntityFrameworkCore;
++using Tindy.Application.Interfaces.Repositories;
++using Tindy.Infrastructure.Persistence;
++using Tindy.Infrastructure.Persistence.Models;
++
++namespace Tindy.Infrastructure.Repositories;
++
++/// <summary>
++/// Shared PostgreSQL store. A conditional DELETE ensures one successful exchange
++/// even when two API instances receive the same ticket concurrently.
++/// </summary>
++public sealed class OAuthLoginTicketStore : IOAuthLoginTicketStore
++{
++    private static readonly TimeSpan Lifetime = TimeSpan.FromSeconds(90);
++    private readonly TindyDbContext _db;
++
++    public OAuthLoginTicketStore(TindyDbContext db) => _db = db;
++
++    public async Task<string> IssueAsync(Guid userId, CancellationToken cancellationToken = default)
++    {
++        if (userId == Guid.Empty) throw new ArgumentException("Invalid user ID", nameof(userId));
++
++        // Housekeeping: bounded by time-based index; also safe on multiple instances.
++        var now = DateTime.UtcNow;
++        await _db.OAuthLoginTickets.Where(x => x.ExpiresAt <= now)
++            .ExecuteDeleteAsync(cancellationToken);
++
++        var secret = RandomNumberGenerator.GetBytes(32);
++        var ticket = Convert.ToBase64String(secret).TrimEnd('=')
++            .Replace('+', '-').Replace('/', '_');
++        var hash = Convert.ToHexString(SHA256.HashData(secret));
++        await _db.OAuthLoginTickets.AddAsync(new OAuthLoginTicket
++        {
++            TicketHash = hash,
++            UserId = userId,
++            CreatedAt = now,
++            ExpiresAt = now.Add(Lifetime)
++        }, cancellationToken);
++        await _db.SaveChangesAsync(cancellationToken);
++        return ticket;
++    }
++
++    public async Task<Guid?> ConsumeAsync(string ticket, CancellationToken cancellationToken = default)
++    {
++        // 32 random bytes encoded as unpadded Base64Url are always 43 characters.
++        if (string.IsNullOrWhiteSpace(ticket) || ticket.Length != 43 ||
++            ticket.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
++            return null;
++
++        byte[] secret;
++        try
++        {
++            var base64 = ticket.Replace('-', '+').Replace('_', '/');
++            secret = Convert.FromBase64String(base64 + "=");
++        }
++        catch (FormatException) { return null; }
++        if (secret.Length != 32) return null;
++
++        var hash = Convert.ToHexString(SHA256.HashData(secret));
++        var now = DateTime.UtcNow;
++        var candidate = await _db.OAuthLoginTickets.AsNoTracking()
++            .Where(x => x.TicketHash == hash && x.ExpiresAt > now)
++            .Select(x => (Guid?)x.UserId)
++            .FirstOrDefaultAsync(cancellationToken);
++        if (!candidate.HasValue) return null;
++
++        // At most one caller can delete the row. No JWT is issued to any other caller.
++        var deleted = await _db.OAuthLoginTickets
++            .Where(x => x.TicketHash == hash && x.ExpiresAt > now)
++            .ExecuteDeleteAsync(cancellationToken);
++        return deleted == 1 ? candidate : null;
++    }
++}
+diff --git a/tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs b/tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs
+new file mode 100644
+index 0000000..9bd6fc3
+--- /dev/null
++++ b/tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs
+@@ -0,0 +1,179 @@
++using Tindy.Application.Entities;
++using Tindy.Application.Exceptions;
++using Tindy.Application.Interfaces.Repositories;
++using Tindy.Application.Interfaces.Services;
++using Tindy.Application.Models.Authentication;
++using Tindy.Application.Services;
++using Xunit;
++
++namespace Tindy.Tests.Security;
++
++/// <summary>Fast unit tests: no Docker or actual OAuth provider required.</summary>
++public sealed class OAuthLoginFlowServiceTests
++{
++    private static readonly Guid UserId = Guid.NewGuid();
++
++    private static User MakeUser(bool onboarding = false, string status = "active") => new()
++    {
++        UserId = UserId, Status = status, IsOnboardingCompleted = onboarding,
++        PrimaryEmail = "verified@example.com",
++        Profile = new UserProfile { UserId = UserId, DisplayName = "Test OAuth User" },
++        UserRoles = new List<UserRole>
++        {
++            new() { UserId = UserId, Role = new Role { RoleName = "member" } }
++        }
++    };
++
++    private static OAuthLoginFlowService MakeService(FakeUsers users, FakeTickets tickets,
++        FakeExternalAuth externalAuth, FakeJwt jwt) =>
++        new(externalAuth, users, tickets, jwt);
++
++    [Fact]
++    public async Task SuccessfulExchange_IssuesTindyJwt_AndRedirectsToOnboarding()
++    {
++        var user = MakeUser();
++        var users = new FakeUsers(user);
++        var tickets = new FakeTickets(user.UserId);
++        var jwt = new FakeJwt();
++        var service = MakeService(users, tickets, new FakeExternalAuth(), jwt);
++        var result = await service.ExchangeAsync("example-valid-ticket");
++
++        Assert.Equal("test.tindy.jwt", result.AccessToken);
++        Assert.Equal("Bearer", result.TokenType);
++        Assert.Equal("/onboarding", result.RedirectTo);
++        Assert.False(result.User.IsOnboardingCompleted);
++        Assert.Equal(user.UserId, jwt.IssuedFor);
++        Assert.Equal("member", Assert.Single(jwt.Roles!));
++    }
++
++    [Fact]
++    public async Task CompletedOnboarding_UsesDiscover()
++    {
++        var user = MakeUser(onboarding: true);
++        var result = await MakeService(new FakeUsers(user), new FakeTickets(user.UserId),
++            new FakeExternalAuth(), new FakeJwt()).ExchangeAsync("valid");
++        Assert.Equal("/discover", result.RedirectTo);
++    }
++
++    [Fact]
++    public async Task ReplayedTicket_IsRejected()
++    {
++        var user = MakeUser();
++        var service = MakeService(new FakeUsers(user), new FakeTickets(user.UserId),
++            new FakeExternalAuth(), new FakeJwt());
++        await service.ExchangeAsync("valid");
++        await Assert.ThrowsAsync<InvalidCredentialsException>(() => service.ExchangeAsync("valid"));
++    }
++
++    [Fact]
++    public async Task InvalidOrExpiredTicket_DoesNotCreateJwt()
++    {
++        var jwt = new FakeJwt();
++        var service = MakeService(new FakeUsers(MakeUser()), new FakeTickets(null),
++            new FakeExternalAuth(), jwt);
++        await Assert.ThrowsAsync<InvalidCredentialsException>(() => service.ExchangeAsync("expired"));
++        Assert.Null(jwt.IssuedFor);
++    }
++
++    [Theory]
++    [InlineData("suspended", false)]
++    [InlineData("active", true)]
++    public async Task DisabledOrDeletedUser_CannotExchange(string status, bool deleted)
++    {
++        var user = MakeUser(status: status);
++        if (deleted) user.DeletedAt = DateTime.UtcNow;
++        var jwt = new FakeJwt();
++        var service = MakeService(new FakeUsers(user), new FakeTickets(user.UserId),
++            new FakeExternalAuth(), jwt);
++        await Assert.ThrowsAsync<InvalidCredentialsException>(() => service.ExchangeAsync("valid"));
++        Assert.Null(jwt.IssuedFor);
++    }
++
++    [Fact]
++    public async Task MissingRole_CannotExchange()
++    {
++        var user = MakeUser();
++        user.UserRoles.Clear();
++        await Assert.ThrowsAsync<InvalidCredentialsException>(() =>
++            MakeService(new FakeUsers(user), new FakeTickets(user.UserId),
++                new FakeExternalAuth(), new FakeJwt()).ExchangeAsync("valid"));
++    }
++
++    [Fact]
++    public async Task BeginTicket_UsesResolvedTindyIdentity_NotClientUserId()
++    {
++        var user = MakeUser();
++        var auth = new FakeExternalAuth();
++        var tickets = new FakeTickets(null);
++        var service = MakeService(new FakeUsers(user), tickets, auth, new FakeJwt());
++        var result = await service.BeginTicketAsync(new AuthenticatedExternalIdentity(
++            "Google", "stable-google-id", "Test", null, "verified@example.com", true));
++        Assert.Equal("new-ticket", result);
++        Assert.Equal(UserId, tickets.IssuedFor);
++        Assert.Equal("stable-google-id", auth.Identity?.ProviderUserId);
++    }
++
++    private sealed class FakeTickets(Guid? firstTicket) : IOAuthLoginTicketStore
++    {
++        private Guid? _remaining = firstTicket;
++        public Guid? IssuedFor { get; private set; }
++        public Task<string> IssueAsync(Guid userId, CancellationToken token = default)
++        {
++            IssuedFor = userId;
++            return Task.FromResult("new-ticket");
++        }
++        public Task<Guid?> ConsumeAsync(string ticket, CancellationToken token = default)
++        {
++            var current = _remaining;
++            _remaining = null;
++            return Task.FromResult(current);
++        }
++    }
++
++    private sealed class FakeExternalAuth : IExternalAuthService
++    {
++        public AuthenticatedExternalIdentity? Identity { get; private set; }
++        public Task<ExternalSignInResult> ResolveSignInAsync(
++            AuthenticatedExternalIdentity identity, CancellationToken token = default)
++        {
++            Identity = identity;
++            return Task.FromResult(new ExternalSignInResult(UserId, true,
++                "Test", "verified@example.com", new[] { "member" }, false));
++        }
++        public Task<bool> LinkAsync(Guid userId, AuthenticatedExternalIdentity identity,
++            CancellationToken token = default) => throw new NotImplementedException();
++    }
++
++    private sealed class FakeJwt : IJwtTokenService
++    {
++        public Guid? IssuedFor { get; private set; }
++        public IReadOnlyCollection<string>? Roles { get; private set; }
++        public AccessTokenResult GenerateAccessToken(Guid userId, IReadOnlyCollection<string> roles)
++        {
++            IssuedFor = userId;
++            Roles = roles;
++            return new AccessTokenResult("test.tindy.jwt", "Bearer", 3600);
++        }
++    }
++
++    // Only GetUserByIdAsync is used by OAuthLoginFlowService.
++    private sealed class FakeUsers(User user) : IExternalAuthRepository
++    {
++        public Task<User?> GetUserByIdAsync(Guid userId, CancellationToken ct = default) =>
++            Task.FromResult<User?>(userId == user.UserId ? user : null);
++        public Task<ExternalAuthAccount?> GetByProviderIdentityAsync(string provider,
++            string providerUserId, CancellationToken ct = default) => throw new NotImplementedException();
++        public Task<ExternalAuthAccount?> GetByUserAndProviderAsync(Guid userId,
++            string provider, CancellationToken ct = default) => throw new NotImplementedException();
++        public Task<bool> EmailReservedAsync(string email, CancellationToken ct = default) =>
++            throw new NotImplementedException();
++        public Task<Role?> GetRoleByNameAsync(string roleName, CancellationToken ct = default) =>
++            throw new NotImplementedException();
++        public Task AddUserAsync(User newUser, CancellationToken ct = default) =>
++            throw new NotImplementedException();
++        public Task AddExternalAccountAsync(ExternalAuthAccount account,
++            CancellationToken ct = default) => throw new NotImplementedException();
++        public Task SaveChangesAsync(CancellationToken ct = default) =>
++            throw new NotImplementedException();
++    }
++}

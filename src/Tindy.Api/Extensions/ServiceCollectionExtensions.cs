@@ -227,6 +227,8 @@ public static class ServiceCollectionExtensions
         // External identity business logic (STEP 03, no OAuth endpoints yet)
         services.AddScoped<IExternalAuthService, ExternalAuthService>();
 
+        services.AddScoped<IOAuthLoginFlowService, OAuthLoginFlowService>();
+
         // Onboarding application service
         services.AddScoped<IOnboardingService, OnboardingService>();
 
@@ -255,6 +257,24 @@ public static class ServiceCollectionExtensions
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
+
+            // Limit start/challenge redirects as well as ticket-exchange attempts.
+            options.AddPolicy("oauth-start", context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 20, Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0, AutoReplenishment = true
+                }));
+
+            // OAuth ticket exchange: rate-limit invalid/replayed ticket attempts.
+            options.AddPolicy("oauth-exchange", context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10, Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0, AutoReplenishment = true
+                }));
 
             // ===================================
             // 2. CUSTOM 429 ERROR RESPONSE

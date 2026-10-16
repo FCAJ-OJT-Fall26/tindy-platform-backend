@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.Extensions.Configuration;
+using System.Net.Http.Headers;
+using System.Security.Claims;
+using System.Text.Json;
 
 namespace Tindy.Api.Extensions;
 
@@ -51,6 +54,10 @@ public static class OAuthAuthenticationExtensions
                 options.SignInScheme = ExternalCookieScheme;
                 options.CallbackPath = "/signin-google";
                 options.SaveTokens = false;
+                // Google userinfo response may use either key depending on endpoint version.
+                // Never infer verification from the presence of a nonempty email.
+                options.ClaimActions.MapJsonKey("tindy:google_verified_v2", "verified_email");
+                options.ClaimActions.MapJsonKey("tindy:google_verified_v3", "email_verified");
 
                 ConfigureCorrelationCookie(options);
                 options.Events.OnRemoteFailure = HandleRemoteFailureAsync;
@@ -71,6 +78,37 @@ public static class OAuthAuthenticationExtensions
                 }
 
                 ConfigureCorrelationCookie(options);
+                options.Events.OnCreatingTicket = async context =>
+                {
+                    // GitHub's public email claim may be absent or unverified.
+                    // Ask /user/emails and mark an email verified ONLY when confirmed.
+                    using var request = new HttpRequestMessage(HttpMethod.Get,
+                        "https://api.github.com/user/emails");
+                    request.Headers.Authorization =
+                        new AuthenticationHeaderValue("Bearer", context.AccessToken);
+                    request.Headers.UserAgent.ParseAdd("Tindy-Backend/1.0");
+                    request.Headers.Accept.ParseAdd("application/vnd.github+json");
+                    using var response = await context.Backchannel.SendAsync(request,
+                        context.HttpContext.RequestAborted);
+                    if (!response.IsSuccessStatusCode) return; // Treat unknown as unverified.
+                    await using var stream = await response.Content.ReadAsStreamAsync(
+                        context.HttpContext.RequestAborted);
+                    using var json = await JsonDocument.ParseAsync(stream,
+                        cancellationToken: context.HttpContext.RequestAborted);
+                    if (json.RootElement.ValueKind != JsonValueKind.Array) return;
+                    var verified = json.RootElement.EnumerateArray()
+                        .Where(x => x.TryGetProperty("verified", out var v) &&
+                                    v.ValueKind == JsonValueKind.True &&
+                                    x.TryGetProperty("email", out var e) &&
+                                    e.ValueKind == JsonValueKind.String)
+                        .OrderByDescending(x => x.TryGetProperty("primary", out var p) &&
+                                                p.ValueKind == JsonValueKind.True)
+                        .FirstOrDefault();
+                    if (verified.ValueKind != JsonValueKind.Object) return;
+                    var email = verified.GetProperty("email").GetString();
+                    if (string.IsNullOrWhiteSpace(email)) return;
+                    context.Identity?.AddClaim(new Claim("tindy:github_verified_email", email));
+                };
                 options.Events.OnRemoteFailure = HandleRemoteFailureAsync;
             });
     }
@@ -132,6 +170,7 @@ public static class OAuthAuthenticationExtensions
         context.HandleResponse();
         context.Response.StatusCode = StatusCodes.Status400BadRequest;
         context.Response.Headers["Cache-Control"] = "no-store";
+        context.Response.Headers["Referrer-Policy"] = "no-referrer";
         return context.Response.WriteAsJsonAsync(new
         {
             success = false,
