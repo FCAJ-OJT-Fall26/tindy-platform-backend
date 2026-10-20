@@ -7,6 +7,8 @@ public interface IProfileRepository
 {
     Task<MyProfileResponse?> GetMyProfileAsync(Guid userId, CancellationToken cancellationToken = default);
 
+    Task<MemberProfileResponse?> GetMemberProfileAsync(Guid userId, CancellationToken cancellationToken = default);
+
     Task<User?> GetUserForUpdateAsync(Guid userId, CancellationToken cancellationToken = default);
 
     Task<bool> IsActiveProfessionalRoleAsync(Guid roleId, CancellationToken cancellationToken = default);

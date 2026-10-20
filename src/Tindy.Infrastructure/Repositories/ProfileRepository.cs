@@ -58,6 +58,51 @@ public sealed class ProfileRepository : IProfileRepository
             .SingleOrDefaultAsync(cancellationToken);
     }
 
+    public Task<MemberProfileResponse?> GetMemberProfileAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        // Project only fields permitted to other authenticated members. Filtering
+        // at the query level treats missing, suspended, deleted, and incomplete
+        // target profiles identically (404 from Application service).
+        return _context.Users
+            .AsNoTracking()
+            .Where(user => user.UserId == userId && user.Status == "active" &&
+                user.DeletedAt == null && user.IsOnboardingCompleted && user.Profile != null)
+            .AsSplitQuery()
+            .Select(user => new MemberProfileResponse(
+                user.UserId,
+                user.Username,
+                user.Profile!.DisplayName,
+                user.Profile.University,
+                user.Profile.Headline,
+                user.Profile.Bio,
+                user.Profile.Location,
+                user.Profile.CurrentRole,
+                user.Profile.PreferredProfessionalRole == null
+                    ? null
+                    : new PreferredRoleSummary(
+                        user.Profile.PreferredProfessionalRole.ProfessionalRoleId,
+                        user.Profile.PreferredProfessionalRole.Name),
+                user.Profile.AvailableHoursPerWeek,
+                user.Profile.ProfessionalInterests,
+                user.Profile.LearningGoals,
+                user.Profile.PreviousProjectsAndContribution,
+                user.Profile.TechnologiesToLearn,
+                user.Profile.GithubUrl,
+                user.Profile.LinkedinUrl,
+                user.Profile.PersonalWebsiteUrl,
+                user.Profile.PublicEmail,
+                user.Profile.AvatarUrl,
+                user.Profile.CoverImageUrl,
+                user.Profile.UserSkills
+                    .OrderBy(link => link.Skill.Name)
+                    .ThenBy(link => link.SkillId)
+                    .Select(link => new ProfileSkillSummary(link.SkillId, link.Skill.Name))
+                    .ToList(),
+                _context.ProfileExperiences.Count(experience => experience.UserId == user.UserId),
+                _context.UserCertificates.Count(certificate => certificate.UserId == user.UserId)))
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
     public Task<User?> GetUserForUpdateAsync(Guid userId, CancellationToken cancellationToken = default) =>
         _context.Users
             .Include(user => user.Profile)

@@ -21,6 +21,17 @@ public sealed class ProfileService : IProfileService
             ?? throw new NotFoundException("Profile was not found.");
     }
 
+    public async Task<MemberProfileResponse> GetMemberProfileAsync(Guid targetUserId, CancellationToken cancellationToken = default)
+    {
+        // Target IDs come from the route, not the authenticated caller claim.
+        // Do not disclose whether malformed, inactive, deleted, or incomplete accounts exist.
+        if (targetUserId == Guid.Empty)
+            throw new NotFoundException("Profile was not found.");
+
+        return await _profileRepository.GetMemberProfileAsync(targetUserId, cancellationToken)
+            ?? throw new NotFoundException("Profile was not found.");
+    }
+
     public Task<MyProfileResponse> UpdateMyProfileAsync(Guid userId, UpdateProfileRequest request, CancellationToken cancellationToken = default)
     {
         if (userId == Guid.Empty)

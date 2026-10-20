@@ -228,6 +228,9 @@ public sealed class ProfilePartialUpdateTests
             return Task.FromResult(CurrentRoleIsActive);
         }
 
+        public Task<MemberProfileResponse?> GetMemberProfileAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
         public Task<IReadOnlyCollection<Guid>> GetActiveSkillIdsAsync(IReadOnlyCollection<Guid> skillIds, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyCollection<Guid>>(AddedSkillsAreActive ? skillIds.ToArray() : Array.Empty<Guid>());
 
@@ -249,8 +252,13 @@ public sealed class ProfilePartialUpdateTests
             var old = User.Profile!;
             var snapshot = new UserProfile
             {
-                UserId = old.UserId, DisplayName = old.DisplayName, University = old.University, Headline = old.Headline,
-                Bio = old.Bio, LearningGoals = old.LearningGoals, PreferredRoleId = old.PreferredRoleId,
+                UserId = old.UserId,
+                DisplayName = old.DisplayName,
+                University = old.University,
+                Headline = old.Headline,
+                Bio = old.Bio,
+                LearningGoals = old.LearningGoals,
+                PreferredRoleId = old.PreferredRoleId,
                 AvailableHoursPerWeek = old.AvailableHoursPerWeek,
                 UserSkills = old.UserSkills.Select(x => new UserSkill { UserId = x.UserId, SkillId = x.SkillId }).ToArray()
             };
@@ -266,11 +274,18 @@ public sealed class ProfilePartialUpdateTests
         {
             var user = new User
             {
-                UserId = UserId, Username = "alex", Status = "active", IsOnboardingCompleted = true,
+                UserId = UserId,
+                Username = "alex",
+                Status = "active",
+                IsOnboardingCompleted = true,
                 Profile = new UserProfile
                 {
-                    UserId = UserId, DisplayName = "Alex", University = "FPT University",
-                    PreferredRoleId = RoleId, AvailableHoursPerWeek = 20, LearningGoals = "Old goal",
+                    UserId = UserId,
+                    DisplayName = "Alex",
+                    University = "FPT University",
+                    PreferredRoleId = RoleId,
+                    AvailableHoursPerWeek = 20,
+                    LearningGoals = "Old goal",
                     UserSkills = [
                         new UserSkill { UserId = UserId, SkillId = SkillId },
                         new UserSkill { UserId = UserId, SkillId = InactiveSkillId }
