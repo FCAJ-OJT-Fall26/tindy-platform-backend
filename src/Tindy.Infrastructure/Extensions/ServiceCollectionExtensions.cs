@@ -66,6 +66,9 @@ public static class ServicesCollectionExtensions
         // Profile projection repository (STEP 04).
         services.AddScoped<IProfileRepository, ProfileRepository>();
 
+        // Experiences persistence (STEP 07).
+        services.AddScoped<IExperienceRepository, ExperienceRepository>();
+
         // Lightweight read-only check for protected business APIs
         services.AddScoped<IOnboardingAccessReader, OnboardingAccessReader>();
 

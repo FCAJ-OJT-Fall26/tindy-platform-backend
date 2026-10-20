@@ -245,6 +245,9 @@ public static class ServiceCollectionExtensions
         // Profile read-only application service (STEP 04).
         services.AddScoped<IProfileService, ProfileService>();
 
+        // Experience business operations (controller added in STEP 08).
+        services.AddScoped<IExperienceService, ExperienceService>();
+
 
 
 
