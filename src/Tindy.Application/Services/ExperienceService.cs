@@ -18,6 +18,17 @@ public sealed class ExperienceService : IExperienceService
         return await _repository.ListOwnedAsync(callerUserId, cancellationToken);
     }
 
+    // Member endpoints are authorized by the DefaultPolicy at the HTTP boundary.
+    // Independently verify target eligibility so missing, inactive, soft-deleted,
+    // or incomplete targets produce the same 404 as the member profile endpoint.
+    public async Task<IReadOnlyList<ExperienceResponse>> ListMemberExperiencesAsync(Guid targetUserId, CancellationToken cancellationToken = default)
+    {
+        if (targetUserId == Guid.Empty || !await _repository.IsEligibleOwnerAsync(targetUserId, cancellationToken))
+            throw new NotFoundException("Profile was not found.");
+
+        return await _repository.ListOwnedAsync(targetUserId, cancellationToken);
+    }
+
     public async Task<ExperienceResponse> GetMyExperienceAsync(Guid callerUserId, Guid experienceId, CancellationToken cancellationToken = default)
     {
         await RequireEligibleOwnerAsync(callerUserId, cancellationToken);

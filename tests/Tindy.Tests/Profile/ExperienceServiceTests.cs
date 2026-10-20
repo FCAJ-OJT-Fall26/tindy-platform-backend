@@ -198,6 +198,34 @@ public sealed class ExperienceServiceTests
     }
 
     [Fact]
+    public async Task MemberExperiences_OnlyReturnsTargetItems_AndEmptyTargetReturnsEmptyArray()
+    {
+        var repo = new FakeRepository();
+        repo.Seed(Owner, ActiveSkill);
+        repo.Seed(Stranger, SecondSkill);
+        var service = new ExperienceService(repo);
+
+        var owned = await service.ListMemberExperiencesAsync(Owner);
+        Assert.Single(owned);
+        Assert.Equal("Existing Project", owned[0].ProjectName);
+
+        var emptyTarget = Guid.NewGuid();
+        var emptyList = await service.ListMemberExperiencesAsync(emptyTarget);
+        Assert.Empty(emptyList);
+    }
+
+    [Fact]
+    public async Task MemberExperiences_IneligibleAndEmptyTargetReturnIdentical404()
+    {
+        var repo = new FakeRepository { OwnerEligible = false };
+        var service = new ExperienceService(repo);
+        var missing = await Assert.ThrowsAsync<NotFoundException>(() => service.ListMemberExperiencesAsync(Owner));
+        var empty = await Assert.ThrowsAsync<NotFoundException>(() => service.ListMemberExperiencesAsync(Guid.Empty));
+        Assert.Equal("Profile was not found.", missing.Message);
+        Assert.Equal(missing.Message, empty.Message);
+    }
+
+    [Fact]
     public void EfModel_ExperienceSkillsCascadeOnExperience_RestrictOnCatalogSkill()
     {
         var options = new DbContextOptionsBuilder<TindyDbContext>()
