@@ -11,4 +11,5 @@ public sealed record AuthenticatedExternalIdentity(
     string? DisplayName,
     string? ProviderUsername,
     string? Email,
-    bool EmailVerified);
+    bool EmailVerified,
+    string? AvatarUrl = null);

@@ -32,7 +32,8 @@ public static class AuthenticatedExternalIdentityReader
         return new AuthenticatedExternalIdentity(provider, id,
             principal.FindFirstValue(ClaimTypes.Name),
             provider == ExternalAuthProviders.GitHub ? principal.FindFirstValue(ClaimTypes.Name) : null,
-            email, verified);
+            email, verified, OAuthAvatarUrl.Normalize(principal.FindFirstValue(
+                provider == ExternalAuthProviders.Google ? "tindy:google_avatar_url" : "tindy:github_avatar_url")));
     }
 
     private static bool IsTrue(string? value) =>

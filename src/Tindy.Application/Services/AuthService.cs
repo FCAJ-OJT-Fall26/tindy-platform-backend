@@ -123,7 +123,6 @@ public sealed class AuthService : IAuthService
                 // Filled during Onboarding Step 5
                 AvailableHoursPerWeek = null,
 
-                IsPublic = true,
 
                 CreatedAt = now
             },

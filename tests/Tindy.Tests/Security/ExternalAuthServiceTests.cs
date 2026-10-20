@@ -268,6 +268,80 @@ public sealed class ExternalAuthServiceTests
             () => new ExternalAuthService(repository).ResolveSignInAsync(Identity()));
     }
 
+    [Theory]
+    [InlineData("Google", "https://lh3.googleusercontent.com/a/sample")]
+    [InlineData("GitHub", "https://avatars.githubusercontent.com/u/123?v=4")]
+    public async Task NewOAuthUser_StoresProviderAvatar(string provider, string avatar)
+    {
+        var repo = new InMemoryExternalAuthRepository();
+        await new ExternalAuthService(repo).ResolveSignInAsync(
+            Identity(provider) with { AvatarUrl = avatar });
+        Assert.Equal(avatar, Assert.Single(repo.Users).Profile!.AvatarUrl);
+    }
+
+    [Theory]
+    [InlineData("Google", "javascript:alert(1)")]
+    [InlineData("GitHub", "http://localhost/avatar.png")]
+    [InlineData("Google", "")]
+    public async Task InvalidOrMissingProviderAvatar_FallsBackToNull(string provider, string avatar)
+    {
+        var repo = new InMemoryExternalAuthRepository();
+        await new ExternalAuthService(repo).ResolveSignInAsync(
+            Identity(provider) with { AvatarUrl = avatar });
+        Assert.Null(Assert.Single(repo.Users).Profile!.AvatarUrl);
+    }
+
+    [Theory]
+    [InlineData("Google")]
+    [InlineData("GitHub")]
+    public async Task LinkingProvider_FillsOnlyEmptyAvatar(string provider)
+    {
+        var repo = new InMemoryExternalAuthRepository();
+        var existingProvider = provider == "Google" ? "GitHub" : "Google";
+        var user = await new ExternalAuthService(repo).ResolveSignInAsync(Identity(existingProvider));
+        var profile = Assert.Single(repo.Users).Profile!;
+        Assert.Null(profile.AvatarUrl);
+        var service = new ExternalAuthService(repo);
+        Assert.True(await service.LinkAsync(user.UserId, Identity(provider, provider + "-new",
+            email: null, verified: false) with { AvatarUrl = "https://avatars.githubusercontent.com/u/12" }));
+        Assert.Equal("https://avatars.githubusercontent.com/u/12", profile.AvatarUrl);
+        Assert.Equal(2, repo.SaveCount);
+    }
+
+    [Fact]
+    public async Task RepeatedLoginOrDifferentProviderLink_DoesNotOverwriteAvatar()
+    {
+        var repo = new InMemoryExternalAuthRepository();
+        var service = new ExternalAuthService(repo);
+        var original = await service.ResolveSignInAsync(
+            Identity("Google", "g-original") with { AvatarUrl = "https://example.com/original.png" });
+        await service.ResolveSignInAsync(Identity("Google", "g-original") with
+        {
+            AvatarUrl = "https://example.com/changed.png"
+        });
+        await service.LinkAsync(original.UserId, Identity("GitHub", "github-other") with
+        {
+            AvatarUrl = "https://example.com/github.png"
+        });
+        Assert.Equal("https://example.com/original.png", Assert.Single(repo.Users).Profile!.AvatarUrl);
+    }
+
+    [Fact]
+    public async Task FailedCrossAccountLink_DoesNotSetAvatar()
+    {
+        var repo = new InMemoryExternalAuthRepository();
+        var service = new ExternalAuthService(repo);
+        var a = await service.ResolveSignInAsync(Identity("Google", "google-a") with
+        {
+            AvatarUrl = "https://example.com/a.png"
+        });
+        var b = await service.ResolveSignInAsync(Identity("GitHub", "github-b", email: "b@example.com")
+            with { AvatarUrl = null });
+        await Assert.ThrowsAsync<ConflictException>(() => service.LinkAsync(b.UserId,
+            Identity("Google", "google-a") with { AvatarUrl = "https://example.com/swap.png" }));
+        Assert.Null(repo.Users.Single(x => x.UserId == b.UserId).Profile!.AvatarUrl);
+    }
+
     // An intentionally small fake: tests Application business rules only.
     private sealed class InMemoryExternalAuthRepository : IExternalAuthRepository
     {
@@ -315,6 +389,16 @@ public sealed class ExternalAuthServiceTests
             account.User = user;
             user.ExternalAuthAccounts.Add(account);
             return Task.CompletedTask;
+        }
+
+        public async Task AddExternalAccountAndFillAvatarAsync(ExternalAuthAccount account,
+            string? avatarUrl, CancellationToken cancellationToken = default)
+        {
+            await AddExternalAccountAsync(account, cancellationToken);
+            var profile = Users.Single(x => x.UserId == account.UserId).Profile!;
+            if (profile.AvatarUrl is null && avatarUrl is not null)
+                profile.AvatarUrl = avatarUrl;
+            await SaveChangesAsync(cancellationToken);
         }
 
         public Task SaveChangesAsync(CancellationToken cancellationToken = default)

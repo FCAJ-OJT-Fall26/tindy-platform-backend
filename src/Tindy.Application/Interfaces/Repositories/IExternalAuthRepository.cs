@@ -20,6 +20,10 @@ public interface IExternalAuthRepository
 
     Task AddExternalAccountAsync(ExternalAuthAccount account, CancellationToken cancellationToken = default);
 
+    /// <summary>Atomically link the external identity and fill an unset profile avatar only.</summary>
+    Task AddExternalAccountAndFillAvatarAsync(ExternalAuthAccount account, string? avatarUrl,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Saves the complete new-user aggregate atomically in one EF Core SaveChanges call.
     /// Known unique constraint violations translate to ConflictException.

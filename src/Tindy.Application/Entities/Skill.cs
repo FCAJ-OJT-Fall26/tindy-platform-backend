@@ -14,6 +14,8 @@ public class Skill
     public ICollection<UserSkill> UserSkills { get; set; }
         = new List<UserSkill>();
 
+    public ICollection<ProfileExperienceSkill> ProfileExperienceSkills { get; set; } = new List<ProfileExperienceSkill>();
+
     public ICollection<SkillCategorySkill> SkillCategorySkills { get; set; }
         = new List<SkillCategorySkill>();
 }

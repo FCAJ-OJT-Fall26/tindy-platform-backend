@@ -1,0 +1,1282 @@
+openapi: 3.1.0
+info:
+  title: Tindy Profile V1 — Curated Reference
+  version: 1.0.0
+  description: 'Maintained reference based on 2026-10-20 Backend source. Runtime OpenAPI: /openapi/tindy.json in Development.
+    Parser has cross-field business rules not expressible here (see PROFILE_API.md). Not proof of E2E verification.'
+servers:
+- url: http://localhost:5217
+  description: Development example — actual host may differ
+tags:
+- name: My Profile
+- name: Member Profile
+- name: Experiences
+- name: Certificates
+paths:
+  /api/me/profile:
+    get:
+      summary: Read owner profile
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyProfileSuccess'
+        '400':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    patch:
+      summary: Patch owner profile with field-presence semantics
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfilePatch'
+            example:
+              bio: Backend Developer interested in AWS and RAG.
+              learning_goals: null
+              skill_ids:
+              - 33333333-3333-4333-8333-333333333333
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyProfileSuccess'
+        '400':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/users/{user_id}/profile:
+    get:
+      summary: Read member-visible profile
+      security:
+      - bearerAuth: []
+      parameters: &id004
+      - in: path
+        name: user_id
+        required: true
+        schema: &id001
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberProfileSuccess'
+        '400':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/me/profile/experiences:
+    get:
+      summary: List own experiences
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExperienceListSuccess'
+        '400':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    post:
+      summary: Create experience
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExperienceUpsert'
+            example: &id002
+              project_name: RAG Knowledge Chatbot
+              role_title: Backend Developer
+              description: Built retrieval and chat APIs.
+              repo_url: https://github.com/example/rag
+              start_date: 2025-09
+              end_date: null
+              is_ongoing: true
+              skill_ids:
+              - 33333333-3333-4333-8333-333333333333
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExperienceSuccess'
+        '400':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/me/profile/experiences/{experience_id}:
+    put:
+      summary: Replace own experience
+      security:
+      - bearerAuth: []
+      parameters: &id003
+      - in: path
+        name: experience_id
+        required: true
+        schema: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExperienceUpsert'
+            example: *id002
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExperienceSuccess'
+        '400':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    delete:
+      summary: Delete own experience
+      security:
+      - bearerAuth: []
+      parameters: *id003
+      responses:
+        '204':
+          description: Deleted; no response body
+        '400':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/users/{user_id}/profile/experiences:
+    get:
+      summary: List member experiences
+      security:
+      - bearerAuth: []
+      parameters: *id004
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExperienceListSuccess'
+        '400':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/me/profile/certificates:
+    get:
+      summary: List own certificates
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificateListSuccess'
+        '400':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    post:
+      summary: Create certificate
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CertificateUpsert'
+            example: &id005
+              title: AWS Certified Cloud Practitioner
+              issuer: Amazon Web Services
+              credential_id: null
+              credential_url: https://www.credly.com/badges/example
+              issued_at: '2026-09-01'
+              expires_at: null
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificateSuccess'
+        '400':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/me/profile/certificates/{certificate_id}:
+    put:
+      summary: Replace own certificate
+      security:
+      - bearerAuth: []
+      parameters: &id006
+      - in: path
+        name: certificate_id
+        required: true
+        schema: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CertificateUpsert'
+            example: *id005
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificateSuccess'
+        '400':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    delete:
+      summary: Delete own certificate
+      security:
+      - bearerAuth: []
+      parameters: *id006
+      responses:
+        '204':
+          description: Deleted; no response body
+        '400':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/users/{user_id}/profile/certificates:
+    get:
+      summary: List member certificates
+      security:
+      - bearerAuth: []
+      parameters: *id004
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificateListSuccess'
+        '400':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: ProblemDetails
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    PreferredRole:
+      type: object
+      properties:
+        professional_role_id: *id001
+        name: &id007
+          type: string
+      required:
+      - professional_role_id
+      - name
+      additionalProperties: false
+    ProfileSkill:
+      type: object
+      properties:
+        skill_id: *id001
+        name: *id007
+      required:
+      - skill_id
+      - name
+      additionalProperties: false
+    MyProfileResponse:
+      type: object
+      properties:
+        user_id: *id001
+        username: &id008
+          oneOf:
+          - *id007
+          - type: 'null'
+        display_name: *id007
+        university: &id009
+          oneOf:
+          - *id007
+          - type: 'null'
+        headline: &id010
+          oneOf:
+          - *id007
+          - type: 'null'
+        bio: &id011
+          oneOf:
+          - *id007
+          - type: 'null'
+        location: &id012
+          oneOf:
+          - *id007
+          - type: 'null'
+        current_role: &id013
+          oneOf:
+          - *id007
+          - type: 'null'
+        preferred_role: &id014
+          oneOf:
+          - $ref: '#/components/schemas/PreferredRole'
+          - type: 'null'
+        available_hours_per_week: &id015
+          oneOf:
+          - type: integer
+            minimum: 1
+            maximum: 40
+          - type: 'null'
+        professional_interests: &id016
+          oneOf:
+          - *id007
+          - type: 'null'
+        learning_goals: &id017
+          oneOf:
+          - *id007
+          - type: 'null'
+        previous_projects_and_contribution: &id018
+          oneOf:
+          - *id007
+          - type: 'null'
+        technologies_to_learn: &id019
+          oneOf:
+          - *id007
+          - type: 'null'
+        github_url: &id020
+          oneOf:
+          - *id007
+          - type: 'null'
+        linkedin_url: &id021
+          oneOf:
+          - *id007
+          - type: 'null'
+        personal_website_url: &id022
+          oneOf:
+          - *id007
+          - type: 'null'
+        public_email: &id023
+          oneOf:
+          - *id007
+          - type: 'null'
+        avatar_url: &id024
+          oneOf:
+          - *id007
+          - type: 'null'
+        cover_image_url: &id025
+          oneOf:
+          - *id007
+          - type: 'null'
+        skills: &id026
+          type: array
+          items:
+            $ref: '#/components/schemas/ProfileSkill'
+        experiences_count: &id027
+          type: integer
+          minimum: 0
+        certificates_count: &id028
+          type: integer
+          minimum: 0
+        phone_number:
+          oneOf:
+          - *id007
+          - type: 'null'
+        resume_url:
+          oneOf:
+          - *id007
+          - type: 'null'
+      required:
+      - user_id
+      - username
+      - display_name
+      - university
+      - headline
+      - bio
+      - location
+      - current_role
+      - preferred_role
+      - available_hours_per_week
+      - professional_interests
+      - learning_goals
+      - previous_projects_and_contribution
+      - technologies_to_learn
+      - github_url
+      - linkedin_url
+      - personal_website_url
+      - public_email
+      - avatar_url
+      - cover_image_url
+      - skills
+      - experiences_count
+      - certificates_count
+      - phone_number
+      - resume_url
+      additionalProperties: false
+    MemberProfileResponse:
+      type: object
+      properties:
+        user_id: *id001
+        username: *id008
+        display_name: *id007
+        university: *id009
+        headline: *id010
+        bio: *id011
+        location: *id012
+        current_role: *id013
+        preferred_role: *id014
+        available_hours_per_week: *id015
+        professional_interests: *id016
+        learning_goals: *id017
+        previous_projects_and_contribution: *id018
+        technologies_to_learn: *id019
+        github_url: *id020
+        linkedin_url: *id021
+        personal_website_url: *id022
+        public_email: *id023
+        avatar_url: *id024
+        cover_image_url: *id025
+        skills: *id026
+        experiences_count: *id027
+        certificates_count: *id028
+      required:
+      - user_id
+      - username
+      - display_name
+      - university
+      - headline
+      - bio
+      - location
+      - current_role
+      - preferred_role
+      - available_hours_per_week
+      - professional_interests
+      - learning_goals
+      - previous_projects_and_contribution
+      - technologies_to_learn
+      - github_url
+      - linkedin_url
+      - personal_website_url
+      - public_email
+      - avatar_url
+      - cover_image_url
+      - skills
+      - experiences_count
+      - certificates_count
+      additionalProperties: false
+    ExperienceResponse:
+      type: object
+      properties:
+        experience_id: *id001
+        project_name: *id007
+        role_title: *id007
+        description: *id007
+        technologies:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProfileSkill'
+        repo_url:
+          oneOf:
+          - *id007
+          - type: 'null'
+        start_date:
+          oneOf:
+          - type: string
+            pattern: ^\d{4}-(0[1-9]|1[0-2])$
+          - type: 'null'
+        end_date:
+          oneOf:
+          - type: string
+            pattern: ^\d{4}-(0[1-9]|1[0-2])$
+          - type: 'null'
+        is_ongoing:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+      additionalProperties: false
+      required:
+      - experience_id
+      - project_name
+      - role_title
+      - description
+      - technologies
+      - repo_url
+      - start_date
+      - end_date
+      - is_ongoing
+      - created_at
+      - updated_at
+    CertificateResponse:
+      type: object
+      properties:
+        certificate_id: *id001
+        title: *id007
+        issuer: *id007
+        credential_id:
+          oneOf:
+          - *id007
+          - type: 'null'
+        credential_url:
+          oneOf:
+          - *id007
+          - type: 'null'
+        issued_at:
+          oneOf:
+          - type: string
+            format: date
+          - type: 'null'
+        expires_at:
+          oneOf:
+          - type: string
+            format: date
+          - type: 'null'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+      additionalProperties: false
+      required:
+      - certificate_id
+      - title
+      - issuer
+      - credential_id
+      - credential_url
+      - issued_at
+      - expires_at
+      - created_at
+      - updated_at
+    ProfilePatch:
+      type: object
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        university:
+          type: string
+          minLength: 1
+          maxLength: 255
+        phone_number:
+          oneOf:
+          - type: string
+            maxLength: 20
+          - type: 'null'
+        headline:
+          oneOf:
+          - type: string
+            maxLength: 255
+          - type: 'null'
+        bio:
+          oneOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+        location:
+          oneOf:
+          - type: string
+            maxLength: 255
+          - type: 'null'
+        current_role:
+          oneOf:
+          - type: string
+            maxLength: 255
+          - type: 'null'
+        preferred_role_id: *id001
+        available_hours_per_week:
+          type: integer
+          minimum: 1
+          maximum: 40
+        professional_interests:
+          oneOf:
+          - type: string
+            maxLength: 5000
+          - type: 'null'
+        learning_goals:
+          oneOf:
+          - type: string
+            maxLength: 5000
+          - type: 'null'
+        previous_projects_and_contribution:
+          oneOf:
+          - type: string
+            maxLength: 5000
+          - type: 'null'
+        technologies_to_learn:
+          oneOf:
+          - type: string
+            maxLength: 5000
+          - type: 'null'
+        github_url:
+          oneOf:
+          - type: string
+            maxLength: 1000
+          - type: 'null'
+        linkedin_url:
+          oneOf:
+          - type: string
+            maxLength: 1000
+          - type: 'null'
+        personal_website_url:
+          oneOf:
+          - type: string
+            maxLength: 1000
+          - type: 'null'
+        resume_url:
+          oneOf:
+          - type: string
+            maxLength: 1000
+          - type: 'null'
+        public_email:
+          oneOf:
+          - type: string
+            maxLength: 255
+          - type: 'null'
+        skill_ids:
+          type: array
+          minItems: 1
+          maxItems: 30
+          uniqueItems: true
+          items: *id001
+      additionalProperties: false
+      minProperties: 1
+    ExperienceUpsert:
+      type: object
+      properties:
+        project_name:
+          type: string
+          minLength: 1
+          maxLength: 150
+        role_title:
+          type: string
+          minLength: 1
+          maxLength: 150
+        description:
+          type: string
+          minLength: 1
+          maxLength: 5000
+        repo_url:
+          oneOf:
+          - type: string
+            maxLength: 1000
+          - type: 'null'
+        start_date:
+          oneOf:
+          - type: string
+            pattern: ^\d{4}-(0[1-9]|1[0-2])$
+          - type: 'null'
+        end_date:
+          oneOf:
+          - type: string
+            pattern: ^\d{4}-(0[1-9]|1[0-2])$
+          - type: 'null'
+        is_ongoing:
+          type: boolean
+        skill_ids:
+          type: array
+          minItems: 0
+          maxItems: 20
+          uniqueItems: true
+          items: *id001
+      required:
+      - project_name
+      - role_title
+      - description
+      - is_ongoing
+      - skill_ids
+      additionalProperties: false
+    CertificateUpsert:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        issuer:
+          type: string
+          minLength: 1
+          maxLength: 255
+        credential_id:
+          oneOf:
+          - type: string
+            maxLength: 255
+          - type: 'null'
+        credential_url:
+          oneOf:
+          - type: string
+            maxLength: 1000
+          - type: 'null'
+        issued_at:
+          oneOf:
+          - type: string
+            format: date
+          - type: 'null'
+        expires_at:
+          oneOf:
+          - type: string
+            format: date
+          - type: 'null'
+      required:
+      - title
+      - issuer
+      additionalProperties: false
+    ProblemDetails:
+      type: object
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        error_code:
+          type: string
+        traceId:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: *id007
+      required:
+      - title
+      - status
+      - error_code
+      additionalProperties: true
+    MyProfileSuccess:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        message: *id007
+        data:
+          $ref: '#/components/schemas/MyProfileResponse'
+      required:
+      - success
+      - message
+      - data
+      additionalProperties: false
+    MemberProfileSuccess:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        message: *id007
+        data:
+          $ref: '#/components/schemas/MemberProfileResponse'
+      required:
+      - success
+      - message
+      - data
+      additionalProperties: false
+    ExperienceSuccess:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        message: *id007
+        data:
+          $ref: '#/components/schemas/ExperienceResponse'
+      required:
+      - success
+      - message
+      - data
+      additionalProperties: false
+    CertificateSuccess:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        message: *id007
+        data:
+          $ref: '#/components/schemas/CertificateResponse'
+      required:
+      - success
+      - message
+      - data
+      additionalProperties: false
+    ExperienceListSuccess:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        message: *id007
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExperienceResponse'
+      required:
+      - success
+      - message
+      - data
+      additionalProperties: false
+    CertificateListSuccess:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        message: *id007
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CertificateResponse'
+      required:
+      - success
+      - message
+      - data
+      additionalProperties: false

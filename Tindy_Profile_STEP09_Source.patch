@@ -1,0 +1,992 @@
+diff --git a/src/Tindy.Api/Controllers/MemberCertificatesController.cs b/src/Tindy.Api/Controllers/MemberCertificatesController.cs
+new file mode 100644
+index 0000000..486d1d3
+--- /dev/null
++++ b/src/Tindy.Api/Controllers/MemberCertificatesController.cs
+@@ -0,0 +1,24 @@
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Mvc;
++using Tindy.Application.Exceptions;
++using Tindy.Application.Interfaces.Services;
++
++namespace Tindy.Api.Controllers;
++
++[ApiController]
++[Authorize]
++[Route("api/users/{user_id:guid}/profile/certificates")]
++public sealed class MemberCertificatesController : ControllerBase
++{
++    private readonly ICertificateService _service;
++    public MemberCertificatesController(ICertificateService service) => _service = service;
++
++    [HttpGet]
++    public async Task<IActionResult> List([FromRoute(Name = "user_id")] Guid userId, CancellationToken cancellationToken)
++    {
++        if (!Guid.TryParse(User.FindFirst("sub")?.Value, out var callerId) || callerId == Guid.Empty)
++            throw new InvalidCredentialsException();
++        var data = await _service.ListMemberCertificatesAsync(userId, cancellationToken);
++        return Ok(new { success = true, message = "Member certificates retrieved successfully.", data });
++    }
++}
+diff --git a/src/Tindy.Api/Controllers/MyCertificatesController.cs b/src/Tindy.Api/Controllers/MyCertificatesController.cs
+new file mode 100644
+index 0000000..1550ff8
+--- /dev/null
++++ b/src/Tindy.Api/Controllers/MyCertificatesController.cs
+@@ -0,0 +1,64 @@
++using System.Text.Json;
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Mvc;
++using Tindy.Application.DTOs.Profile;
++using Tindy.Application.Exceptions;
++using Tindy.Application.Interfaces.Services;
++
++namespace Tindy.Api.Controllers;
++
++// DefaultPolicy: JWT + active + completed onboarding; not AuthenticatedOnly.
++[ApiController]
++[Authorize]
++[Route("api/me/profile/certificates")]
++public sealed class MyCertificatesController : ControllerBase
++{
++    private readonly ICertificateService _service;
++    public MyCertificatesController(ICertificateService service) => _service = service;
++
++    private Guid CurrentUserId
++    {
++        get
++        {
++            if (Guid.TryParse(User.FindFirst("sub")?.Value, out var id) && id != Guid.Empty)
++                return id;
++            throw new InvalidCredentialsException();
++        }
++    }
++
++    [HttpGet]
++    public async Task<IActionResult> List(CancellationToken cancellationToken)
++    {
++        var data = await _service.ListMyCertificatesAsync(CurrentUserId, cancellationToken);
++        return Ok(new { success = true, message = "Certificates retrieved successfully.", data });
++    }
++
++    [HttpPost]
++    public async Task<IActionResult> Create([FromBody] JsonElement json, CancellationToken cancellationToken)
++    {
++        var userId = CurrentUserId;
++        var command = CertificateRequestParser.Parse(json);
++        var data = await _service.CreateAsync(userId, command, cancellationToken);
++        // No GET-by-id contract, so do not create a Location pointing to a missing endpoint.
++        return StatusCode(StatusCodes.Status201Created,
++            new { success = true, message = "Certificate created successfully.", data });
++    }
++
++    [HttpPut("{certificate_id:guid}")]
++    public async Task<IActionResult> Update([FromRoute(Name = "certificate_id")] Guid certificateId,
++        [FromBody] JsonElement json, CancellationToken cancellationToken)
++    {
++        var userId = CurrentUserId;
++        var command = CertificateRequestParser.Parse(json);
++        var data = await _service.UpdateAsync(userId, certificateId, command, cancellationToken);
++        return Ok(new { success = true, message = "Certificate updated successfully.", data });
++    }
++
++    [HttpDelete("{certificate_id:guid}")]
++    public async Task<IActionResult> Delete([FromRoute(Name = "certificate_id")] Guid certificateId,
++        CancellationToken cancellationToken)
++    {
++        await _service.DeleteAsync(CurrentUserId, certificateId, cancellationToken);
++        return NoContent();
++    }
++}
+diff --git a/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs b/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
+index 6fc4ff1..ef3a40f 100644
+--- a/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
++++ b/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
+@@ -248,6 +248,9 @@ public static class ServiceCollectionExtensions
+         // Experience business operations (controller added in STEP 08).
+         services.AddScoped<IExperienceService, ExperienceService>();
+ 
++        // Certificate CRUD service (STEP 09).
++        services.AddScoped<ICertificateService, CertificateService>();
++
+ 
+ 
+ 
+diff --git a/src/Tindy.Application/DTOs/Profile/CertificateDtos.cs b/src/Tindy.Application/DTOs/Profile/CertificateDtos.cs
+new file mode 100644
+index 0000000..de1f0f3
+--- /dev/null
++++ b/src/Tindy.Application/DTOs/Profile/CertificateDtos.cs
+@@ -0,0 +1,21 @@
++namespace Tindy.Application.DTOs.Profile;
++
++// Shared command for POST and full-replacement PUT.
++public sealed record CertificateUpsertRequest(
++    string Title,
++    string Issuer,
++    string? CredentialId,
++    string? CredentialUrl,
++    DateOnly? IssuedAt,
++    DateOnly? ExpiresAt);
++
++public sealed record CertificateResponse(
++    Guid CertificateId,
++    string Title,
++    string Issuer,
++    string? CredentialId,
++    string? CredentialUrl,
++    string? IssuedAt,
++    string? ExpiresAt,
++    DateTime CreatedAt,
++    DateTime? UpdatedAt);
+diff --git a/src/Tindy.Application/DTOs/Profile/CertificateRequestParser.cs b/src/Tindy.Application/DTOs/Profile/CertificateRequestParser.cs
+new file mode 100644
+index 0000000..661b912
+--- /dev/null
++++ b/src/Tindy.Application/DTOs/Profile/CertificateRequestParser.cs
+@@ -0,0 +1,114 @@
++using System.Globalization;
++using System.Text.Json;
++using Tindy.Application.Exceptions;
++
++namespace Tindy.Application.DTOs.Profile;
++
++// Strict JSON boundary: unknown, duplicate and account/security fields are rejected.
++public static class CertificateRequestParser
++{
++    private static readonly HashSet<string> Allowed = new(StringComparer.Ordinal)
++    {
++        "title", "issuer", "credential_id", "credential_url", "issued_at", "expires_at"
++    };
++
++    public static CertificateUpsertRequest Parse(JsonElement body)
++    {
++        if (body.ValueKind != JsonValueKind.Object)
++            throw new ProfileValidationException(new Dictionary<string, string[]> { ["body"] = ["The request body must be a JSON object."] });
++
++        var errors = new Dictionary<string, string[]>(StringComparer.Ordinal);
++        var fields = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
++        foreach (var property in body.EnumerateObject())
++        {
++            if (!Allowed.Contains(property.Name))
++                errors[property.Name] = ["This field is not supported."];
++            else if (!fields.TryAdd(property.Name, property.Value))
++                errors[property.Name] = ["Duplicate JSON properties are not allowed."];
++        }
++
++        string? Text(string key, bool required, int maxLength)
++        {
++            if (!fields.TryGetValue(key, out var element))
++            {
++                if (required) errors[key] = ["This field is required."];
++                return null;
++            }
++            if (element.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
++            {
++                errors[key] = ["The field must be a string or null."];
++                return null;
++            }
++            var value = element.ValueKind == JsonValueKind.Null ? null : element.GetString()?.Trim();
++            if (string.IsNullOrWhiteSpace(value)) value = null;
++            if (required && value is null)
++                errors[key] = ["This field cannot be empty or null."];
++            else if (value?.Length > maxLength)
++                errors[key] = [$"The maximum length is {maxLength} characters."];
++            return value;
++        }
++
++        DateOnly? Date(string key)
++        {
++            if (!fields.TryGetValue(key, out var element) || element.ValueKind == JsonValueKind.Null) return null;
++            var raw = element.ValueKind == JsonValueKind.String ? element.GetString() : null;
++            if (raw is null || raw.Length != 10 || raw[4] != '-' || raw[7] != '-' ||
++                !raw.Where((ch, index) => index != 4 && index != 7).All(ch => ch is >= '0' and <= '9') ||
++                !DateOnly.TryParseExact(raw, "yyyy-MM-dd", CultureInfo.InvariantCulture,
++                    DateTimeStyles.None, out var date))
++            {
++                errors[key] = ["The date must be a valid YYYY-MM-DD calendar date."];
++                return null;
++            }
++            return date;
++        }
++
++        var title = Text("title", true, 255);
++        var issuer = Text("issuer", true, 255);
++        var credentialId = Text("credential_id", false, 255);
++        var credentialUrl = Text("credential_url", false, 1000);
++        var issued = Date("issued_at");
++        var expires = Date("expires_at");
++
++        if (credentialUrl is not null && !IsWebUrl(credentialUrl))
++            errors["credential_url"] = ["A valid absolute http:// or https:// URL is required."];
++        if (issued is not null && expires is not null && expires < issued)
++            errors["expires_at"] = ["Expiry must not precede issuance."];
++        if (errors.Count > 0) throw new ProfileValidationException(errors);
++        return new CertificateUpsertRequest(title!, issuer!, credentialId, credentialUrl, issued, expires);
++    }
++
++    internal static bool IsWebUrl(string value) =>
++        Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
++        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps) &&
++        !string.IsNullOrWhiteSpace(uri.Host);
++}
++
++public static class CertificateInputValidator
++{
++    // Revalidate at Application boundary; Services can be called outside HTTP.
++    public static CertificateUpsertRequest Normalize(CertificateUpsertRequest? request)
++    {
++        if (request is null)
++            throw new ProfileValidationException(new Dictionary<string, string[]> { ["body"] = ["A certificate is required."] });
++
++        static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
++        var errors = new Dictionary<string, string[]>(StringComparer.Ordinal);
++        var title = Clean(request.Title);
++        var issuer = Clean(request.Issuer);
++        var credentialId = Clean(request.CredentialId);
++        var credentialUrl = Clean(request.CredentialUrl);
++        if (title is null || title.Length > 255)
++            errors["title"] = ["Title must contain 1 to 255 characters."];
++        if (issuer is null || issuer.Length > 255)
++            errors["issuer"] = ["Issuer must contain 1 to 255 characters."];
++        if (credentialId?.Length > 255)
++            errors["credential_id"] = ["Credential ID must not exceed 255 characters."];
++        if (credentialUrl is not null && (credentialUrl.Length > 1000 || !CertificateRequestParser.IsWebUrl(credentialUrl)))
++            errors["credential_url"] = ["A valid absolute http:// or https:// URL up to 1000 characters is required."];
++        if (request.IssuedAt is not null && request.ExpiresAt is not null && request.ExpiresAt < request.IssuedAt)
++            errors["expires_at"] = ["Expiry must not precede issuance."];
++        if (errors.Count > 0) throw new ProfileValidationException(errors);
++        return request with { Title = title!, Issuer = issuer!, CredentialId = credentialId, CredentialUrl = credentialUrl };
++    }
++}
+diff --git a/src/Tindy.Application/Interfaces/Repositories/ICertificateRepository.cs b/src/Tindy.Application/Interfaces/Repositories/ICertificateRepository.cs
+new file mode 100644
+index 0000000..7bc5404
+--- /dev/null
++++ b/src/Tindy.Application/Interfaces/Repositories/ICertificateRepository.cs
+@@ -0,0 +1,16 @@
++using Tindy.Application.DTOs.Profile;
++using Tindy.Application.Entities;
++
++namespace Tindy.Application.Interfaces.Repositories;
++
++public interface ICertificateRepository
++{
++    Task<bool> IsEligibleUserAsync(Guid userId, CancellationToken cancellationToken = default);
++    Task<IReadOnlyList<CertificateResponse>> ListOwnedAsync(Guid userId, CancellationToken cancellationToken = default);
++    Task<CertificateResponse?> GetOwnedAsync(Guid userId, Guid certificateId, CancellationToken cancellationToken = default);
++    Task<UserCertificate?> FindOwnedForUpdateAsync(Guid userId, Guid certificateId, CancellationToken cancellationToken = default);
++    void Add(UserCertificate certificate);
++    void Remove(UserCertificate certificate);
++    Task SaveChangesAsync(CancellationToken cancellationToken = default);
++    Task<T> ExecuteInTransactionAsync<T>(Guid ownerUserId, Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default);
++}
+diff --git a/src/Tindy.Application/Interfaces/Services/ICertificateService.cs b/src/Tindy.Application/Interfaces/Services/ICertificateService.cs
+new file mode 100644
+index 0000000..3cf25c3
+--- /dev/null
++++ b/src/Tindy.Application/Interfaces/Services/ICertificateService.cs
+@@ -0,0 +1,13 @@
++using Tindy.Application.DTOs.Profile;
++
++namespace Tindy.Application.Interfaces.Services;
++
++// HTTP Controllers must derive callerUserId from authenticated JWT sub, never the request body.
++public interface ICertificateService
++{
++    Task<IReadOnlyList<CertificateResponse>> ListMyCertificatesAsync(Guid callerUserId, CancellationToken cancellationToken = default);
++    Task<IReadOnlyList<CertificateResponse>> ListMemberCertificatesAsync(Guid targetUserId, CancellationToken cancellationToken = default);
++    Task<CertificateResponse> CreateAsync(Guid callerUserId, CertificateUpsertRequest request, CancellationToken cancellationToken = default);
++    Task<CertificateResponse> UpdateAsync(Guid callerUserId, Guid certificateId, CertificateUpsertRequest request, CancellationToken cancellationToken = default);
++    Task DeleteAsync(Guid callerUserId, Guid certificateId, CancellationToken cancellationToken = default);
++}
+diff --git a/src/Tindy.Application/Services/CertificateService.cs b/src/Tindy.Application/Services/CertificateService.cs
+new file mode 100644
+index 0000000..b7f71ae
+--- /dev/null
++++ b/src/Tindy.Application/Services/CertificateService.cs
+@@ -0,0 +1,93 @@
++using Tindy.Application.DTOs.Profile;
++using Tindy.Application.Entities;
++using Tindy.Application.Exceptions;
++using Tindy.Application.Interfaces.Repositories;
++using Tindy.Application.Interfaces.Services;
++
++namespace Tindy.Application.Services;
++
++public sealed class CertificateService : ICertificateService
++{
++    private readonly ICertificateRepository _repository;
++
++    public CertificateService(ICertificateRepository repository) => _repository = repository;
++
++    public async Task<IReadOnlyList<CertificateResponse>> ListMyCertificatesAsync(Guid callerUserId, CancellationToken cancellationToken = default)
++    {
++        await RequireEligibleUserAsync(callerUserId, cancellationToken);
++        return await _repository.ListOwnedAsync(callerUserId, cancellationToken);
++    }
++
++    // Member API caller is checked by the DefaultPolicy; target is checked here.
++    public async Task<IReadOnlyList<CertificateResponse>> ListMemberCertificatesAsync(Guid targetUserId, CancellationToken cancellationToken = default)
++    {
++        if (targetUserId == Guid.Empty || !await _repository.IsEligibleUserAsync(targetUserId, cancellationToken))
++            throw new NotFoundException("Profile was not found.");
++        return await _repository.ListOwnedAsync(targetUserId, cancellationToken);
++    }
++
++    public Task<CertificateResponse> CreateAsync(Guid callerUserId, CertificateUpsertRequest request, CancellationToken cancellationToken = default)
++    {
++        var normalized = CertificateInputValidator.Normalize(request);
++        return _repository.ExecuteInTransactionAsync(callerUserId, async token =>
++        {
++            await RequireEligibleUserAsync(callerUserId, token);
++            var certificate = new UserCertificate
++            {
++                CertificateId = Guid.NewGuid(),
++                UserId = callerUserId,
++                Title = normalized.Title,
++                Issuer = normalized.Issuer,
++                CredentialId = normalized.CredentialId,
++                CredentialUrl = normalized.CredentialUrl,
++                IssuedAt = normalized.IssuedAt,
++                ExpiresAt = normalized.ExpiresAt,
++                CreatedAt = DateTime.UtcNow
++            };
++            _repository.Add(certificate);
++            await _repository.SaveChangesAsync(token);
++            return await _repository.GetOwnedAsync(callerUserId, certificate.CertificateId, token)
++                ?? throw new NotFoundException("Certificate was not found.");
++        }, cancellationToken);
++    }
++
++    public Task<CertificateResponse> UpdateAsync(Guid callerUserId, Guid certificateId, CertificateUpsertRequest request, CancellationToken cancellationToken = default)
++    {
++        var normalized = CertificateInputValidator.Normalize(request);
++        return _repository.ExecuteInTransactionAsync(callerUserId, async token =>
++        {
++            await RequireEligibleUserAsync(callerUserId, token);
++            var certificate = await _repository.FindOwnedForUpdateAsync(callerUserId, certificateId, token)
++                ?? throw new NotFoundException("Certificate was not found.");
++            certificate.Title = normalized.Title;
++            certificate.Issuer = normalized.Issuer;
++            certificate.CredentialId = normalized.CredentialId;
++            certificate.CredentialUrl = normalized.CredentialUrl;
++            certificate.IssuedAt = normalized.IssuedAt;
++            certificate.ExpiresAt = normalized.ExpiresAt;
++            certificate.UpdatedAt = DateTime.UtcNow;
++            await _repository.SaveChangesAsync(token);
++            return await _repository.GetOwnedAsync(callerUserId, certificateId, token)
++                ?? throw new NotFoundException("Certificate was not found.");
++        }, cancellationToken);
++    }
++
++    public async Task DeleteAsync(Guid callerUserId, Guid certificateId, CancellationToken cancellationToken = default)
++    {
++        await _repository.ExecuteInTransactionAsync(callerUserId, async token =>
++        {
++            await RequireEligibleUserAsync(callerUserId, token);
++            var certificate = await _repository.FindOwnedForUpdateAsync(callerUserId, certificateId, token)
++                ?? throw new NotFoundException("Certificate was not found.");
++            _repository.Remove(certificate);
++            await _repository.SaveChangesAsync(token);
++            return true;
++        }, cancellationToken);
++    }
++
++    private async Task RequireEligibleUserAsync(Guid userId, CancellationToken token)
++    {
++        if (userId == Guid.Empty || !await _repository.IsEligibleUserAsync(userId, token))
++            throw new NotFoundException("Certificate was not found.");
++    }
++}
+diff --git a/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs b/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
+index b31d99b..d2d3115 100644
+--- a/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
++++ b/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
+@@ -69,6 +69,9 @@ public static class ServicesCollectionExtensions
+         // Experiences persistence (STEP 07).
+         services.AddScoped<IExperienceRepository, ExperienceRepository>();
+ 
++        // Certificate persistence (STEP 09).
++        services.AddScoped<ICertificateRepository, CertificateRepository>();
++
+         // Lightweight read-only check for protected business APIs
+         services.AddScoped<IOnboardingAccessReader, OnboardingAccessReader>();
+ 
+diff --git a/src/Tindy.Infrastructure/Repositories/CertificateRepository.cs b/src/Tindy.Infrastructure/Repositories/CertificateRepository.cs
+new file mode 100644
+index 0000000..aa60fa4
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Repositories/CertificateRepository.cs
+@@ -0,0 +1,65 @@
++using System.Globalization;
++using Microsoft.EntityFrameworkCore;
++using Tindy.Application.DTOs.Profile;
++using Tindy.Application.Entities;
++using Tindy.Application.Interfaces.Repositories;
++using Tindy.Infrastructure.Persistence;
++
++namespace Tindy.Infrastructure.Repositories;
++
++public sealed class CertificateRepository : ICertificateRepository
++{
++    private readonly TindyDbContext _context;
++
++    public CertificateRepository(TindyDbContext context) => _context = context;
++
++    public Task<bool> IsEligibleUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
++        _context.Users.AsNoTracking().AnyAsync(user => user.UserId == userId &&
++            user.Status == "active" && user.DeletedAt == null && user.IsOnboardingCompleted && user.Profile != null,
++            cancellationToken);
++
++    public async Task<IReadOnlyList<CertificateResponse>> ListOwnedAsync(Guid userId, CancellationToken cancellationToken = default)
++    {
++        var rows = await ForOwner(userId)
++            .OrderByDescending(cert => cert.IssuedAt.HasValue)
++            .ThenByDescending(cert => cert.IssuedAt)
++            .ThenByDescending(cert => cert.CreatedAt)
++            .ThenBy(cert => cert.CertificateId)
++            .ToListAsync(cancellationToken);
++        return rows.Select(ToResponse).ToArray();
++    }
++
++    public async Task<CertificateResponse?> GetOwnedAsync(Guid userId, Guid certificateId, CancellationToken cancellationToken = default)
++    {
++        var row = await ForOwner(userId).SingleOrDefaultAsync(cert => cert.CertificateId == certificateId, cancellationToken);
++        return row is null ? null : ToResponse(row);
++    }
++
++    public Task<UserCertificate?> FindOwnedForUpdateAsync(Guid userId, Guid certificateId, CancellationToken cancellationToken = default) =>
++        _context.UserCertificates.SingleOrDefaultAsync(cert => cert.UserId == userId && cert.CertificateId == certificateId,
++            cancellationToken);
++
++    public void Add(UserCertificate certificate) => _context.UserCertificates.Add(certificate);
++    public void Remove(UserCertificate certificate) => _context.UserCertificates.Remove(certificate);
++    public Task SaveChangesAsync(CancellationToken cancellationToken = default) => _context.SaveChangesAsync(cancellationToken);
++
++    public async Task<T> ExecuteInTransactionAsync<T>(Guid ownerUserId, Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
++    {
++        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
++        // Consistent with Profile/Experience writes: lock the owner row before mutations.
++        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM users WHERE user_id = {ownerUserId} FOR UPDATE", cancellationToken);
++        var result = await operation(cancellationToken);
++        await transaction.CommitAsync(cancellationToken);
++        return result;
++    }
++
++    private IQueryable<UserCertificate> ForOwner(Guid userId) =>
++        _context.UserCertificates.AsNoTracking().Where(cert => cert.UserId == userId);
++
++    private static CertificateResponse ToResponse(UserCertificate certificate) =>
++        new(certificate.CertificateId, certificate.Title, certificate.Issuer,
++            certificate.CredentialId, certificate.CredentialUrl,
++            certificate.IssuedAt?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
++            certificate.ExpiresAt?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
++            certificate.CreatedAt, certificate.UpdatedAt);
++}
+diff --git a/tests/Tindy.Tests/Profile/CertificateControllerTests.cs b/tests/Tindy.Tests/Profile/CertificateControllerTests.cs
+new file mode 100644
+index 0000000..4265e3f
+--- /dev/null
++++ b/tests/Tindy.Tests/Profile/CertificateControllerTests.cs
+@@ -0,0 +1,230 @@
++using System.Reflection;
++using System.Security.Claims;
++using System.Text.Json;
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.Mvc;
++using Tindy.Api.Controllers;
++using Tindy.Application.DTOs.Profile;
++using Tindy.Application.Exceptions;
++using Tindy.Application.Interfaces.Services;
++using Xunit;
++
++namespace Tindy.Tests.Profile;
++
++public sealed class CertificateControllerTests
++{
++    private static readonly Guid Owner = Guid.Parse("11111111-1111-4111-8111-111111111111");
++    private static readonly Guid Target = Guid.Parse("22222222-2222-4222-8222-222222222222");
++    private static readonly Guid CertificateId = Guid.Parse("33333333-3333-4333-8333-333333333333");
++    private static readonly JsonSerializerOptions Snake = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
++    private const string Body = """
++    {"title":" AWS Badge ","issuer":"AWS","credential_id":"ID-123","credential_url":"https://www.credly.com/badges/test","issued_at":"2026-09-01","expires_at":null}
++    """;
++
++    private static CertificateResponse Example() => new(CertificateId, "AWS Badge", "AWS", "ID-123",
++        "https://www.credly.com/badges/test", "2026-09-01", null,
++        new DateTime(2026, 10, 20, 10, 0, 0, DateTimeKind.Utc), null);
++
++    private static T Attach<T>(T controller, string? sub) where T : ControllerBase
++    {
++        controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
++        if (sub is not null)
++            controller.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", sub)], "test"));
++        return controller;
++    }
++
++    private static JsonDocument Serialize(object? value) =>
++        JsonDocument.Parse(JsonSerializer.Serialize(value, Snake));
++
++    [Fact]
++    public async Task GetMyCertificates_Returns200EmptyArray()
++    {
++        var fake = new StubCertificateService { Result = [] };
++        var controller = Attach(new MyCertificatesController(fake), Owner.ToString("D"));
++        var response = Assert.IsType<OkObjectResult>(await controller.List(CancellationToken.None));
++        Assert.Equal(200, response.StatusCode);
++        Assert.Equal(Owner, fake.LastCaller);
++        using var json = Serialize(response.Value);
++        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
++        Assert.Empty(json.RootElement.GetProperty("data").EnumerateArray());
++    }
++
++    [Fact]
++    public async Task Post_UsesJwtSub_ParsesDateAndReturns201WithoutPrivateFields()
++    {
++        var fake = new StubCertificateService();
++        var controller = Attach(new MyCertificatesController(fake), Owner.ToString("D"));
++        using var body = JsonDocument.Parse(Body);
++        using var cts = new CancellationTokenSource();
++        var response = Assert.IsType<ObjectResult>(await controller.Create(body.RootElement, cts.Token));
++        Assert.Equal(201, response.StatusCode);
++        Assert.Equal(Owner, fake.LastCaller);
++        Assert.Equal(cts.Token, fake.LastToken);
++        Assert.Equal("AWS Badge", fake.LastRequest?.Title);
++        Assert.Equal(new DateOnly(2026, 9, 1), fake.LastRequest?.IssuedAt);
++        using var json = Serialize(response.Value);
++        var item = json.RootElement.GetProperty("data");
++        Assert.Equal(CertificateId.ToString("D"), item.GetProperty("certificate_id").GetString());
++        Assert.Equal("2026-09-01", item.GetProperty("issued_at").GetString());
++        foreach (var forbidden in new[] { "user_id", "primary_email", "phone_number", "is_verified", "verification_status", "file_url" })
++            Assert.False(item.TryGetProperty(forbidden, out _));
++    }
++
++    [Fact]
++    public async Task Put_UsesRouteId_Returns200()
++    {
++        var fake = new StubCertificateService();
++        var controller = Attach(new MyCertificatesController(fake), Owner.ToString("D"));
++        using var body = JsonDocument.Parse(Body);
++        var response = Assert.IsType<OkObjectResult>(await controller.Update(CertificateId, body.RootElement, CancellationToken.None));
++        Assert.Equal(200, response.StatusCode);
++        Assert.Equal(CertificateId, fake.LastId);
++        Assert.Equal(Owner, fake.LastCaller);
++        using var json = Serialize(response.Value);
++        Assert.Equal("Certificate updated successfully.", json.RootElement.GetProperty("message").GetString());
++    }
++
++    [Fact]
++    public async Task Delete_UsesOwnerAndId_Returns204NoContent()
++    {
++        var fake = new StubCertificateService();
++        var controller = Attach(new MyCertificatesController(fake), Owner.ToString("D"));
++        var result = Assert.IsType<NoContentResult>(await controller.Delete(CertificateId, CancellationToken.None));
++        Assert.Equal(204, result.StatusCode);
++        Assert.Equal(Owner, fake.LastCaller);
++        Assert.Equal(CertificateId, fake.LastId);
++    }
++
++    [Theory]
++    [InlineData("{\"title\":\"X\",\"issuer\":\"Y\",\"is_verified\":true}")]
++    [InlineData("{\"title\":\"X\",\"issuer\":\"Y\",\"issued_at\":\"2026-02-30\"}")]
++    [InlineData("{\"title\":\"X\",\"issuer\":\"Y\",\"credential_url\":\"ftp://bad\"}")]
++    public async Task InvalidBody_RejectsPOSTAndPUTWithoutCallingService(string invalidBody)
++    {
++        var fake = new StubCertificateService();
++        var controller = Attach(new MyCertificatesController(fake), Owner.ToString("D"));
++        using var body = JsonDocument.Parse(invalidBody);
++        await Assert.ThrowsAsync<ProfileValidationException>(() => controller.Create(body.RootElement, CancellationToken.None));
++        await Assert.ThrowsAsync<ProfileValidationException>(() => controller.Update(CertificateId, body.RootElement, CancellationToken.None));
++        Assert.Equal(0, fake.Mutations);
++    }
++
++    [Fact]
++    public async Task MemberList_UsesTargetID_AndReturnsOnlySafeProfessionalData()
++    {
++        var fake = new StubCertificateService { Result = [Example()] };
++        var controller = Attach(new MemberCertificatesController(fake), Owner.ToString("D"));
++        var response = Assert.IsType<OkObjectResult>(await controller.List(Target, CancellationToken.None));
++        Assert.Equal(Target, fake.LastTarget);
++        Assert.NotEqual(Owner, fake.LastTarget);
++        using var json = Serialize(response.Value);
++        var certificate = json.RootElement.GetProperty("data")[0];
++        Assert.Equal("AWS Badge", certificate.GetProperty("title").GetString());
++        Assert.False(certificate.TryGetProperty("user_id", out _));
++        Assert.False(certificate.TryGetProperty("verification_status", out _));
++    }
++
++    [Theory]
++    [InlineData(null)]
++    [InlineData("")]
++    [InlineData("bad-sub")]
++    [InlineData("00000000-0000-0000-0000-000000000000")]
++    public async Task MissingOrInvalidJwtSub_IsRejected(string? sub)
++    {
++        var fake = new StubCertificateService();
++        var myController = Attach(new MyCertificatesController(fake), sub);
++        var memberController = Attach(new MemberCertificatesController(fake), sub);
++        await Assert.ThrowsAsync<InvalidCredentialsException>(() => myController.List(CancellationToken.None));
++        await Assert.ThrowsAsync<InvalidCredentialsException>(() => memberController.List(Target, CancellationToken.None));
++        Assert.Null(fake.LastCaller);
++        Assert.Null(fake.LastTarget);
++    }
++
++    [Fact]
++    public async Task ForeignCertificate_Throws404FromService()
++    {
++        var fake = new StubCertificateService { RejectForeign = true };
++        var controller = Attach(new MyCertificatesController(fake), Owner.ToString("D"));
++        using var body = JsonDocument.Parse(Body);
++        await Assert.ThrowsAsync<NotFoundException>(() => controller.Update(CertificateId, body.RootElement, CancellationToken.None));
++        await Assert.ThrowsAsync<NotFoundException>(() => controller.Delete(CertificateId, CancellationToken.None));
++    }
++
++    [Fact]
++    public void RoutesAndAuthorization_UseDefaultPolicyAndReadOnlyMember()
++    {
++        var my = typeof(MyCertificatesController);
++        var member = typeof(MemberCertificatesController);
++        foreach (var type in new[] { my, member })
++        {
++            var authorize = type.GetCustomAttribute<AuthorizeAttribute>();
++            Assert.NotNull(authorize);
++            Assert.Null(authorize!.Policy);
++            Assert.Null(type.GetCustomAttribute<AllowAnonymousAttribute>());
++        }
++        Assert.Equal("api/me/profile/certificates", my.GetCustomAttribute<RouteAttribute>()!.Template);
++        Assert.Equal("api/users/{user_id:guid}/profile/certificates", member.GetCustomAttribute<RouteAttribute>()!.Template);
++        var myMethods = my.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
++        Assert.Single(myMethods, method => method.GetCustomAttribute<HttpGetAttribute>() is not null);
++        Assert.Single(myMethods, method => method.GetCustomAttribute<HttpPostAttribute>() is not null);
++        Assert.Equal("{certificate_id:guid}", my.GetMethod("Update")!.GetCustomAttribute<HttpPutAttribute>()!.Template);
++        Assert.Equal("{certificate_id:guid}", my.GetMethod("Delete")!.GetCustomAttribute<HttpDeleteAttribute>()!.Template);
++        var methods = member.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
++        Assert.Single(methods, method => method.GetCustomAttribute<HttpGetAttribute>() is not null);
++        Assert.DoesNotContain(methods, method => method.GetCustomAttribute<HttpPostAttribute>() is not null ||
++            method.GetCustomAttribute<HttpPutAttribute>() is not null || method.GetCustomAttribute<HttpDeleteAttribute>() is not null);
++    }
++
++    private sealed class StubCertificateService : ICertificateService
++    {
++        public IReadOnlyList<CertificateResponse> Result { get; init; } = [Example()];
++        public bool RejectForeign { get; init; }
++        public Guid? LastCaller { get; private set; }
++        public Guid? LastTarget { get; private set; }
++        public Guid? LastId { get; private set; }
++        public CertificateUpsertRequest? LastRequest { get; private set; }
++        public CancellationToken LastToken { get; private set; }
++        public int Mutations { get; private set; }
++
++        public Task<IReadOnlyList<CertificateResponse>> ListMyCertificatesAsync(Guid callerUserId, CancellationToken token = default)
++        {
++            LastCaller = callerUserId;
++            return Task.FromResult(Result);
++        }
++
++        public Task<IReadOnlyList<CertificateResponse>> ListMemberCertificatesAsync(Guid targetUserId, CancellationToken token = default)
++        {
++            LastTarget = targetUserId;
++            return Task.FromResult(Result);
++        }
++
++        public Task<CertificateResponse> CreateAsync(Guid callerUserId, CertificateUpsertRequest request, CancellationToken token = default)
++        {
++            LastCaller = callerUserId;
++            LastRequest = request;
++            LastToken = token;
++            Mutations++;
++            return Task.FromResult(Example());
++        }
++
++        public Task<CertificateResponse> UpdateAsync(Guid callerUserId, Guid certificateId, CertificateUpsertRequest request, CancellationToken token = default)
++        {
++            LastCaller = callerUserId;
++            LastId = certificateId;
++            LastRequest = request;
++            Mutations++;
++            if (RejectForeign) throw new NotFoundException("Certificate was not found.");
++            return Task.FromResult(Example());
++        }
++
++        public Task DeleteAsync(Guid callerUserId, Guid certificateId, CancellationToken token = default)
++        {
++            LastCaller = callerUserId;
++            LastId = certificateId;
++            Mutations++;
++            if (RejectForeign) throw new NotFoundException("Certificate was not found.");
++            return Task.CompletedTask;
++        }
++    }
++}
+diff --git a/tests/Tindy.Tests/Profile/CertificateServiceTests.cs b/tests/Tindy.Tests/Profile/CertificateServiceTests.cs
+new file mode 100644
+index 0000000..769fcbb
+--- /dev/null
++++ b/tests/Tindy.Tests/Profile/CertificateServiceTests.cs
+@@ -0,0 +1,264 @@
++using System.Text.Json;
++using Microsoft.EntityFrameworkCore;
++using Tindy.Application.DTOs.Profile;
++using Tindy.Application.Entities;
++using Tindy.Application.Exceptions;
++using Tindy.Application.Interfaces.Repositories;
++using Tindy.Application.Services;
++using Tindy.Infrastructure.Persistence;
++using Xunit;
++
++namespace Tindy.Tests.Profile;
++
++// No Docker: parser, business logic, ownership, rollback simulation and EF metadata.
++public sealed class CertificateServiceTests
++{
++    private static readonly Guid Owner = Guid.Parse("11111111-1111-4111-8111-111111111111");
++    private static readonly Guid Stranger = Guid.Parse("22222222-2222-4222-8222-222222222222");
++
++    private static CertificateUpsertRequest Request() => new(
++        "  AWS Certified Cloud Practitioner  ", " AWS ", "  CERT-123  ",
++        " https://www.credly.com/badges/example ", new DateOnly(2026, 9, 1), new DateOnly(2029, 9, 1));
++
++    [Theory]
++    [InlineData("[]")]
++    [InlineData("{}")]
++    [InlineData("{\"title\":\"T\",\"issuer\":null}")]
++    [InlineData("{\"title\":\"T\",\"issuer\":\"I\",\"user_id\":\"bad\"}")]
++    [InlineData("{\"title\":\"T\",\"title\":\"U\",\"issuer\":\"I\"}")]
++    [InlineData("{\"title\":\"T\",\"issuer\":\"I\",\"is_verified\":true}")]
++    [InlineData("{\"title\":\"T\",\"issuer\":\"I\",\"credential_url\":\"javascript:alert(1)\"}")]
++    [InlineData("{\"title\":\"T\",\"issuer\":\"I\",\"issued_at\":\"2026-02-30\"}")]
++    [InlineData("{\"title\":\"T\",\"issuer\":\"I\",\"issued_at\":\"2026-2-01\"}")]
++    [InlineData("{\"title\":\"T\",\"issuer\":\"I\",\"issued_at\":\"2026-10-02\",\"expires_at\":\"2026-10-01\"}")]
++    [InlineData("{\"title\":3,\"issuer\":\"I\"}")]
++    public void Parser_RejectsInvalidPayloads(string json)
++    {
++        using var body = JsonDocument.Parse(json);
++        Assert.Throws<ProfileValidationException>(() => CertificateRequestParser.Parse(body.RootElement));
++    }
++
++    [Fact]
++    public void Parser_ValidNullableDataAndTrim()
++    {
++        using var body = JsonDocument.Parse("""{"title":"  Badge  ","issuer":"  Organization ","credential_id":"  ","credential_url":null,"issued_at":"2024-02-29","expires_at":null}""");
++        var result = CertificateRequestParser.Parse(body.RootElement);
++        Assert.Equal("Badge", result.Title);
++        Assert.Equal("Organization", result.Issuer);
++        Assert.Null(result.CredentialId);
++        Assert.Null(result.CredentialUrl);
++        Assert.Equal(new DateOnly(2024, 2, 29), result.IssuedAt);
++        Assert.Null(result.ExpiresAt);
++
++        using var minimal = JsonDocument.Parse("""{"title":"T","issuer":"I"}""");
++        var noOptionals = CertificateRequestParser.Parse(minimal.RootElement);
++        Assert.Null(noOptionals.IssuedAt);
++        Assert.Null(noOptionals.ExpiresAt);
++    }
++
++    [Fact]
++    public void DirectApplicationCommands_AreRevalidated()
++    {
++        Assert.Throws<ProfileValidationException>(() => CertificateInputValidator.Normalize(
++            Request() with { CredentialUrl = "ftp://example.org" }));
++        Assert.Throws<ProfileValidationException>(() => CertificateInputValidator.Normalize(
++            Request() with { Title = " " }));
++        Assert.Throws<ProfileValidationException>(() => CertificateInputValidator.Normalize(
++            Request() with { ExpiresAt = new DateOnly(2025, 1, 1) }));
++        Assert.Throws<ProfileValidationException>(() => CertificateInputValidator.Normalize(null));
++    }
++
++    [Fact]
++    public async Task Create_NormalizesPersistsWithUTCAndDateOnlyResponse()
++    {
++        var repo = new FakeRepository();
++        var result = await new CertificateService(repo).CreateAsync(Owner, Request());
++        Assert.Equal("AWS Certified Cloud Practitioner", result.Title);
++        Assert.Equal("AWS", result.Issuer);
++        Assert.Equal("CERT-123", result.CredentialId);
++        Assert.Equal("https://www.credly.com/badges/example", result.CredentialUrl);
++        Assert.Equal("2026-09-01", result.IssuedAt);
++        Assert.Equal("2029-09-01", result.ExpiresAt);
++        Assert.Equal(DateTimeKind.Utc, result.CreatedAt.Kind);
++        Assert.Null(result.UpdatedAt);
++        Assert.Equal(1, repo.SaveCalls);
++        Assert.Equal(1, repo.Transactions);
++        Assert.Equal(Owner, Assert.Single(repo.Items.Values).UserId);
++    }
++
++    [Fact]
++    public async Task Create_AllowsNullDatesAndCredentialData()
++    {
++        var result = await new CertificateService(new FakeRepository()).CreateAsync(Owner,
++            Request() with { CredentialId = null, CredentialUrl = null, IssuedAt = null, ExpiresAt = null });
++        Assert.Null(result.CredentialId);
++        Assert.Null(result.CredentialUrl);
++        Assert.Null(result.IssuedAt);
++        Assert.Null(result.ExpiresAt);
++    }
++
++    [Fact]
++    public async Task Update_IsFullReplacement_OwnerOnly()
++    {
++        var repo = new FakeRepository();
++        var cert = repo.Seed(Owner);
++        var service = new CertificateService(repo);
++        var result = await service.UpdateAsync(Owner, cert.CertificateId, Request() with
++        {
++            Title = "Renewed", CredentialId = null, CredentialUrl = null, IssuedAt = null, ExpiresAt = null
++        });
++        Assert.Equal("Renewed", result.Title);
++        Assert.Null(result.CredentialUrl);
++        Assert.Null(result.IssuedAt);
++        Assert.NotNull(result.UpdatedAt);
++        Assert.Equal(cert.CertificateId, result.CertificateId);
++        Assert.Equal(1, repo.SaveCalls);
++        Assert.Equal(1, repo.Transactions);
++    }
++
++    [Fact]
++    public async Task ForeignCertificate_Is404OnUpdateDelete_AndNeverMutatesOtherUsers()
++    {
++        var repo = new FakeRepository();
++        var cert = repo.Seed(Stranger);
++        var service = new CertificateService(repo);
++        await Assert.ThrowsAsync<NotFoundException>(() => service.UpdateAsync(Owner, cert.CertificateId, Request()));
++        await Assert.ThrowsAsync<NotFoundException>(() => service.DeleteAsync(Owner, cert.CertificateId));
++        Assert.Equal("Existing", Assert.Single(repo.Items.Values).Title);
++        Assert.Equal(0, repo.SaveCalls);
++    }
++
++    [Fact]
++    public async Task Delete_OwnerSucceeds_SecondDelete404()
++    {
++        var repo = new FakeRepository();
++        var cert = repo.Seed(Owner);
++        var service = new CertificateService(repo);
++        await service.DeleteAsync(Owner, cert.CertificateId);
++        Assert.Empty(repo.Items);
++        await Assert.ThrowsAsync<NotFoundException>(() => service.DeleteAsync(Owner, cert.CertificateId));
++    }
++
++    [Fact]
++    public async Task InvalidOwnerAndTargetRejected_ButEligibleEmptyListReturned()
++    {
++        var repo = new FakeRepository();
++        var service = new CertificateService(repo);
++        Assert.Empty(await service.ListMyCertificatesAsync(Owner));
++        Assert.Empty(await service.ListMemberCertificatesAsync(Stranger));
++        await Assert.ThrowsAsync<NotFoundException>(() => service.ListMemberCertificatesAsync(Guid.Empty));
++        await Assert.ThrowsAsync<NotFoundException>(() => service.CreateAsync(Guid.Empty, Request()));
++        repo.Eligible = false;
++        await Assert.ThrowsAsync<NotFoundException>(() => service.ListMyCertificatesAsync(Owner));
++        await Assert.ThrowsAsync<NotFoundException>(() => service.ListMemberCertificatesAsync(Stranger));
++    }
++
++    [Fact]
++    public async Task MemberReadAndOwnerList_ReturnOnlyTargetCertificates()
++    {
++        var repo = new FakeRepository();
++        repo.Seed(Owner);
++        repo.Seed(Stranger);
++        var service = new CertificateService(repo);
++        Assert.Single(await service.ListMyCertificatesAsync(Owner));
++        Assert.Single(await service.ListMemberCertificatesAsync(Stranger));
++    }
++
++    [Fact]
++    public async Task SaveFailure_RollsBackUpdatedAndCreatedEntities()
++    {
++        var repo = new FakeRepository { FailOnSave = true };
++        var original = repo.Seed(Owner);
++        var service = new CertificateService(repo);
++        await Assert.ThrowsAsync<InvalidOperationException>(() => service.UpdateAsync(Owner, original.CertificateId,
++            Request() with { Title = "Changed" }));
++        Assert.Equal("Existing", Assert.Single(repo.Items.Values).Title);
++        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(Owner, Request()));
++        Assert.Single(repo.Items);
++    }
++
++    [Fact]
++    public void EfMetadata_HasExpectedFKColumnsIndexAndDateTypes()
++    {
++        using var context = new TindyDbContext(new DbContextOptionsBuilder<TindyDbContext>()
++            .UseNpgsql("Host=localhost;Database=unused;Username=unused;Password=unused").Options);
++        var entity = context.Model.FindEntityType(typeof(UserCertificate));
++        Assert.NotNull(entity);
++        Assert.Equal("user_certificates", entity!.GetTableName());
++        Assert.Equal("date", entity.FindProperty(nameof(UserCertificate.IssuedAt))!.GetColumnType());
++        Assert.Equal("date", entity.FindProperty(nameof(UserCertificate.ExpiresAt))!.GetColumnType());
++        Assert.Contains(entity.GetForeignKeys(), fk => fk.PrincipalEntityType.ClrType == typeof(User) &&
++            fk.DeleteBehavior == DeleteBehavior.Cascade);
++        Assert.Contains(entity.GetIndexes(), idx => idx.Properties.Select(p => p.Name)
++            .SequenceEqual([nameof(UserCertificate.UserId)]));
++    }
++
++    private static CertificateResponse ToResponse(UserCertificate value) => new(
++        value.CertificateId, value.Title, value.Issuer, value.CredentialId, value.CredentialUrl,
++        value.IssuedAt?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
++        value.ExpiresAt?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
++        value.CreatedAt, value.UpdatedAt);
++
++    private sealed class FakeRepository : ICertificateRepository
++    {
++        public Dictionary<Guid, UserCertificate> Items { get; } = new();
++        public bool Eligible { get; set; } = true;
++        public bool FailOnSave { get; set; }
++        public int SaveCalls { get; private set; }
++        public int Transactions { get; private set; }
++
++        public UserCertificate Seed(Guid userId)
++        {
++            var item = new UserCertificate
++            {
++                UserId = userId, CertificateId = Guid.NewGuid(), Title = "Existing", Issuer = "Org",
++                CreatedAt = DateTime.UtcNow, IssuedAt = new DateOnly(2024, 1, 1)
++            };
++            Items.Add(item.CertificateId, item);
++            return item;
++        }
++
++        public Task<bool> IsEligibleUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
++            Task.FromResult(Eligible && userId != Guid.Empty);
++
++        public Task<IReadOnlyList<CertificateResponse>> ListOwnedAsync(Guid userId, CancellationToken cancellationToken = default) =>
++            Task.FromResult<IReadOnlyList<CertificateResponse>>(Items.Values.Where(item => item.UserId == userId)
++                .Select(ToResponse).ToArray());
++
++        public Task<CertificateResponse?> GetOwnedAsync(Guid userId, Guid certificateId, CancellationToken cancellationToken = default) =>
++            Task.FromResult(Items.TryGetValue(certificateId, out var value) && value.UserId == userId ? ToResponse(value) : null);
++
++        public Task<UserCertificate?> FindOwnedForUpdateAsync(Guid userId, Guid certificateId, CancellationToken cancellationToken = default) =>
++            Task.FromResult(Items.TryGetValue(certificateId, out var value) && value.UserId == userId ? value : null);
++
++        public void Add(UserCertificate certificate) => Items.Add(certificate.CertificateId, certificate);
++        public void Remove(UserCertificate certificate) => Items.Remove(certificate.CertificateId);
++        public Task SaveChangesAsync(CancellationToken cancellationToken = default)
++        {
++            SaveCalls++;
++            if (FailOnSave) throw new InvalidOperationException("Simulated failure.");
++            return Task.CompletedTask;
++        }
++
++        public async Task<T> ExecuteInTransactionAsync<T>(Guid ownerUserId, Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
++        {
++            Transactions++;
++            var backup = Items.ToDictionary(kvp => kvp.Key, kvp => Copy(kvp.Value));
++            try { return await operation(cancellationToken); }
++            catch
++            {
++                Items.Clear();
++                foreach (var (key, value) in backup) Items.Add(key, value);
++                throw;
++            }
++        }
++
++        private static UserCertificate Copy(UserCertificate source) => new()
++        {
++            CertificateId = source.CertificateId, UserId = source.UserId, Title = source.Title,
++            Issuer = source.Issuer, CredentialId = source.CredentialId, CredentialUrl = source.CredentialUrl,
++            IssuedAt = source.IssuedAt, ExpiresAt = source.ExpiresAt,
++            CreatedAt = source.CreatedAt, UpdatedAt = source.UpdatedAt
++        };
++    }
++}

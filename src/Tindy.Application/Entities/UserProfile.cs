@@ -18,7 +18,6 @@ public class UserProfile
     public string? LinkedinUrl { get; set; }
     public string? ResumeUrl { get; set; }
     public string? PersonalWebsiteUrl { get; set; }
-    public bool IsPublic { get; set; } = true;
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public User User { get; set; } = null!;

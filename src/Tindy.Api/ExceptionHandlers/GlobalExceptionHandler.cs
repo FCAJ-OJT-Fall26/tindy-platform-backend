@@ -21,6 +21,9 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
             InvalidCredentialsException =>
                 StatusCodes.Status401Unauthorized,
 
+            ProfileValidationException =>
+                StatusCodes.Status400BadRequest,
+
             NotFoundException =>
                 StatusCodes.Status404NotFound,
 
@@ -48,7 +51,15 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         }
 
         // 3. Create ProblemDetails
-        var problemDetails = new ProblemDetails
+        ProblemDetails problemDetails = exception is ProfileValidationException validation
+            ? new ValidationProblemDetails(validation.Errors.ToDictionary(entry => entry.Key, entry => entry.Value))
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Bad Request",
+                Detail = "The input data is invalid.",
+                Instance = httpContext.Request.Path
+            }
+            : new ProblemDetails
         {
             Status = statusCode,
 
@@ -71,6 +82,9 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         problemDetails.Extensions["error_code"] =
             exception switch
             {
+                ProfileValidationException =>
+                    "VALIDATION_FAILED",
+
                 InvalidCredentialsException =>
                     "AUTH_INVALID_CREDENTIALS",
 
@@ -79,6 +93,9 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
 
                 UsernameAlreadyExistsException =>
                     "USERNAME_ALREADY_EXISTS",
+
+                OnboardingAlreadyCompletedException =>
+                    "ONBOARDING_ALREADY_COMPLETED",
 
                 OnboardingIncompleteException =>
                     "ONBOARDING_INCOMPLETE",
@@ -111,8 +128,17 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         httpContext.Response.ContentType =
             "application/problem+json";
 
-        await httpContext.Response.WriteAsJsonAsync(problemDetails,
-            options: null, contentType: "application/problem+json", cancellationToken: cancellationToken);
+        // Serialize validation responses as their concrete type so the "errors" member is included.
+        if (problemDetails is ValidationProblemDetails validationProblemDetails)
+        {
+            await httpContext.Response.WriteAsJsonAsync(validationProblemDetails,
+                options: null, contentType: "application/problem+json", cancellationToken: cancellationToken);
+        }
+        else
+        {
+            await httpContext.Response.WriteAsJsonAsync(problemDetails,
+                options: null, contentType: "application/problem+json", cancellationToken: cancellationToken);
+        }
 
         // 6. Exception was handled
         return true;

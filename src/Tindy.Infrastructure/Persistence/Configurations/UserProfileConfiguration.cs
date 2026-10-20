@@ -81,11 +81,6 @@ public class UserProfileConfiguration
             .HasColumnName("personal_website_url")
             .HasMaxLength(1000);
 
-        builder.Property(x => x.IsPublic)
-            .HasColumnName("is_public")
-            .HasDefaultValue(true)
-            .IsRequired();
-
         builder.Property(x => x.CreatedAt)
             .HasColumnName("created_at")
             .IsRequired();

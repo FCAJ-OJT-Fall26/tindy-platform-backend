@@ -145,6 +145,95 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.ToTable("professional_roles", (string)null);
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.ProfileExperience", b =>
+                {
+                    b.Property<Guid>("ExperienceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("experience_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date")
+                        .HasColumnName("end_date");
+
+                    b.Property<bool>("IsOngoing")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_ongoing");
+
+                    b.Property<string>("ProjectName")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)")
+                        .HasColumnName("project_name");
+
+                    b.Property<string>("RepoUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("repo_url");
+
+                    b.Property<string>("RoleTitle")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)")
+                        .HasColumnName("role_title");
+
+                    b.Property<DateOnly?>("StartDate")
+                        .HasColumnType("date")
+                        .HasColumnName("start_date");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("ExperienceId");
+
+                    b.HasIndex("UserId", "StartDate")
+                        .HasDatabaseName("ix_profile_experiences_user_id_start_date");
+
+                    b.ToTable("profile_experiences", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_profile_experiences_dates_order", "start_date IS NULL OR end_date IS NULL OR end_date >= start_date");
+
+                            t.HasCheckConstraint("ck_profile_experiences_month_end", "end_date IS NULL OR EXTRACT(DAY FROM end_date) = 1");
+
+                            t.HasCheckConstraint("ck_profile_experiences_month_start", "start_date IS NULL OR EXTRACT(DAY FROM start_date) = 1");
+
+                            t.HasCheckConstraint("ck_profile_experiences_ongoing_end_date", "NOT is_ongoing OR end_date IS NULL");
+                        });
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.ProfileExperienceSkill", b =>
+                {
+                    b.Property<Guid>("ExperienceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("experience_id");
+
+                    b.Property<Guid>("SkillId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("skill_id");
+
+                    b.HasKey("ExperienceId", "SkillId");
+
+                    b.HasIndex("SkillId")
+                        .HasDatabaseName("ix_profile_experience_skills_skill_id");
+
+                    b.ToTable("profile_experience_skills", (string)null);
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.Role", b =>
                 {
                     b.Property<Guid>("RoleId")
@@ -354,6 +443,65 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.ToTable("users", (string)null);
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.UserCertificate", b =>
+                {
+                    b.Property<Guid>("CertificateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("certificate_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CredentialId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("credential_id");
+
+                    b.Property<string>("CredentialUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("credential_url");
+
+                    b.Property<DateOnly?>("ExpiresAt")
+                        .HasColumnType("date")
+                        .HasColumnName("expires_at");
+
+                    b.Property<DateOnly?>("IssuedAt")
+                        .HasColumnType("date")
+                        .HasColumnName("issued_at");
+
+                    b.Property<string>("Issuer")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("issuer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("title");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("CertificateId");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_user_certificates_user_id");
+
+                    b.ToTable("user_certificates", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_user_certificates_dates_order", "issued_at IS NULL OR expires_at IS NULL OR expires_at >= issued_at");
+                        });
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.UserCredential", b =>
                 {
                     b.Property<Guid>("UserCredentialId")
@@ -486,12 +634,6 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("headline");
 
-                    b.Property<bool>("IsPublic")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(true)
-                        .HasColumnName("is_public");
-
                     b.Property<string>("LearningGoals")
                         .HasColumnType("text")
                         .HasColumnName("learning_goals");
@@ -604,6 +746,11 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("transaction_id");
+
+                    b.Property<string>("AvatarUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("avatar_url");
 
                     b.Property<string>("CompletionTicketHash")
                         .HasMaxLength(64)
@@ -723,6 +870,36 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.ProfileExperience", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.User", "User")
+                        .WithMany("ProfileExperiences")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.ProfileExperienceSkill", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.ProfileExperience", "Experience")
+                        .WithMany("ExperienceSkills")
+                        .HasForeignKey("ExperienceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Tindy.Application.Entities.Skill", "Skill")
+                        .WithMany("ProfileExperienceSkills")
+                        .HasForeignKey("SkillId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Experience");
+
+                    b.Navigation("Skill");
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.RolePermission", b =>
                 {
                     b.HasOne("Tindy.Application.Entities.Permission", "Permission")
@@ -759,6 +936,17 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("Skill");
 
                     b.Navigation("SkillCategory");
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.UserCertificate", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.User", "User")
+                        .WithMany("Certificates")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.UserCredential", b =>
@@ -867,6 +1055,11 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("UserProfiles");
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.ProfileExperience", b =>
+                {
+                    b.Navigation("ExperienceSkills");
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.Role", b =>
                 {
                     b.Navigation("RolePermissions");
@@ -876,6 +1069,8 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Tindy.Application.Entities.Skill", b =>
                 {
+                    b.Navigation("ProfileExperienceSkills");
+
                     b.Navigation("SkillCategorySkills");
 
                     b.Navigation("UserSkills");
@@ -888,6 +1083,8 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Tindy.Application.Entities.User", b =>
                 {
+                    b.Navigation("Certificates");
+
                     b.Navigation("Credential");
 
                     b.Navigation("ExternalAuthAccounts");
@@ -895,6 +1092,8 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("OnboardingSteps");
 
                     b.Navigation("Profile");
+
+                    b.Navigation("ProfileExperiences");
 
                     b.Navigation("UserRoles");
                 });

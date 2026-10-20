@@ -1,0 +1,22 @@
+--- a/src/Tindy.Api/ExceptionHandlers/GlobalExceptionHandler.cs
++++ b/src/Tindy.Api/ExceptionHandlers/GlobalExceptionHandler.cs
+@@ -128,8 +128,17 @@
+         httpContext.Response.ContentType =
+             "application/problem+json";
+ 
+-        await httpContext.Response.WriteAsJsonAsync(problemDetails,
+-            options: null, contentType: "application/problem+json", cancellationToken: cancellationToken);
++        // Serialize validation responses as their concrete type so the "errors" member is included.
++        if (problemDetails is ValidationProblemDetails validationProblemDetails)
++        {
++            await httpContext.Response.WriteAsJsonAsync(validationProblemDetails,
++                options: null, contentType: "application/problem+json", cancellationToken: cancellationToken);
++        }
++        else
++        {
++            await httpContext.Response.WriteAsJsonAsync(problemDetails,
++                options: null, contentType: "application/problem+json", cancellationToken: cancellationToken);
++        }
+ 
+         // 6. Exception was handled
+         return true;
