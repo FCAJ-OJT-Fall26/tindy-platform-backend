@@ -84,6 +84,7 @@ public sealed class OnboardingService : IOnboardingService
         return _repository.ExecuteInTransactionAsync(userId, async token =>
         {
             var user = await GetActiveUserAsync(userId, token);
+            EnsureOnboardingIsOpen(user);
             var profile = RequireProfile(user);
 
             var username = request.Username!.Trim();
@@ -117,6 +118,7 @@ public sealed class OnboardingService : IOnboardingService
         return _repository.ExecuteInTransactionAsync(userId, async token =>
         {
             var user = await GetActiveUserAsync(userId, token);
+            EnsureOnboardingIsOpen(user);
             var profile = RequireProfile(user);
             var skills = await _repository.GetActiveSkillsByIdsAsync(skillIds, token);
 
@@ -143,6 +145,7 @@ public sealed class OnboardingService : IOnboardingService
         return _repository.ExecuteInTransactionAsync(userId, async token =>
         {
             var user = await GetActiveUserAsync(userId, token);
+            EnsureOnboardingIsOpen(user);
             var profile = RequireProfile(user);
             var role = await _repository.GetActiveProfessionalRoleByIdAsync(request.PreferredRoleId!.Value, token);
 
@@ -271,6 +274,7 @@ public sealed class OnboardingService : IOnboardingService
         return _repository.ExecuteInTransactionAsync(userId, async token =>
         {
             var user = await GetActiveUserAsync(userId, token);
+            EnsureOnboardingIsOpen(user);
             var profile = RequireProfile(user);
             mutate(user, profile);
             profile.UpdatedAt = DateTime.UtcNow;
@@ -289,6 +293,12 @@ public sealed class OnboardingService : IOnboardingService
             throw new InvalidCredentialsException();
         }
         return user;
+    }
+
+    private static void EnsureOnboardingIsOpen(User user)
+    {
+        if (user.IsOnboardingCompleted)
+            throw new OnboardingAlreadyCompletedException();
     }
 
     private static UserProfile RequireProfile(User user) =>

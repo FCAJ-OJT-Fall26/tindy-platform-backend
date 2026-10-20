@@ -80,6 +80,9 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 UsernameAlreadyExistsException =>
                     "USERNAME_ALREADY_EXISTS",
 
+                OnboardingAlreadyCompletedException =>
+                    "ONBOARDING_ALREADY_COMPLETED",
+
                 OnboardingIncompleteException =>
                     "ONBOARDING_INCOMPLETE",
 
