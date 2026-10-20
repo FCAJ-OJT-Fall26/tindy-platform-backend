@@ -69,6 +69,9 @@ public static class ServicesCollectionExtensions
         // Experiences persistence (STEP 07).
         services.AddScoped<IExperienceRepository, ExperienceRepository>();
 
+        // Certificate persistence (STEP 09).
+        services.AddScoped<ICertificateRepository, CertificateRepository>();
+
         // Lightweight read-only check for protected business APIs
         services.AddScoped<IOnboardingAccessReader, OnboardingAccessReader>();
 

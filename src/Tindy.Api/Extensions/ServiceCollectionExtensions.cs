@@ -248,6 +248,9 @@ public static class ServiceCollectionExtensions
         // Experience business operations (controller added in STEP 08).
         services.AddScoped<IExperienceService, ExperienceService>();
 
+        // Certificate CRUD service (STEP 09).
+        services.AddScoped<ICertificateService, CertificateService>();
+
 
 
 
