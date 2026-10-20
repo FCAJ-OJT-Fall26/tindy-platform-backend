@@ -16,6 +16,12 @@ public class TindyDbContext : DbContext
     public DbSet<UserProfile> UserProfiles
         => Set<UserProfile>();
 
+    public DbSet<ProfileExperience> ProfileExperiences => Set<ProfileExperience>();
+
+    public DbSet<ProfileExperienceSkill> ProfileExperienceSkills => Set<ProfileExperienceSkill>();
+
+    public DbSet<UserCertificate> UserCertificates => Set<UserCertificate>();
+
     public DbSet<Role> Roles
         => Set<Role>();
 

@@ -17,6 +17,8 @@ public class User
     public DateTime? UpdatedAt {get;set;}
     public DateTime? DeletedAt {get;set;}
     public UserProfile? Profile { get; set; }
+    public ICollection<ProfileExperience> ProfileExperiences { get; set; } = new List<ProfileExperience>();
+    public ICollection<UserCertificate> Certificates { get; set; } = new List<UserCertificate>();
     public UserCredential? Credential { get; set; }
     public ICollection<UserRole> UserRoles { get; set; }
     = new List<UserRole>();

@@ -63,7 +63,6 @@ public sealed class ExternalAuthService : IExternalAuthService
                 DisplayName = data.DisplayName,
                 University = null,
                 Bio = null,
-                IsPublic = true,
                 CreatedAt = now
             },
             UserRoles = new List<UserRole>

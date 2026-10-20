@@ -28,7 +28,7 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
     }
 
     [Fact]
-    public async Task Schema_HasFourteenTables_AndForeignKeyColumns()
+    public async Task Schema_HasNineteenTables_AndForeignKeyColumns()
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<TindyDbContext>();
@@ -50,10 +50,12 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
         {
             "users", "user_profiles", "roles", "permissions", "user_roles", "role_permissions",
             "user_credentials", "external_auth_accounts", "professional_roles", "skill_categories",
-            "skills", "skill_category_skills", "user_skills", "user_onboarding_steps"
+            "skills", "skill_category_skills", "user_skills", "user_onboarding_steps",
+            "profile_experiences", "profile_experience_skills", "user_certificates",
+            "oauth_login_tickets", "oauth_link_transactions"
         };
         Assert.True(expected.ToHashSet().SetEquals(tables),
-            $"Expected 14 business tables. Actual: {string.Join(", ", tables.OrderBy(x => x))}");
+            $"Expected 19 business tables. Actual: {string.Join(", ", tables.OrderBy(x => x))}");
 
         command.CommandText = """
             SELECT table_name || '.' || column_name
@@ -70,6 +72,31 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
         Assert.Contains("user_profiles.preferred_role_id", columns);
         Assert.Contains("skills.is_active", columns);
         Assert.DoesNotContain("user_profiles.preferred_role", columns);
+
+        command.CommandText = """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'user_profiles'
+              AND column_name = 'is_public'
+            """;
+        await using (var reader = await command.ExecuteReaderAsync())
+        {
+            Assert.False(await reader.ReadAsync());
+        }
+
+        command.CommandText = """
+            SELECT table_name || '.' || column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND ((table_name = 'profile_experiences' AND column_name IN ('experience_id', 'user_id', 'start_date', 'end_date'))
+                OR (table_name = 'profile_experience_skills' AND column_name IN ('experience_id', 'skill_id'))
+                OR (table_name = 'user_certificates' AND column_name IN ('certificate_id', 'user_id', 'issued_at', 'expires_at')))
+            """;
+        var profileColumns = new List<string>();
+        await using (var reader = await command.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync()) profileColumns.Add(reader.GetString(0));
+        }
+        Assert.Equal(10, profileColumns.Count);
     }
 
     [Fact]
