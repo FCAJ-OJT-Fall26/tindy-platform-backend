@@ -242,6 +242,9 @@ public static class ServiceCollectionExtensions
         // Read-only catalog application service (available before onboarding completion)
         services.AddScoped<ICatalogService, CatalogService>();
 
+        // Profile read-only application service (STEP 04).
+        services.AddScoped<IProfileService, ProfileService>();
+
 
 
 

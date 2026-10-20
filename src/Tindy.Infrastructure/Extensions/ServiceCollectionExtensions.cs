@@ -63,6 +63,9 @@ public static class ServicesCollectionExtensions
         // Read-only catalog repository
         services.AddScoped<ICatalogRepository, CatalogRepository>();
 
+        // Profile projection repository (STEP 04).
+        services.AddScoped<IProfileRepository, ProfileRepository>();
+
         // Lightweight read-only check for protected business APIs
         services.AddScoped<IOnboardingAccessReader, OnboardingAccessReader>();
 

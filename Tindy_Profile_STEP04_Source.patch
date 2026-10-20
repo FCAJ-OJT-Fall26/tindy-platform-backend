@@ -1,0 +1,367 @@
+--- /dev/null
++++ b/src/Tindy.Application/DTOs/Profile/MyProfileResponse.cs
+@@ -0,0 +1,33 @@
++namespace Tindy.Application.DTOs.Profile;
++
++// DTO returned only to the profile owner. Do not reuse for member-visible profiles.
++public sealed record PreferredRoleSummary(Guid ProfessionalRoleId, string Name);
++
++public sealed record ProfileSkillSummary(Guid SkillId, string Name);
++
++public sealed record MyProfileResponse(
++    Guid UserId,
++    string? Username,
++    string DisplayName,
++    string? University,
++    string? PhoneNumber,
++    string? Headline,
++    string? Bio,
++    string? Location,
++    string? CurrentRole,
++    PreferredRoleSummary? PreferredRole,
++    int? AvailableHoursPerWeek,
++    string? ProfessionalInterests,
++    string? LearningGoals,
++    string? PreviousProjectsAndContribution,
++    string? TechnologiesToLearn,
++    string? GithubUrl,
++    string? LinkedinUrl,
++    string? PersonalWebsiteUrl,
++    string? ResumeUrl,
++    string? PublicEmail,
++    string? AvatarUrl,
++    string? CoverImageUrl,
++    IReadOnlyList<ProfileSkillSummary> Skills,
++    int ExperiencesCount,
++    int CertificatesCount);
+--- /dev/null
++++ b/src/Tindy.Application/Interfaces/Repositories/IProfileRepository.cs
+@@ -0,0 +1,9 @@
++using Tindy.Application.DTOs.Profile;
++
++namespace Tindy.Application.Interfaces.Repositories;
++
++// Read projection for the current account; no tracked User/credential/OAuth graph.
++public interface IProfileRepository
++{
++    Task<MyProfileResponse?> GetMyProfileAsync(Guid userId, CancellationToken cancellationToken = default);
++}
+--- /dev/null
++++ b/src/Tindy.Application/Interfaces/Services/IProfileService.cs
+@@ -0,0 +1,8 @@
++using Tindy.Application.DTOs.Profile;
++
++namespace Tindy.Application.Interfaces.Services;
++
++public interface IProfileService
++{
++    Task<MyProfileResponse> GetMyProfileAsync(Guid userId, CancellationToken cancellationToken = default);
++}
+--- /dev/null
++++ b/src/Tindy.Application/Services/ProfileService.cs
+@@ -0,0 +1,23 @@
++using Tindy.Application.DTOs.Profile;
++using Tindy.Application.Exceptions;
++using Tindy.Application.Interfaces.Repositories;
++using Tindy.Application.Interfaces.Services;
++
++namespace Tindy.Application.Services;
++
++public sealed class ProfileService : IProfileService
++{
++    private readonly IProfileRepository _profileRepository;
++
++    public ProfileService(IProfileRepository profileRepository) => _profileRepository = profileRepository;
++
++    public async Task<MyProfileResponse> GetMyProfileAsync(Guid userId, CancellationToken cancellationToken = default)
++    {
++        if (userId == Guid.Empty)
++            throw new InvalidCredentialsException();
++
++        // The DB read also filters suspended/deleted/incomplete accounts and missing profiles.
++        return await _profileRepository.GetMyProfileAsync(userId, cancellationToken)
++            ?? throw new NotFoundException("Profile was not found.");
++    }
++}
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Repositories/ProfileRepository.cs
+@@ -0,0 +1,59 @@
++using Microsoft.EntityFrameworkCore;
++using Tindy.Application.DTOs.Profile;
++using Tindy.Application.Interfaces.Repositories;
++using Tindy.Infrastructure.Persistence;
++
++namespace Tindy.Infrastructure.Repositories;
++
++public sealed class ProfileRepository : IProfileRepository
++{
++    private readonly TindyDbContext _context;
++
++    public ProfileRepository(TindyDbContext context) => _context = context;
++
++    public Task<MyProfileResponse?> GetMyProfileAsync(Guid userId, CancellationToken cancellationToken = default)
++    {
++        // Project only the permitted fields. Never Include Credentials, OAuth accounts or roles.
++        // AsSplitQuery avoids Cartesian expansion of the nested skill collection.
++        return _context.Users
++            .AsNoTracking()
++            .Where(user => user.UserId == userId && user.Status == "active" &&
++                user.DeletedAt == null && user.IsOnboardingCompleted && user.Profile != null)
++            .AsSplitQuery()
++            .Select(user => new MyProfileResponse(
++                user.UserId,
++                user.Username,
++                user.Profile!.DisplayName,
++                user.Profile.University,
++                user.Profile.PhoneNumber,
++                user.Profile.Headline,
++                user.Profile.Bio,
++                user.Profile.Location,
++                user.Profile.CurrentRole,
++                user.Profile.PreferredProfessionalRole == null
++                    ? null
++                    : new PreferredRoleSummary(
++                        user.Profile.PreferredProfessionalRole.ProfessionalRoleId,
++                        user.Profile.PreferredProfessionalRole.Name),
++                user.Profile.AvailableHoursPerWeek,
++                user.Profile.ProfessionalInterests,
++                user.Profile.LearningGoals,
++                user.Profile.PreviousProjectsAndContribution,
++                user.Profile.TechnologiesToLearn,
++                user.Profile.GithubUrl,
++                user.Profile.LinkedinUrl,
++                user.Profile.PersonalWebsiteUrl,
++                user.Profile.ResumeUrl,
++                user.Profile.PublicEmail,
++                user.Profile.AvatarUrl,
++                user.Profile.CoverImageUrl,
++                user.Profile.UserSkills
++                    .OrderBy(link => link.Skill.Name)
++                    .ThenBy(link => link.SkillId)
++                    .Select(link => new ProfileSkillSummary(link.SkillId, link.Skill.Name))
++                    .ToList(),
++                _context.ProfileExperiences.Count(experience => experience.UserId == user.UserId),
++                _context.UserCertificates.Count(certificate => certificate.UserId == user.UserId)))
++            .SingleOrDefaultAsync(cancellationToken);
++    }
++}
+--- /dev/null
++++ b/src/Tindy.Api/Controllers/MyProfileController.cs
+@@ -0,0 +1,28 @@
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Mvc;
++using Tindy.Application.Exceptions;
++using Tindy.Application.Interfaces.Services;
++
++namespace Tindy.Api.Controllers;
++
++// Uses the DefaultPolicy (JWT + active + completed onboarding).
++// Do not inherit the AuthenticatedOnly policy from MeController.
++[ApiController]
++[Authorize]
++[Route("api/me/profile")]
++public sealed class MyProfileController : ControllerBase
++{
++    private readonly IProfileService _profileService;
++
++    public MyProfileController(IProfileService profileService) => _profileService = profileService;
++
++    [HttpGet]
++    public async Task<IActionResult> GetMyProfile(CancellationToken cancellationToken)
++    {
++        if (!Guid.TryParse(User.FindFirst("sub")?.Value, out var userId) || userId == Guid.Empty)
++            throw new InvalidCredentialsException();
++
++        var data = await _profileService.GetMyProfileAsync(userId, cancellationToken);
++        return Ok(new { success = true, message = "User profile retrieved successfully.", data });
++    }
++}
+--- a/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
++++ b/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
+@@ -242,6 +242,9 @@
+         // Read-only catalog application service (available before onboarding completion)
+         services.AddScoped<ICatalogService, CatalogService>();
+ 
++        // Profile read-only application service (STEP 04).
++        services.AddScoped<IProfileService, ProfileService>();
++
+ 
+ 
+ 
+--- a/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
++++ b/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
+@@ -63,6 +63,9 @@
+         // Read-only catalog repository
+         services.AddScoped<ICatalogRepository, CatalogRepository>();
+ 
++        // Profile projection repository (STEP 04).
++        services.AddScoped<IProfileRepository, ProfileRepository>();
++
+         // Lightweight read-only check for protected business APIs
+         services.AddScoped<IOnboardingAccessReader, OnboardingAccessReader>();
+ 
+--- /dev/null
++++ b/tests/Tindy.Tests/Profile/MyProfileReadTests.cs
+@@ -0,0 +1,162 @@
++using System.Reflection;
++using System.Security.Claims;
++using System.Text.Json;
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.Mvc;
++using Tindy.Api.Controllers;
++using Tindy.Application.DTOs.Profile;
++using Tindy.Application.Exceptions;
++using Tindy.Application.Interfaces.Repositories;
++using Tindy.Application.Interfaces.Services;
++using Tindy.Application.Services;
++using Xunit;
++
++namespace Tindy.Tests.Profile;
++
++/// <summary>STEP 04 unit tests: no PostgreSQL, Docker or Testcontainers.</summary>
++public sealed class MyProfileReadTests
++{
++    private static readonly Guid ValidUserId = Guid.NewGuid();
++    private static readonly Guid RoleId = Guid.NewGuid();
++    private static readonly Guid SkillId = Guid.NewGuid();
++
++    [Fact]
++    public async Task ProfileService_ReturnsProjectionAndPassesUserIdAndCancellationToken()
++    {
++        var expected = ExampleProfile();
++        var repo = new FakeProfileRepository(expected);
++        var service = new ProfileService(repo);
++        using var cts = new CancellationTokenSource();
++
++        var actual = await service.GetMyProfileAsync(ValidUserId, cts.Token);
++
++        Assert.Same(expected, actual);
++        Assert.Equal(ValidUserId, repo.LastUserId);
++        Assert.Equal(cts.Token, repo.LastCancellationToken);
++        Assert.Equal("Backend Developer", actual.PreferredRole?.Name);
++        Assert.Equal(SkillId, Assert.Single(actual.Skills).SkillId);
++        Assert.Equal(2, actual.ExperiencesCount);
++        Assert.Equal(1, actual.CertificatesCount);
++    }
++
++    [Fact]
++    public async Task ProfileService_PreservesNullableValuesForOAuthOnlyAccount()
++    {
++        var nullable = ExampleProfile() with
++        {
++            Username = null, PhoneNumber = null, PreferredRole = null,
++            Bio = null, ResumeUrl = null, Skills = Array.Empty<ProfileSkillSummary>(),
++            ExperiencesCount = 0, CertificatesCount = 0
++        };
++
++        var actual = await new ProfileService(new FakeProfileRepository(nullable)).GetMyProfileAsync(ValidUserId);
++
++        Assert.Null(actual.Username);
++        Assert.Null(actual.PreferredRole);
++        Assert.Empty(actual.Skills);
++        Assert.Equal(0, actual.CertificatesCount);
++    }
++
++    [Fact]
++    public async Task ProfileService_UnknownOrIncompleteProfileReturnsNotFound()
++    {
++        var repo = new FakeProfileRepository(null);
++        var exception = await Assert.ThrowsAsync<NotFoundException>(
++            () => new ProfileService(repo).GetMyProfileAsync(ValidUserId));
++        Assert.Equal("Profile was not found.", exception.Message);
++    }
++
++    [Fact]
++    public async Task ProfileService_EmptyUserIdRejectsWithoutDatabaseRead()
++    {
++        var repo = new FakeProfileRepository(ExampleProfile());
++        await Assert.ThrowsAsync<InvalidCredentialsException>(
++            () => new ProfileService(repo).GetMyProfileAsync(Guid.Empty));
++        Assert.Null(repo.LastUserId);
++    }
++
++    [Fact]
++    public async Task Controller_ReturnsConventionalEnvelope_ForJwtSub()
++    {
++        var service = new ProfileService(new FakeProfileRepository(ExampleProfile()));
++        var controller = NewController(service, ValidUserId.ToString("D"));
++        var response = await controller.GetMyProfile(CancellationToken.None);
++        var ok = Assert.IsType<OkObjectResult>(response);
++        var json = JsonSerializer.Serialize(ok.Value,
++            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower });
++        using var parsed = JsonDocument.Parse(json);
++        var root = parsed.RootElement;
++        Assert.True(root.GetProperty("success").GetBoolean());
++        Assert.Equal("User profile retrieved successfully.", root.GetProperty("message").GetString());
++        var data = root.GetProperty("data");
++        Assert.Equal(ValidUserId.ToString("D"), data.GetProperty("user_id").GetString());
++        Assert.Equal(RoleId.ToString("D"), data.GetProperty("preferred_role").GetProperty("professional_role_id").GetString());
++        Assert.Equal(SkillId.ToString("D"), data.GetProperty("skills")[0].GetProperty("skill_id").GetString());
++        Assert.Equal(2, data.GetProperty("experiences_count").GetInt32());
++        Assert.Equal(1, data.GetProperty("certificates_count").GetInt32());
++        Assert.False(data.TryGetProperty("primary_email", out _));
++        Assert.False(data.TryGetProperty("credential", out _));
++        Assert.False(data.TryGetProperty("external_auth_accounts", out _));
++    }
++
++    [Theory]
++    [InlineData("")]
++    [InlineData("not-a-guid")]
++    [InlineData("00000000-0000-0000-0000-000000000000")]
++    public async Task Controller_MissingOrInvalidSub_IsRejected(string sub)
++    {
++        var controller = NewController(new ProfileService(new FakeProfileRepository(ExampleProfile())), sub);
++        await Assert.ThrowsAsync<InvalidCredentialsException>(
++            () => controller.GetMyProfile(CancellationToken.None));
++    }
++
++    [Fact]
++    public void Controller_UsesDefaultAuthorizationPolicy_NotPreOnboardingPolicy()
++    {
++        var route = typeof(MyProfileController).GetCustomAttribute<RouteAttribute>();
++        var authorize = typeof(MyProfileController).GetCustomAttribute<AuthorizeAttribute>();
++        Assert.Equal("api/me/profile", route?.Template);
++        Assert.NotNull(authorize);
++        Assert.Null(authorize.Policy);
++        Assert.Null(typeof(MyProfileController).GetCustomAttribute<AllowAnonymousAttribute>());
++        var method = typeof(MyProfileController).GetMethod(nameof(MyProfileController.GetMyProfile))!;
++        Assert.NotNull(method.GetCustomAttribute<HttpGetAttribute>());
++    }
++
++    private static MyProfileController NewController(IProfileService service, string sub)
++    {
++        var claims = string.IsNullOrEmpty(sub) ? Array.Empty<Claim>() : new[] { new Claim("sub", sub) };
++        return new MyProfileController(service)
++        {
++            ControllerContext = new ControllerContext
++            {
++                HttpContext = new DefaultHttpContext
++                {
++                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"))
++                }
++            }
++        };
++    }
++
++    private static MyProfileResponse ExampleProfile() => new(
++        ValidUserId, "alexle", "Alex Le", "FPT University", "0900000000",
++        "Backend Developer", null, "Ho Chi Minh City", "Student",
++        new PreferredRoleSummary(RoleId, "Backend Developer"), 10,
++        "Cloud", null, null, null, "https://github.com/example", null,
++        null, null, null, null, null,
++        new[] { new ProfileSkillSummary(SkillId, ".NET") }, 2, 1);
++
++    private sealed class FakeProfileRepository(MyProfileResponse? profile) : IProfileRepository
++    {
++        public Guid? LastUserId { get; private set; }
++        public CancellationToken LastCancellationToken { get; private set; }
++
++        public Task<MyProfileResponse?> GetMyProfileAsync(Guid userId, CancellationToken cancellationToken = default)
++        {
++            LastUserId = userId;
++            LastCancellationToken = cancellationToken;
++            return Task.FromResult(profile);
++        }
++    }
++}
