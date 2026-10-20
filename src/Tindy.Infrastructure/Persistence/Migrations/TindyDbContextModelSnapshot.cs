@@ -747,6 +747,11 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("transaction_id");
 
+                    b.Property<string>("AvatarUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("avatar_url");
+
                     b.Property<string>("CompletionTicketHash")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")

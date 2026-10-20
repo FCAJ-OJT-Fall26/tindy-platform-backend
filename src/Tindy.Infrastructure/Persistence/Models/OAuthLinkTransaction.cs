@@ -13,6 +13,7 @@ public sealed class OAuthLinkTransaction
     public string? ProviderUsername { get; set; }
     public string? DisplayName { get; set; }
     public string? ProviderEmail { get; set; }
+    public string? AvatarUrl { get; set; }
     public bool EmailVerified { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime ExpiresAt { get; set; }

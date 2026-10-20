@@ -65,6 +65,7 @@ public static class OAuthAuthenticationExtensions
                 // Never infer verification from the presence of a nonempty email.
                 options.ClaimActions.MapJsonKey("tindy:google_verified_v2", "verified_email");
                 options.ClaimActions.MapJsonKey("tindy:google_verified_v3", "email_verified");
+                options.ClaimActions.MapJsonKey("tindy:google_avatar_url", "picture");
 
                 ConfigureCorrelationCookie(options);
                 options.Events.OnRemoteFailure = HandleRemoteFailureAsync;
@@ -76,6 +77,7 @@ public static class OAuthAuthenticationExtensions
                 options.SignInScheme = ExternalCookieScheme;
                 options.CallbackPath = "/signin-github";
                 options.SaveTokens = false;
+                options.ClaimActions.MapJsonKey("tindy:github_avatar_url", "avatar_url");
 
                 // Required when the user's email is not publicly visible.
                 // STEP 04 must still check whether each returned email is verified.

@@ -66,6 +66,7 @@ public sealed class OAuthLinkTransactionStore : IOAuthLinkTransactionStore
         var displayName = Crop(identity.DisplayName, 100);
         var email = Crop(identity.Email, 255);
         var verified = identity.EmailVerified;
+        var avatarUrl = OAuthAvatarUrl.Normalize(identity.AvatarUrl);
         var now = DateTime.UtcNow;
         var expiresAt = now.Add(ConfirmLifetime);
         var count = await _db.OAuthLinkTransactions.Where(x => x.TransactionId == transactionId &&
@@ -76,6 +77,7 @@ public sealed class OAuthLinkTransactionStore : IOAuthLinkTransactionStore
                 .SetProperty(x => x.ProviderUsername, providerUsername)
                 .SetProperty(x => x.DisplayName, displayName)
                 .SetProperty(x => x.ProviderEmail, email)
+                .SetProperty(x => x.AvatarUrl, avatarUrl)
                 .SetProperty(x => x.EmailVerified, verified)
                 .SetProperty(x => x.CompletionTicketHash, completionHash)
                 .SetProperty(x => x.ExpiresAt, expiresAt), cancellationToken);
@@ -91,14 +93,15 @@ public sealed class OAuthLinkTransactionStore : IOAuthLinkTransactionStore
             .Where(x => x.CompletionTicketHash == hash && x.UserId == userId &&
                         x.Status == "verified" && x.ExpiresAt > now && x.ProviderUserId != null)
             .Select(x => new { x.Provider, x.ProviderUserId, x.ProviderUsername,
-                x.DisplayName, x.ProviderEmail, x.EmailVerified })
+                x.DisplayName, x.ProviderEmail, x.EmailVerified, x.AvatarUrl })
             .SingleOrDefaultAsync(cancellationToken);
         if (row is null) return null;
         var deleted = await _db.OAuthLinkTransactions.Where(x => x.CompletionTicketHash == hash &&
                 x.UserId == userId && x.Status == "verified" && x.ExpiresAt > now)
             .ExecuteDeleteAsync(cancellationToken);
         return deleted == 1 ? new AuthenticatedExternalIdentity(row.Provider, row.ProviderUserId!,
-            row.DisplayName, row.ProviderUsername, row.ProviderEmail, row.EmailVerified) : null;
+            row.DisplayName, row.ProviderUsername, row.ProviderEmail, row.EmailVerified,
+            row.AvatarUrl) : null;
     }
 
     private static string? Crop(string? value, int maxLength) => value is null

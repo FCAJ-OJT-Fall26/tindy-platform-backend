@@ -20,6 +20,7 @@ public sealed class OAuthLinkTransactionConfiguration : IEntityTypeConfiguration
         builder.Property(x => x.ProviderUsername).HasColumnName("provider_username").HasMaxLength(255);
         builder.Property(x => x.DisplayName).HasColumnName("display_name").HasMaxLength(100);
         builder.Property(x => x.ProviderEmail).HasColumnName("provider_email").HasMaxLength(255);
+        builder.Property(x => x.AvatarUrl).HasColumnName("avatar_url").HasMaxLength(1000);
         builder.Property(x => x.EmailVerified).HasColumnName("email_verified").IsRequired();
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
         builder.Property(x => x.ExpiresAt).HasColumnName("expires_at").IsRequired();

@@ -45,6 +45,19 @@ public sealed class AccountConnectionsServiceTests
     }
 
     [Fact]
+    public async Task LinkCompletion_PreservesAvatarForExplicitConfirmation()
+    {
+        var setup = Setup();
+        var providerIdentity = Identity() with { AvatarUrl = "https://avatars.githubusercontent.com/u/9" };
+        var ticket = await setup.Service.FinishProviderAsync(setup.Store.TransactionId, providerIdentity);
+        Assert.Equal("completion-ticket", ticket);
+        Assert.Equal(0, setup.External.LinkCount);
+
+        await setup.Service.ConfirmAsync(setup.User, ticket!);
+        Assert.Equal(providerIdentity.AvatarUrl, setup.External.LastIdentity!.AvatarUrl);
+    }
+
+    [Fact]
     public async Task Confirm_RequiresSameTindyUser_AndConsumesTicketOnce()
     {
         var setup = Setup();
@@ -120,6 +133,7 @@ public sealed class AccountConnectionsServiceTests
         private readonly Guid _userId;
         private bool _challenged;
         private bool _consumed;
+        private AuthenticatedExternalIdentity? _completedIdentity;
         public Guid TransactionId { get; } = Guid.NewGuid();
         public string? IssuedProvider { get; private set; }
         public FakeLinkStore(Guid userId) => _userId = userId;
@@ -138,15 +152,19 @@ public sealed class AccountConnectionsServiceTests
             return Task.FromResult<Guid?>(TransactionId);
         }
         public Task<string?> CompleteProviderAsync(Guid transactionId,
-            AuthenticatedExternalIdentity identity, CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>(transactionId == TransactionId ? "completion-ticket" : null);
+            AuthenticatedExternalIdentity identity, CancellationToken cancellationToken = default)
+        {
+            if (transactionId != TransactionId) return Task.FromResult<string?>(null);
+            _completedIdentity = identity;
+            return Task.FromResult<string?>("completion-ticket");
+        }
         public Task<AuthenticatedExternalIdentity?> ConsumeCompletionAsync(string linkTicket, Guid userId,
             CancellationToken cancellationToken = default)
         {
             if (_consumed || userId != _userId || linkTicket != "completion-ticket")
                 return Task.FromResult<AuthenticatedExternalIdentity?>(null);
             _consumed = true;
-            return Task.FromResult<AuthenticatedExternalIdentity?>(Identity());
+            return Task.FromResult<AuthenticatedExternalIdentity?>(_completedIdentity ?? Identity());
         }
     }
 

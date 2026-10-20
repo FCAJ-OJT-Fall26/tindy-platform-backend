@@ -59,6 +59,26 @@ public sealed class ExternalAuthRepository : IExternalAuthRepository
         await _context.ExternalAuthAccounts.AddAsync(account, cancellationToken);
     }
 
+    public async Task AddExternalAccountAndFillAvatarAsync(ExternalAuthAccount account, string? avatarUrl,
+        CancellationToken cancellationToken = default)
+    {
+        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        await AddExternalAccountAsync(account, cancellationToken);
+        await SaveChangesAsync(cancellationToken);
+
+        if (avatarUrl is not null)
+        {
+            DateTime? now = DateTime.UtcNow;
+            await _context.UserProfiles
+                .Where(x => x.UserId == account.UserId && x.AvatarUrl == null)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(x => x.AvatarUrl, avatarUrl)
+                    .SetProperty(x => x.UpdatedAt, now), cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         try

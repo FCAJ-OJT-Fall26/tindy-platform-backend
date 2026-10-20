@@ -63,6 +63,7 @@ public sealed class ExternalAuthService : IExternalAuthService
                 DisplayName = data.DisplayName,
                 University = null,
                 Bio = null,
+                AvatarUrl = data.AvatarUrl,
                 CreatedAt = now
             },
             UserRoles = new List<UserRole>
@@ -132,7 +133,9 @@ public sealed class ExternalAuthService : IExternalAuthService
             throw new ConflictException("A different identity from this provider is already linked.");
         }
 
-        await _repository.AddExternalAccountAsync(new ExternalAuthAccount
+        // Both operations must commit together. The repository conditionally fills
+        // avatar_url in SQL so concurrent provider links cannot overwrite an existing image.
+        await _repository.AddExternalAccountAndFillAvatarAsync(new ExternalAuthAccount
         {
             ExternalAuthAccountId = Guid.NewGuid(),
             UserId = currentUserId,
@@ -141,8 +144,7 @@ public sealed class ExternalAuthService : IExternalAuthService
             ProviderUsername = data.ProviderUsername,
             ProviderEmail = data.ProviderEmail,
             CreatedAt = DateTime.UtcNow
-        }, cancellationToken);
-        await _repository.SaveChangesAsync(cancellationToken);
+        }, data.AvatarUrl, cancellationToken);
         return true;
     }
 
@@ -207,7 +209,8 @@ public sealed class ExternalAuthService : IExternalAuthService
             ?? "Tindy Member";
 
         return new ValidatedIdentity(provider, providerUserId,
-            displayName, username, email, verifiedEmail, normalizedEmail);
+            displayName, username, email, verifiedEmail, normalizedEmail,
+            OAuthAvatarUrl.Normalize(identity.AvatarUrl));
     }
 
     private static string? TrimOrNull(string? value)
@@ -222,5 +225,5 @@ public sealed class ExternalAuthService : IExternalAuthService
     private sealed record ValidatedIdentity(
         string Provider, string ProviderUserId, string DisplayName,
         string? ProviderUsername, string? ProviderEmail,
-        string? VerifiedEmail, string? NormalizedEmail);
+        string? VerifiedEmail, string? NormalizedEmail, string? AvatarUrl);
 }
