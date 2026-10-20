@@ -158,5 +158,11 @@ public sealed class MyProfileReadTests
             LastCancellationToken = cancellationToken;
             return Task.FromResult(profile);
         }
+        public Task<Tindy.Application.Entities.User?> GetUserForUpdateAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<bool> IsActiveProfessionalRoleAsync(Guid roleId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyCollection<Guid>> GetActiveSkillIdsAsync(IReadOnlyCollection<Guid> skillIds, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public void SyncUserSkills(Tindy.Application.Entities.UserProfile profile, IReadOnlyCollection<Guid> skillIds) => throw new NotImplementedException();
+        public Task SaveChangesAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<T> ExecuteInTransactionAsync<T>(Guid userId, Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 }

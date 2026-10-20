@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Tindy.Application.DTOs.Profile;
+using Tindy.Application.Entities;
 using Tindy.Application.Interfaces.Repositories;
 using Tindy.Infrastructure.Persistence;
 
@@ -56,4 +57,50 @@ public sealed class ProfileRepository : IProfileRepository
                 _context.UserCertificates.Count(certificate => certificate.UserId == user.UserId)))
             .SingleOrDefaultAsync(cancellationToken);
     }
+
+    public Task<User?> GetUserForUpdateAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        _context.Users
+            .Include(user => user.Profile)
+                .ThenInclude(profile => profile!.UserSkills)
+            .AsSplitQuery()
+            .SingleOrDefaultAsync(user => user.UserId == userId, cancellationToken);
+
+    public Task<bool> IsActiveProfessionalRoleAsync(Guid roleId, CancellationToken cancellationToken = default) =>
+        _context.ProfessionalRoles.AsNoTracking()
+            .AnyAsync(role => role.ProfessionalRoleId == roleId && role.IsActive, cancellationToken);
+
+    public async Task<IReadOnlyCollection<Guid>> GetActiveSkillIdsAsync(IReadOnlyCollection<Guid> skillIds, CancellationToken cancellationToken = default) =>
+        await _context.Skills.AsNoTracking()
+            .Where(skill => skill.IsActive && skillIds.Contains(skill.SkillId))
+            .Select(skill => skill.SkillId)
+            .ToArrayAsync(cancellationToken);
+
+    public void SyncUserSkills(UserProfile profile, IReadOnlyCollection<Guid> skillIds)
+    {
+        var requiredIds = skillIds.ToHashSet();
+        var existingIds = profile.UserSkills.Select(link => link.SkillId).ToHashSet();
+
+        foreach (var link in profile.UserSkills.Where(link => !requiredIds.Contains(link.SkillId)).ToArray())
+            _context.UserSkills.Remove(link);
+
+        foreach (var skillId in requiredIds.Where(id => !existingIds.Contains(id)))
+            _context.UserSkills.Add(new UserSkill { UserId = profile.UserId, SkillId = skillId });
+    }
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
+        _context.SaveChangesAsync(cancellationToken);
+
+    public async Task<T> ExecuteInTransactionAsync<T>(Guid userId, Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
+    {
+        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+
+        // Serialize concurrent writes to the same profile using the existing
+        // Onboarding row-lock convention. Transaction disposal rolls back on failure.
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM users WHERE user_id = {userId} FOR UPDATE", cancellationToken);
+
+        var result = await operation(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
 }
