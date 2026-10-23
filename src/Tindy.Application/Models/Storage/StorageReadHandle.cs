@@ -7,13 +7,15 @@ public sealed class StorageReadHandle : IAsyncDisposable, IDisposable
     private readonly IDisposable? _responseOwner;
     private bool _disposed;
 
-    public StorageReadHandle(Stream content, IDisposable? responseOwner = null)
+    public StorageReadHandle(Stream content, IDisposable? responseOwner = null, string? objectETag = null)
     {
         Content = content ?? throw new ArgumentNullException(nameof(content));
         _responseOwner = responseOwner;
+        ObjectETag = objectETag;
     }
 
     public Stream Content { get; }
+    public string? ObjectETag { get; }
 
     public async ValueTask DisposeAsync()
     {

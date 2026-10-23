@@ -5,6 +5,7 @@ using Tindy.Application.Entities;
 using Tindy.Application.Exceptions;
 using Tindy.Application.Interfaces.Services;
 using Tindy.Application.Models.Storage;
+using Tindy.Application.Services;
 using Tindy.Infrastructure.Persistence;
 using Tindy.Infrastructure.Storage;
 
@@ -95,12 +96,32 @@ public sealed class ProfileMediaService : IProfileMediaService
         var limit = avatar ? MaxAvatarBytes : MaxCoverBytes;
         if (image.Bytes.Length == 0 || image.Bytes.Length > limit)
             throw new MediaRequestException(413, "MEDIA_FILE_TOO_LARGE", "Processed image exceeds the storage limit.");
+        var kind = avatar ? MediaStorageKind.Avatar : MediaStorageKind.Cover;
+        var target = _storage.CreateWriteTarget(userId, kind);
+        var mediaId = Guid.NewGuid();
+        await using (var reserve = await _db.Database.BeginTransactionAsync(ct))
+        {
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM users WHERE user_id = {userId} FOR UPDATE", ct);
+            if (!await _db.Users.AnyAsync(u => u.UserId == userId && u.Status == "active" && u.DeletedAt == null && u.IsOnboardingCompleted && u.Profile != null, ct))
+                throw new MediaRequestException(404, "MEDIA_PROFILE_NOT_FOUND", "Profile not found.");
+            _db.MediaAssets.Add(new MediaAsset
+            {
+                MediaAssetId = mediaId, OwnerUserId = userId, Purpose = avatar ? "avatar" : "cover",
+                StorageProvider = target.StorageProvider, StorageContainer = target.StorageContainer, StorageKey = target.StorageKey,
+                ContentType = "image/webp", ReservedBytes = image.Bytes.Length, Status = "pending_upload", ScanStatus = "not_required",
+                CreatedAt = DateTime.UtcNow, UploadExpiresAt = DateTime.UtcNow.AddMinutes(15)
+            });
+            await _db.SaveChangesAsync(ct);
+            await reserve.CommitAsync(ct);
+        }
         await using var input = new MemoryStream(image.Bytes, writable: false);
-        var stored = await _storage.SaveAsync(new StorageSaveRequest(userId,
-            avatar ? MediaStorageKind.Avatar : MediaStorageKind.Cover, input), ct);
         var committed = false;
         try
         {
+            using var uploadTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            uploadTimeout.CancelAfter(TimeSpan.FromMinutes(14));
+            var stored = await _storage.SaveAsync(new StorageSaveRequest(userId, kind, input, target), uploadTimeout.Token);
+            _db.ChangeTracker.Clear();
             await using var tx = await _db.Database.BeginTransactionAsync(ct);
             // Serialize replaces, deletes and OAuth avatar-source changes for this owner.
             await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM users WHERE user_id = {userId} FOR UPDATE", ct);
@@ -113,17 +134,19 @@ public sealed class ProfileMediaService : IProfileMediaService
                 throw new MediaRequestException(409, "MEDIA_OAUTH_UNLINKED", "The selected provider is no longer linked.");
 
             var now = DateTime.UtcNow;
-            var asset = new MediaAsset
-            {
-                MediaAssetId = Guid.NewGuid(), OwnerUserId = userId, Purpose = avatar ? "avatar" : "cover",
-                StorageProvider = stored.StorageProvider, StorageContainer = stored.StorageContainer,
-                StorageKey = stored.StorageKey, ObjectEtag = stored.ObjectETag, ObjectVersionId = stored.ObjectVersionId,
-                OriginalFileName = null, // Do not persist untrusted client-supplied filenames in Profile media.
-                FileSizeBytes = stored.FileSizeBytes, ContentType = stored.ContentType,
-                Width = image.Width, Height = image.Height, ReservedBytes = 0,
-                Status = "active", ScanStatus = "not_required", CreatedAt = now, ActivatedAt = now
-            };
-            _db.MediaAssets.Add(asset);
+            var asset = await _db.MediaAssets.SingleOrDefaultAsync(a => a.MediaAssetId == mediaId && a.Status == "pending_upload", ct);
+            if (asset is null || asset.UploadExpiresAt <= now)
+                throw new MediaRequestException(409, "MEDIA_UPLOAD_EXPIRED", "Upload reservation has expired.");
+            asset.ObjectEtag = stored.ObjectETag;
+            asset.ObjectVersionId = stored.ObjectVersionId;
+            asset.FileSizeBytes = stored.FileSizeBytes;
+            asset.ContentType = stored.ContentType;
+            asset.Width = image.Width;
+            asset.Height = image.Height;
+            asset.ReservedBytes = 0;
+            asset.Status = "active";
+            asset.ActivatedAt = now;
+            asset.UploadExpiresAt = null;
             var oldId = avatar ? profile.AvatarAssetId : profile.CoverAssetId;
             if (avatar)
             {
@@ -146,16 +169,21 @@ public sealed class ProfileMediaService : IProfileMediaService
         }
         catch
         {
-            // Never delete after a successfully committed reference swap.
-            // Step 05 adds durable orphan reconciliation for deletion failures.
+            // Durable cleanup instead of deleting an object after an ambiguous DB commit.
             if (!committed)
             {
                 try
                 {
                     using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                    await _storage.DeleteAsync(stored.StorageKey, stored.ObjectVersionId, cleanup.Token);
+                    _db.ChangeTracker.Clear();
+                    await using var rollback = await _db.Database.BeginTransactionAsync(cleanup.Token);
+                    await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM users WHERE user_id = {userId} FOR UPDATE", cleanup.Token);
+                    var pending = await _db.MediaAssets.SingleOrDefaultAsync(a => a.MediaAssetId == mediaId && a.Status == "pending_upload", cleanup.Token);
+                    if (pending is not null) CertificateAttachmentService.MarkForDeletion(pending);
+                    await _db.SaveChangesAsync(cleanup.Token);
+                    await rollback.CommitAsync(cleanup.Token);
                 }
-                catch { /* Preserve original exception; STEP 05 reconciles storage orphans. */ }
+                catch { /* The persisted upload reservation still expires after 15 minutes. */ }
             }
             throw;
         }
@@ -196,22 +224,38 @@ public sealed class ProfileMediaService : IProfileMediaService
         old.UpdatedAt = now;
     }
 
-    public async Task<PrivateMediaRead> ReadAsync(Guid mediaAssetId, CancellationToken ct)
+    public async Task<PrivateMediaRead> ReadAsync(Guid callerUserId, Guid mediaAssetId, CancellationToken ct)
     {
-        // Never serve by asset ID alone: it must be an active, currently referenced
-        // avatar or cover of an active, onboarded user. Certificate permissions are STEP 04.
+        if (!await _db.Users.AsNoTracking().AnyAsync(u => u.UserId == callerUserId && u.Status == "active" &&
+            u.DeletedAt == null && u.IsOnboardingCompleted && u.Profile != null, ct))
+            throw new MediaRequestException(404, "MEDIA_NOT_FOUND", "Media not found.");
+        // Caller authorization and a live relationship are required even for a known UUID.
         var asset = await _db.MediaAssets.AsNoTracking()
             .Where(a => a.MediaAssetId == mediaAssetId && a.Status == "active" &&
-                (a.Purpose == "avatar" || a.Purpose == "cover") &&
+                (a.ContentType != "application/pdf" || a.ScanStatus == "clean") &&
                 _db.Users.Any(u => u.UserId == a.OwnerUserId && u.Status == "active" &&
-                    u.DeletedAt == null && u.IsOnboardingCompleted &&
-                    u.Profile != null && (a.Purpose == "avatar" ?
-                        u.Profile.AvatarAssetId == a.MediaAssetId : u.Profile.CoverAssetId == a.MediaAssetId)))
-            .Select(a => new { a.StorageKey, a.ObjectVersionId, a.ContentType })
+                    u.DeletedAt == null && u.IsOnboardingCompleted && u.Profile != null) &&
+                (((a.Purpose == "avatar" || a.Purpose == "cover") &&
+                    _db.UserProfiles.Any(p => p.UserId == a.OwnerUserId && (a.Purpose == "avatar" ? p.AvatarAssetId == a.MediaAssetId : p.CoverAssetId == a.MediaAssetId))) ||
+                 (a.Purpose == "certificate" && _db.UserCertificateAttachments.Any(t => t.MediaAssetId == a.MediaAssetId &&
+                    t.OwnerUserId == a.OwnerUserId && (t.OwnerUserId == callerUserId || t.Visibility == "members") &&
+                    t.Certificate.UserId == a.OwnerUserId))))
+            .Select(a => new { a.StorageProvider, a.StorageContainer, a.StorageKey, a.ObjectVersionId, a.ObjectEtag, a.ContentType })
             .SingleOrDefaultAsync(ct);
-        if (asset is null || asset.ContentType != "image/webp")
+        if (asset is null || asset.ContentType is not ("image/webp" or "application/pdf") ||
+            !_storage.CanAccess(asset.StorageProvider, asset.StorageContainer))
             throw new MediaRequestException(404, "MEDIA_NOT_FOUND", "Media not found.");
-        try { return new PrivateMediaRead("image/webp", await _storage.OpenReadAsync(asset.StorageKey, asset.ObjectVersionId, ct)); }
+        try
+        {
+            var handle = await _storage.OpenReadAsync(asset.StorageKey, asset.ObjectVersionId, ct);
+            if (asset.StorageProvider == "s3" && (string.IsNullOrWhiteSpace(asset.ObjectEtag) ||
+                asset.ObjectEtag.Trim('"') != handle.ObjectETag?.Trim('"')))
+            {
+                await handle.DisposeAsync();
+                throw new MediaRequestException(404, "MEDIA_NOT_FOUND", "Media not found.");
+            }
+            return new PrivateMediaRead(asset.ContentType, handle);
+        }
         catch (FileNotFoundException) { throw new MediaRequestException(404, "MEDIA_NOT_FOUND", "Media not found."); }
     }
 }

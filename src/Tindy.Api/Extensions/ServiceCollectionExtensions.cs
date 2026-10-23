@@ -297,6 +297,29 @@ public static class ServiceCollectionExtensions
             static string MediaPartitionKey(HttpContext context) =>
                 context.User.FindFirst("sub")?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
+            // Existing ASP.NET Core limiter also limits the whole HTTP upload lifetime.
+            options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+            {
+                var path = (context.Request.Path.Value ?? "").TrimEnd('/');
+                var upload = (HttpMethods.IsPost(context.Request.Method) && path.StartsWith("/api/me/profile/", StringComparison.OrdinalIgnoreCase) &&
+                    (path.EndsWith("/attachments", StringComparison.OrdinalIgnoreCase) || path.EndsWith("/avatar", StringComparison.OrdinalIgnoreCase) || path.EndsWith("/cover-image", StringComparison.OrdinalIgnoreCase))) ||
+                    (HttpMethods.IsPut(context.Request.Method) && path.Equals("/api/me/profile/avatar/source", StringComparison.OrdinalIgnoreCase));
+                return upload ? RateLimitPartition.GetConcurrencyLimiter(MediaPartitionKey(context), _ => new ConcurrencyLimiterOptions
+                {
+                    PermitLimit = 2, QueueLimit = 0
+                }) : RateLimitPartition.GetNoLimiter("other");
+            });
+            options.AddPolicy("media-certificate-upload", context => RateLimitPartition.GetFixedWindowLimiter(
+                MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 20, Window = TimeSpan.FromDays(1), QueueLimit = 0, AutoReplenishment = true
+                }));
+            options.AddPolicy("media-visibility", context => RateLimitPartition.GetFixedWindowLimiter(
+                MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 60, Window = TimeSpan.FromHours(1), QueueLimit = 0, AutoReplenishment = true
+                }));
+
             options.AddPolicy("media-avatar", context => RateLimitPartition.GetFixedWindowLimiter(
                 MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
                 {

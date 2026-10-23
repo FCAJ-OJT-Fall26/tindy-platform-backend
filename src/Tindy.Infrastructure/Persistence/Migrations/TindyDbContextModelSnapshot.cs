@@ -638,23 +638,15 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<string>("CredentialId")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("credential_id");
-
                     b.Property<string>("CredentialUrl")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)")
                         .HasColumnName("credential_url");
 
-                    b.Property<DateOnly?>("ExpiresAt")
-                        .HasColumnType("date")
-                        .HasColumnName("expires_at");
-
-                    b.Property<DateOnly?>("IssuedAt")
-                        .HasColumnType("date")
-                        .HasColumnName("issued_at");
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("description");
 
                     b.Property<string>("Issuer")
                         .IsRequired()
@@ -684,10 +676,7 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_user_certificates_user_id");
 
-                    b.ToTable("user_certificates", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_user_certificates_dates_order", "issued_at IS NULL OR expires_at IS NULL OR expires_at >= issued_at");
-                        });
+                    b.ToTable("user_certificates", (string)null);
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.UserCertificateAttachment", b =>
@@ -725,6 +714,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnName("visibility");
 
                     b.HasKey("AttachmentId");
+
+                    b.HasIndex("CertificateId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_user_certificate_attachments_certificate_id");
 
                     b.HasIndex("MediaAssetId")
                         .IsUnique()

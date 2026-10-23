@@ -34,4 +34,14 @@ internal static partial class StorageObjectKeys
             throw new ArgumentException("Invalid storage object key.", nameof(storageKey));
         return storageKey;
     }
+
+    public static void ValidateTarget(StorageSaveRequest request, string provider, string container)
+    {
+        if (request.Target is null) return;
+        var expected = Create(request.OwnerUserId, request.Kind).Key;
+        var key = Validate(request.Target.StorageKey);
+        if (request.Target.StorageProvider != provider || request.Target.StorageContainer != container ||
+            key[..key.LastIndexOf('/')] != expected[..expected.LastIndexOf('/')] || Path.GetExtension(key) != Path.GetExtension(expected))
+            throw new ArgumentException("Storage target does not match the upload.", nameof(request));
+    }
 }

@@ -19,12 +19,7 @@ public sealed class MediaSchemaMigrationTests
     [Fact]
     public async Task Migration_UpDown_PreservesExistingProfileCertificateAndRejectsForeignOwners()
     {
-        await using var postgres = new PostgreSqlBuilder()
-            .WithImage("postgres:16-alpine")
-            .WithDatabase("tindy_media_migration_test")
-            .WithUsername("postgres")
-            .WithPassword("postgres_test_only")
-            .Build();
+        await using var postgres = new TestPostgres();
         await postgres.StartAsync();
         var options = new DbContextOptionsBuilder<TindyDbContext>()
             .UseNpgsql(postgres.GetConnectionString()).Options;

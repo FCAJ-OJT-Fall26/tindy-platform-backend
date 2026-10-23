@@ -1,8 +1,8 @@
-using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Tindy.Application.DTOs.Profile;
 using Tindy.Application.Entities;
 using Tindy.Application.Interfaces.Repositories;
+using Tindy.Application.Services;
 using Tindy.Infrastructure.Persistence;
 
 namespace Tindy.Infrastructure.Repositories;
@@ -21,9 +21,7 @@ public sealed class CertificateRepository : ICertificateRepository
     public async Task<IReadOnlyList<CertificateResponse>> ListOwnedAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         var rows = await ForOwner(userId)
-            .OrderByDescending(cert => cert.IssuedAt.HasValue)
-            .ThenByDescending(cert => cert.IssuedAt)
-            .ThenByDescending(cert => cert.CreatedAt)
+            .OrderByDescending(cert => cert.CreatedAt)
             .ThenBy(cert => cert.CertificateId)
             .ToListAsync(cancellationToken);
         return rows.Select(ToResponse).ToArray();
@@ -41,6 +39,13 @@ public sealed class CertificateRepository : ICertificateRepository
 
     public void Add(UserCertificate certificate) => _context.UserCertificates.Add(certificate);
     public void Remove(UserCertificate certificate) => _context.UserCertificates.Remove(certificate);
+    public async Task DetachMediaAsync(Guid ownerUserId, Guid certificateId, CancellationToken cancellationToken = default)
+    {
+        var attachments = await _context.UserCertificateAttachments.Include(a => a.MediaAsset)
+            .Where(a => a.OwnerUserId == ownerUserId && a.CertificateId == certificateId).ToListAsync(cancellationToken);
+        foreach (var attachment in attachments) CertificateAttachmentService.MarkForDeletion(attachment.MediaAsset);
+        _context.UserCertificateAttachments.RemoveRange(attachments);
+    }
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) => _context.SaveChangesAsync(cancellationToken);
 
     public async Task<T> ExecuteInTransactionAsync<T>(Guid ownerUserId, Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
@@ -58,8 +63,6 @@ public sealed class CertificateRepository : ICertificateRepository
 
     private static CertificateResponse ToResponse(UserCertificate certificate) =>
         new(certificate.CertificateId, certificate.Title, certificate.Issuer,
-            certificate.CredentialId, certificate.CredentialUrl,
-            certificate.IssuedAt?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            certificate.ExpiresAt?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            certificate.Description, certificate.CredentialUrl,
             certificate.CreatedAt, certificate.UpdatedAt);
 }

@@ -3,7 +3,7 @@ using Tindy.Application.Models.Storage;
 
 namespace Tindy.Infrastructure.Storage;
 
-public sealed class LocalFileStorageService : IFileStorageService
+public sealed partial class LocalFileStorageService : IFileStorageService, IStorageObjectInventory
 {
     private readonly string _rootPath;
     private readonly string _rootPrefix;
@@ -27,10 +27,17 @@ public sealed class LocalFileStorageService : IFileStorageService
         // Do not create a directory until the first write.
     }
 
+    public StorageWriteTarget CreateWriteTarget(Guid ownerUserId, MediaStorageKind kind) =>
+        new("local", "local", StorageObjectKeys.Create(ownerUserId, kind).Key);
+
+    public bool CanAccess(string storageProvider, string storageContainer) => storageProvider == "local" && storageContainer == "local";
+
     public async Task<StoredFileResult> SaveAsync(StorageSaveRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var (key, contentType, maxBytes) = StorageObjectKeys.Create(request.OwnerUserId, request.Kind);
+        var (generatedKey, contentType, maxBytes) = StorageObjectKeys.Create(request.OwnerUserId, request.Kind);
+        StorageObjectKeys.ValidateTarget(request, "local", "local");
+        var key = request.Target?.StorageKey ?? generatedKey;
         await using var data = await BoundedStorageContent.ReadAsync(request.Content, maxBytes, cancellationToken);
         var destination = Resolve(key);
         var directory = Path.GetDirectoryName(destination)!;
@@ -68,6 +75,7 @@ public sealed class LocalFileStorageService : IFileStorageService
         if (objectVersionId is not null) throw new ArgumentException("Local storage has no object versions.", nameof(objectVersionId));
         var path = Resolve(storageKey);
         File.Delete(path); // .NET's File.Delete does nothing when the file does not exist.
+        File.Delete(path + ".partial"); // The same reserved target may have an interrupted atomic write.
         return Task.CompletedTask;
     }
 

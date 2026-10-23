@@ -20,10 +20,17 @@ public sealed class S3FileStorageService : IFileStorageService, IDisposable
         _ownsClient = ownsClient;
     }
 
+    public StorageWriteTarget CreateWriteTarget(Guid ownerUserId, MediaStorageKind kind) =>
+        new("s3", _bucket, StorageObjectKeys.Create(ownerUserId, kind).Key);
+
+    public bool CanAccess(string storageProvider, string storageContainer) => storageProvider == "s3" && storageContainer == _bucket;
+
     public async Task<StoredFileResult> SaveAsync(StorageSaveRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var (key, contentType, maxBytes) = StorageObjectKeys.Create(request.OwnerUserId, request.Kind);
+        var (generatedKey, contentType, maxBytes) = StorageObjectKeys.Create(request.OwnerUserId, request.Kind);
+        StorageObjectKeys.ValidateTarget(request, "s3", _bucket);
+        var key = request.Target?.StorageKey ?? generatedKey;
         await using var data = await BoundedStorageContent.ReadAsync(request.Content, maxBytes, cancellationToken);
         var length = data.Length;
         try
@@ -53,7 +60,7 @@ public sealed class S3FileStorageService : IFileStorageService, IDisposable
             try
             {
                 using var cleanupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = _bucket, Key = key }, cleanupTimeout.Token);
+                await DeleteAsync(key, cancellationToken: cleanupTimeout.Token);
             }
             catch { /* Preserve the original upload exception. */ }
             throw;
@@ -77,7 +84,7 @@ public sealed class S3FileStorageService : IFileStorageService, IDisposable
                 response.Dispose();
                 throw new IOException("S3 returned no content stream.");
             }
-            return new StorageReadHandle(response.ResponseStream, response);
+            return new StorageReadHandle(response.ResponseStream, response, response.ETag);
         }
         catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
         {
@@ -95,6 +102,13 @@ public sealed class S3FileStorageService : IFileStorageService, IDisposable
         var key = StorageObjectKeys.Validate(storageKey);
         try
         {
+            if (objectVersionId is null)
+            {
+                // A crash may occur after PUT but before its VersionId is persisted.
+                // Immutable generated keys allow resolving that exact current version.
+                var metadata = await _s3.GetObjectMetadataAsync(new GetObjectMetadataRequest { BucketName = _bucket, Key = key }, cancellationToken);
+                objectVersionId = metadata.VersionId;
+            }
             // Explicit version ensures cleanup removes the stored version, not just a delete marker.
             await _s3.DeleteObjectAsync(new DeleteObjectRequest
             {

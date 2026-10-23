@@ -67,6 +67,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
 
             Title = statusCode switch
             {
+                400 => "Bad Request",
                 401 => "Unauthorized",
                 403 => "Forbidden",
                 413 => "Payload Too Large",

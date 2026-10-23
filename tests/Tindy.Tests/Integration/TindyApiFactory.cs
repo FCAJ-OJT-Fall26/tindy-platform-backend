@@ -21,14 +21,10 @@ namespace Tindy.Tests.Integration;
 /// </summary>
 public sealed class TindyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
-        .WithImage("postgres:16-alpine")
-        .WithDatabase("tindy_integration_tests")
-        .WithUsername("postgres")
-        .WithPassword("postgres_test_only")
-        .Build();
+    private readonly TestPostgres _postgres = new();
 
     private readonly string _jwtKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+    private readonly string _mediaRoot = Path.Combine(Path.GetTempPath(), "tindy-api-media-" + Guid.NewGuid().ToString("N"));
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -42,7 +38,11 @@ public sealed class TindyApiFactory : WebApplicationFactory<Program>, IAsyncLife
                 ["Jwt:ClockSkewSeconds"] = "0",
                 ["Jwt:SigningKey"] = _jwtKey,
                 ["ConnectionStrings:DefaultConnection"] = _postgres.GetConnectionString(),
-                ["OAuth:Enabled"] = "false"
+                ["OAuth:Enabled"] = "false",
+                ["MediaLifecycle:Enabled"] = "false",
+                ["GuardDuty:Enabled"] = "false",
+                ["MediaStorage:Provider"] = "local",
+                ["MediaStorage:Local:RootPath"] = _mediaRoot
             };
         // Authentication captures its settings during Program startup. Supply them
         // before startup as well as through the runtime configuration provider.
@@ -76,6 +76,7 @@ public sealed class TindyApiFactory : WebApplicationFactory<Program>, IAsyncLife
     {
         Dispose();
         await _postgres.DisposeAsync();
+        if (Directory.Exists(_mediaRoot)) Directory.Delete(_mediaRoot, recursive: true);
     }
 
     public HttpClient CreateHttpsClient() => CreateClient(new WebApplicationFactoryClientOptions

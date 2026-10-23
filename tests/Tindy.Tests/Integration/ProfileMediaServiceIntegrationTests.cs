@@ -19,12 +19,7 @@ public sealed class ProfileMediaServiceIntegrationTests
     [Fact]
     public async Task Upload_Replace_Delete_ArePrivateAndLeaveOldAssetForCleanup()
     {
-        await using var postgres = new PostgreSqlBuilder()
-            .WithImage("postgres:16-alpine")
-            .WithDatabase("tindy_profile_media_test")
-            .WithUsername("postgres")
-            .WithPassword("postgres_test_only")
-            .Build();
+        await using var postgres = new TestPostgres();
         await postgres.StartAsync();
         var options = new DbContextOptionsBuilder<TindyDbContext>()
             .UseNpgsql(postgres.GetConnectionString()).Options;
@@ -56,7 +51,7 @@ public sealed class ProfileMediaServiceIntegrationTests
             }
 
             var first = await Upload();
-            await using (var current = (await service.ReadAsync(first, CancellationToken.None)).Handle)
+            await using (var current = (await service.ReadAsync(owner, first, CancellationToken.None)).Handle)
             {
                 Assert.True(current.Content.CanRead);
                 Assert.True(current.Content.Length > 0);
@@ -66,7 +61,7 @@ public sealed class ProfileMediaServiceIntegrationTests
             Assert.Equal("pending_delete", (await db.MediaAssets.AsNoTracking()
                 .SingleAsync(a => a.MediaAssetId == first)).Status);
             var firstNotFound = await Assert.ThrowsAsync<MediaRequestException>(() =>
-                service.ReadAsync(first, CancellationToken.None));
+                service.ReadAsync(owner, first, CancellationToken.None));
             Assert.Equal(404, firstNotFound.StatusCode);
 
             await service.RemoveAsync(owner, true, CancellationToken.None);

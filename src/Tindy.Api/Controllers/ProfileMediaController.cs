@@ -85,9 +85,16 @@ public sealed class PrivateMediaController : ControllerBase
     {
         Response.Headers["Cache-Control"] = "private, no-store";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
-        var content = await _media.ReadAsync(id, ct);
+        if (!Guid.TryParse(User.FindFirst("sub")?.Value, out var callerId) || callerId == Guid.Empty)
+            throw new InvalidCredentialsException();
+        var content = await _media.ReadAsync(callerId, id, ct);
         // The response owns this handle; disposing here would close the stream before MVC sends it.
         HttpContext.Response.RegisterForDisposeAsync(content.Handle);
+        if (content.ContentType == "application/pdf")
+        {
+            Response.Headers["Content-Security-Policy"] = "sandbox";
+            return File(content.Handle.Content, content.ContentType, "certificate.pdf", enableRangeProcessing: false);
+        }
         return File(content.Handle.Content, content.ContentType, enableRangeProcessing: false);
     }
 }

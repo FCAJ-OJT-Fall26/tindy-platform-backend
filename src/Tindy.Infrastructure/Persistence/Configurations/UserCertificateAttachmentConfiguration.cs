@@ -34,6 +34,8 @@ public sealed class UserCertificateAttachmentConfiguration : IEntityTypeConfigur
 
         builder.HasIndex(x => x.MediaAssetId).IsUnique()
             .HasDatabaseName("ux_user_certificate_attachments_media_asset_id");
+        builder.HasIndex(x => x.CertificateId).IsUnique()
+            .HasDatabaseName("ux_user_certificate_attachments_certificate_id");
         builder.HasIndex(x => new { x.CertificateId, x.OwnerUserId })
             .HasDatabaseName("ix_user_certificate_attachments_certificate_owner");
         builder.HasIndex(x => x.OwnerUserId).HasDatabaseName("ix_user_certificate_attachments_owner_user_id");

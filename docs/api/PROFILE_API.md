@@ -1,5 +1,7 @@
 # Tindy Profile API — Backend V1 (STEP 12)
 
+> **Certificate cập nhật 23/10/2026:** Contract hiện tại tại mục 6; mỗi certificate có tối đa một file riêng tư qua [attachment endpoints](PROFILE_MEDIA_OPENAPI.yaml). [Preflight và migration thủ công](../guide/PROFILE_CERTIFICATES_SIMPLIFICATION.md). Các checkpoint ZIP bên dưới là lịch sử.
+
 > **Bản đối chiếu:** Backend ZIP `tindy-backend-platform(20261020-131618).zip`, branch metadata `feature/profile`, HEAD `eaac2ba` (`test(profile): cover API security and regression cases`). Ngày đối chiếu: 20/10/2026.  
 > **Trạng thái:** Contract xác minh từ code Controller/DTO/parser/repository, **không phải** xác nhận đã chạy HTTP end-to-end. Quy trình xác nhận trước khi phát hành xem `../guide/PROFILE_STEP12_RELEASE_AUDIT.md`.  
 > **Mục tiêu:** Tài liệu bàn giao FE cho Profile, Experiences, Certificates. Nguồn thực thi cuối cùng là code BE hiện tại; mọi thay đổi contract sau này phải cập nhật tài liệu và test tương ứng.
@@ -337,6 +339,7 @@ Không cần request body; không có response body; không thuộc owner → 40
 
 - Owner: `GET /api/me/profile/certificates` → message `Certificates retrieved successfully.`.
 - Member: `GET /api/users/{user_id}/profile/certificates` → message `Member certificates retrieved successfully.`.
+- Cả hai danh sách sắp xếp `created_at DESC`, sau đó `certificate_id ASC` để ổn định khi trùng thời gian.
 - Ví dụ:
 
 ```json
@@ -348,10 +351,8 @@ Không cần request body; không có response body; không thuộc owner → 40
       "certificate_id": "66666666-6666-4666-8666-666666666666",
       "title": "AWS Certified Cloud Practitioner",
       "issuer": "Amazon Web Services",
-      "credential_id": null,
+      "description": "Foundational knowledge of AWS Cloud services.",
       "credential_url": "https://www.credly.com/badges/example",
-      "issued_at": "2026-09-01",
-      "expires_at": null,
       "created_at": "2026-10-20T10:00:00Z",
       "updated_at": null
     }
@@ -368,10 +369,8 @@ Request:
 {
   "title": "AWS Certified Cloud Practitioner",
   "issuer": "Amazon Web Services",
-  "credential_id": null,
-  "credential_url": "https://www.credly.com/badges/example",
-  "issued_at": "2026-09-01",
-  "expires_at": null
+  "description": "Foundational knowledge of AWS Cloud services.",
+  "credential_url": "https://www.credly.com/badges/example"
 }
 ```
 
@@ -385,10 +384,8 @@ Response:
     "certificate_id": "66666666-6666-4666-8666-666666666666",
     "title": "AWS Certified Cloud Practitioner",
     "issuer": "Amazon Web Services",
-    "credential_id": null,
+    "description": "Foundational knowledge of AWS Cloud services.",
     "credential_url": "https://www.credly.com/badges/example",
-    "issued_at": "2026-09-01",
-    "expires_at": null,
     "created_at": "2026-10-20T10:00:00Z",
     "updated_at": null
   }
@@ -398,11 +395,11 @@ Response:
 
 ### 6.3 PUT `/api/me/profile/certificates/{certificate_id}` — 200
 
-PUT full replacement; body cùng schema POST; trả `Certificate updated successfully.` + CertificateResponse. Không thuộc owner → 404.
+PUT full replacement; body cùng schema POST; trả `Certificate updated successfully.` + CertificateResponse. Optional field bị bỏ qua hoặc gửi null đều được xóa về null. Không thuộc owner → 404.
 
 ### 6.4 DELETE `/api/me/profile/certificates/{certificate_id}` — 204
 
-Không có body. Không thuộc owner → 404.
+Không có body. Không thuộc owner → 404. Attachment được gỡ và media được đánh dấu `pending_delete` trong cùng transaction; worker xóa file vật lý an toàn.
 
 ### Validation Certificate
 
@@ -410,11 +407,18 @@ Không có body. Không thuộc owner → 404.
 |---|---|
 | `title` | bắt buộc, trimmed, 1..255 chars |
 | `issuer` | bắt buộc, 1..255 chars |
-| `credential_id` | optional null, ≤255 |
+| `description` | optional null, trimmed, ≤2000 |
 | `credential_url` | optional null, absolute HTTP/HTTPS ≤1000 |
-| `issued_at`, `expires_at` | optional `YYYY-MM-DD` hoặc null, ngày lịch hợp lệ |
 
-Nếu đủ hai ngày: `expires_at >= issued_at`. **Không có** `is_verified`, `verification_status`, `file_url`, upload chứng chỉ, API xác minh hoặc S3 trong MVP. Certificate là thông tin tự khai báo, không nên gắn nhãn verified trên UI.
+Text được trim; optional blank thành null. JSON phải là object; unknown field, duplicate property và các field certificate đã loại bỏ đều trả `400 VALIDATION_FAILED`. Ví dụ description quá dài có `errors.description = ["The maximum length is 2000 characters."]`; field không hỗ trợ có message `This field is not supported.`; field trùng có `Duplicate JSON properties are not allowed.`.
+
+CertificateResponse chỉ chứa metadata ở ví dụ trên, không nhúng file bytes, storage path hay public file URL. Certificate vẫn là thông tin tự khai báo, không có API xác minh hoặc verified state.
+
+### File tùy chọn — tối đa một attachment
+
+Dùng các [attachment endpoints hiện có](PROFILE_MEDIA_OPENAPI.yaml): POST multipart `file` (ảnh `201`, PDF `202`), GET metadata, PATCH visibility và DELETE theo attachment ID. Mọi row còn liên kết chiếm slot, gồm `pending_upload`, `processing`, `active`, `rejected`. Upload file thứ hai trả `409 MEDIA_ATTACHMENT_LIMIT`, detail `Maximum one attachment per certificate. Delete the existing attachment before uploading another.`. Xóa attachment thành công (`204`) rồi mới upload file thay thế, kể cả PDF bị từ chối. Không có Replace File API.
+
+File tối đa 10.000.000 bytes, quota certificate vẫn 200.000.000 bytes/user. File riêng tư; PDF chỉ tải được khi `active` và scan `clean`. Visibility `owner_only`/`members`, polling và cleanup giữ nguyên.
 
 ## 7. OAuth avatar, Account, Onboarding và Catalog
 
@@ -432,7 +436,7 @@ Nếu đủ hai ngày: `expires_at >= issued_at`. **Không có** `is_verified`, 
 | `bio_summary` | `bio` |
 | `portfolio_url` | `personal_website_url` |
 | `is_public` | Không tồn tại (migration xóa) |
-| Upload avatar/cover/certificate | Không hỗ trợ |
+| Upload avatar/cover/certificate | Qua các endpoint media riêng; certificate tối đa một file, xem `PROFILE_MEDIA_OPENAPI.yaml` |
 | Certificate verified state | Không hỗ trợ |
 | Skills `skill_dotnet`, free-text technologies | UUID từ Catalog; `skill_ids` request |
 | `experiences[]`/`certificates[]` nhúng trong Profile | 2 GET collection độc lập |

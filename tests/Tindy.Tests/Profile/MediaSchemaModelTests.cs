@@ -78,5 +78,8 @@ public sealed class MediaSchemaModelTests
         Assert.Equal("owner_only", attachment.FindProperty(nameof(UserCertificateAttachment.Visibility))!.GetDefaultValue());
         Assert.Contains(attachment.GetIndexes(), i => i.IsUnique &&
             i.Properties.Select(p => p.Name).SequenceEqual(new[] { "MediaAssetId" }));
+        Assert.Contains(attachment.GetIndexes(), i => i.IsUnique &&
+            i.GetDatabaseName() == "ux_user_certificate_attachments_certificate_id" &&
+            i.Properties.Select(p => p.Name).SequenceEqual(new[] { "CertificateId" }));
     }
 }
