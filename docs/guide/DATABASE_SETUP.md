@@ -33,13 +33,13 @@ Chạy các lệnh trong tài liệu này tại **thư mục gốc repository**,
 
 Các tham số dùng chung:
 
-| Tham số | Giá trị |
-|---|---|
-| Target project | `./src/Tindy.Infrastructure/Tindy.Infrastructure.csproj` |
-| Startup project | `./src/Tindy.Api/Tindy.Api.csproj` |
-| DbContext | `TindyDbContext` |
-| Connection string key | `ConnectionStrings:DefaultConnection` |
-| Môi trường local | `Development` |
+| Tham số              | Giá trị                                                  |
+| --------------------- | ---------------------------------------------------------- |
+| Target project        | `./src/Tindy.Infrastructure/Tindy.Infrastructure.csproj` |
+| Startup project       | `./src/Tindy.Api/Tindy.Api.csproj`                       |
+| DbContext             | `TindyDbContext`                                         |
+| Connection string key | `ConnectionStrings:DefaultConnection`                    |
+| Môi trường local   | `Development`                                            |
 
 **Điều kiện:** Ứng dụng phải đăng ký `TindyDbContext` bằng đúng key `DefaultConnection`. Nếu tên key trong code thay đổi, hãy cập nhật lệnh User Secrets tương ứng.
 
@@ -104,13 +104,13 @@ dotnet build
 2. Đảm bảo có tài khoản PostgreSQL được phép kết nối và tạo/cập nhật database cần thiết.
 3. Sử dụng các thông số local, ví dụ:
 
-| Cấu hình | Ví dụ |
-|---|---|
-| Host | `localhost` |
-| Port | `5432` |
-| Database | `tindy` |
-| Username | `postgres` |
-| Password | Mật khẩu PostgreSQL trên **máy của bạn** |
+| Cấu hình | Ví dụ                                              |
+| ---------- | ---------------------------------------------------- |
+| Host       | `localhost`                                        |
+| Port       | `5432`                                             |
+| Database   | `tindy`                                            |
+| Username   | `postgres`                                         |
+| Password   | Mật khẩu PostgreSQL trên **máy của bạn** |
 
 Có thể tạo database rỗng trước bằng pgAdmin hoặc SQL:
 
@@ -274,12 +274,12 @@ git push -u origin feature/update-user-profile-schema
 
 ## 6. Migration khác gì Seeding?
 
-| Nội dung | Migration | Seeding |
-|---|---|---|
-| Mục đích | Tạo/sửa schema | Thêm dữ liệu khởi tạo |
-| Ví dụ | Tạo `users`, `roles`, FK, index | Thêm role `Admin`, `User`, danh mục skill |
-| Khi clone | Chạy `database update` | Chỉ có dữ liệu nếu project **đã triển khai** seeding tương ứng |
-| Dữ liệu người dùng thật | Không tự đồng bộ | Không nên đưa vào seed mặc định |
+| Nội dung                     | Migration                            | Seeding                                                                         |
+| ----------------------------- | ------------------------------------ | ------------------------------------------------------------------------------- |
+| Mục đích                   | Tạo/sửa schema                     | Thêm dữ liệu khởi tạo                                                      |
+| Ví dụ                       | Tạo `users`, `roles`, FK, index | Thêm role `Admin`, `User`, danh mục skill                                 |
+| Khi clone                     | Chạy `database update`            | Chỉ có dữ liệu nếu project **đã triển khai** seeding tương ứng |
+| Dữ liệu người dùng thật | Không tự đồng bộ                | Không nên đưa vào seed mặc định                                         |
 
 **Đối với Tindy:** Có thể cân nhắc seed các bảng dữ liệu dùng chung như `roles`, `permissions`, `skills` khi đã chốt danh sách chuẩn. Nên triển khai seed theo cách **idempotent** (chạy lại không tạo bản ghi trùng lặp).
 
