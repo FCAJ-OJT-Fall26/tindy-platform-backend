@@ -38,19 +38,17 @@ public static class WebApplicationExtensions
         app.UseCors("TindyFrontend");
 
         // ===================================
-        // 5. RATE LIMITING
-        // ===================================
-        app.UseRateLimiter();
-
-        // ===================================
-        // 6. AUTHENTICATION
+        // 5. AUTHENTICATION
         // ===================================
         app.UseAuthentication();
 
         // ===================================
-        // 7. AUTHORIZATION
+        // 6. AUTHORIZATION
         // ===================================
         app.UseAuthorization();
+
+        // Resolve the authenticated, active account before per-user quotas.
+        app.UseRateLimiter();
 
         // ===================================
         // 5. DEVELOPMENT AUTH TEST

@@ -18,6 +18,17 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         // 1. Map Exception -> HTTP Status Code
         var statusCode = exception switch
         {
+            AiException ai => ai.Failure switch
+            {
+                AiFailure.Unavailable => StatusCodes.Status503ServiceUnavailable,
+                AiFailure.Busy => StatusCodes.Status429TooManyRequests,
+                AiFailure.Timeout => StatusCodes.Status504GatewayTimeout,
+                AiFailure.DocumentRejected => StatusCodes.Status422UnprocessableEntity,
+                AiFailure.PayloadTooLarge => StatusCodes.Status413PayloadTooLarge,
+                AiFailure.UnsupportedMedia => StatusCodes.Status415UnsupportedMediaType,
+                _ => StatusCodes.Status502BadGateway
+            },
+
             InvalidCredentialsException =>
                 StatusCodes.Status401Unauthorized,
 
@@ -60,28 +71,35 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 Instance = httpContext.Request.Path
             }
             : new ProblemDetails
-        {
-            Status = statusCode,
-
-            Title = statusCode switch
             {
-                401 => "Unauthorized",
-                404 => "Not Found",
-                409 => "Conflict",
-                422 => "Unprocessable Entity",
-                _ => "Internal Server Error"
-            },
+                Status = statusCode,
 
-            Detail = statusCode == 500
+                Title = statusCode switch
+                {
+                    401 => "Unauthorized",
+                    404 => "Not Found",
+                    409 => "Conflict",
+                    413 => "Payload Too Large",
+                    415 => "Unsupported Media Type",
+                    422 => "Unprocessable Entity",
+                    429 => "Too Many Requests",
+                    502 => "Bad Gateway",
+                    503 => "Service Unavailable",
+                    504 => "Gateway Timeout",
+                    _ => "Internal Server Error"
+                },
+
+                Detail = statusCode == 500
                 ? "An unexpected error occurred."
                 : exception.Message,
 
-            Instance = httpContext.Request.Path
-        };
+                Instance = httpContext.Request.Path
+            };
 
         problemDetails.Extensions["error_code"] =
             exception switch
             {
+                AiException ai => ai.ErrorCode,
                 ProfileValidationException =>
                     "VALIDATION_FAILED",
 

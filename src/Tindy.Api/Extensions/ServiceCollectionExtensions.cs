@@ -250,6 +250,7 @@ public static class ServiceCollectionExtensions
 
         // Certificate CRUD service (STEP 09).
         services.AddScoped<ICertificateService, CertificateService>();
+        services.AddScoped<IAiProfileService, AiProfileService>();
 
 
 
@@ -279,8 +280,10 @@ public static class ServiceCollectionExtensions
                 partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = 20, Window = TimeSpan.FromMinutes(1),
-                    QueueLimit = 0, AutoReplenishment = true
+                    PermitLimit = 20,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
                 }));
 
             // OAuth ticket exchange: rate-limit invalid/replayed ticket attempts.
@@ -288,8 +291,20 @@ public static class ServiceCollectionExtensions
                 partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = 10, Window = TimeSpan.FromMinutes(1),
-                    QueueLimit = 0, AutoReplenishment = true
+                    PermitLimit = 10,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+
+            options.AddPolicy("ai-extract-profile", context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: context.User.FindFirst("sub")?.Value ?? "anonymous",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 5,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
                 }));
 
             // ===================================
@@ -298,17 +313,20 @@ public static class ServiceCollectionExtensions
             options.OnRejected = async (context, cancellationToken) =>
             {
                 var httpContext = context.HttpContext;
+                var isAiExtraction = httpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()
+                    ?.PolicyName == "ai-extract-profile";
 
                 var problem = new ProblemDetails
                 {
                     Status = StatusCodes.Status429TooManyRequests,
                     Title = "Too Many Requests",
-                    Detail = "Too many login attempts. Please try again later.",
+                    Detail = isAiExtraction ? "Too many extraction requests. Please try again later."
+                        : "Too many login attempts. Please try again later.",
                     Instance = httpContext.Request.Path.ToString()
                 };
 
                 problem.Extensions["error_code"] =
-                    "AUTH_TOO_MANY_ATTEMPTS";
+                    isAiExtraction ? "AI_RATE_LIMITED" : "AUTH_TOO_MANY_ATTEMPTS";
 
                 problem.Extensions["traceId"] =
                     httpContext.TraceIdentifier;
