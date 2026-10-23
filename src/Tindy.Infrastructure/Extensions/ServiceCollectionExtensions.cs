@@ -7,6 +7,7 @@ using Tindy.Application.Interfaces.Services;
 using Tindy.Infrastructure.Services;
 using Tindy.Application.Interfaces.Repositories;
 using Tindy.Infrastructure.Repositories;
+using Tindy.Infrastructure.Storage;
 
 namespace Tindy.Infrastructure.Extensions;
 
@@ -79,6 +80,9 @@ public static class ServicesCollectionExtensions
         // JWT ACCESS TOKEN SERVICE
         // ===================================
         services.AddScoped<IJwtTokenService, JwtTokenService>();
+
+        // STEP 02: storage is resolved only when a media feature requests it.
+        services.AddMediaStorage(configuration);
 
         return services;
     }

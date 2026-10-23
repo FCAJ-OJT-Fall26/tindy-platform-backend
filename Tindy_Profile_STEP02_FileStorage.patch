@@ -1,0 +1,841 @@
+diff --git a/docs/guide/PROFILE_MEDIA_STEP02_STORAGE_HANDOFF.md b/docs/guide/PROFILE_MEDIA_STEP02_STORAGE_HANDOFF.md
+new file mode 100644
+index 0000000..92385ac
+--- /dev/null
++++ b/docs/guide/PROFILE_MEDIA_STEP02_STORAGE_HANDOFF.md
+@@ -0,0 +1,175 @@
++# Tindy Profile Module – STEP 02: File Storage Foundation
++
++> Tài liệu bàn giao kỹ thuật (tiếng Việt). Phạm vi: nền tảng lưu trữ file nội bộ, **chưa mở API upload/download**, chưa thay đổi database.
++
++## 1. Kết quả của STEP 02
++
++- `IFileStorageService` được định nghĩa tại Application; **Application không phụ thuộc AWS SDK**.
++- Local Storage ghi file ngoài application content root và web root; key sinh bởi Backend.
++- S3 Storage lưu object vào bucket private; AWS SDK sử dụng default credential chain (role/profile/environment), **không hardcode credentials**.
++- Cả hai provider có `SaveAsync`, `OpenReadAsync`, `DeleteAsync` và thống nhất kiểu kết quả cho `media_assets` V3.
++- File không chứa binary trong PostgreSQL; STEP 03/04 mới thêm nghiệp vụ validate ảnh/PDF và API có JWT.
++
++## 2. Danh sách file thay đổi
++
++| File/thư mục | Vai trò |
++|---|---|
++| `src/Tindy.Application/Interfaces/Services/IFileStorageService.cs` | Contract lưu, đọc, xóa |
++| `src/Tindy.Application/Models/Storage/` | Request, enum loại media, response metadata, read handle |
++| `src/Tindy.Infrastructure/Storage/LocalFileStorageService.cs` | Local private storage |
++| `src/Tindy.Infrastructure/Storage/S3FileStorageService.cs` | Amazon S3 private storage |
++| `src/Tindy.Infrastructure/Storage/StorageObjectKeys.cs` | Key do Backend tạo, chặn path traversal |
++| `src/Tindy.Infrastructure/Storage/BoundedStorageContent.cs` | Đọc stream giới hạn dung lượng |
++| `src/Tindy.Infrastructure/Storage/MediaStorageServiceRegistration.cs` | Chọn provider theo config |
++| `src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs` | Đăng ký storage trong DI |
++| `src/Tindy.Infrastructure/Tindy.Infrastructure.csproj` | Thêm AWSSDK.S3 và các package liên quan |
++| `src/Tindy.Api/appsettings*.json` | Cấu trúc cấu hình provider (không có secrets) |
++| `tests/Tindy.Tests/Media/LocalFileStorageTests.cs` | Test Local lưu/đọc/xóa và các lỗi |
++
++**Không có entity, migration hoặc `dotnet ef database update` trong STEP 02.**
++
++## 3. Áp dụng Git Patch (PowerShell)
++
++Đặt file `Tindy_Profile_STEP02_FileStorage.patch` tại thư mục gốc của Backend:
++
++```powershell
++cd "D:\FPT\Semester 6\OJT\aws\tindy-platform\tindy-backend-platform"
++
++git status
++git apply --check .\Tindy_Profile_STEP02_FileStorage.patch
++git apply .\Tindy_Profile_STEP02_FileStorage.patch
++
++git status
++git -c core.whitespace=cr-at-eol diff --check
++```
++
++**Điều kiện:** source đang ở phiên bản tương ứng với ZIP `tindy-backend-platform(20261023-020135).zip` và các thay đổi hiện có không xung đột patch. Nếu `git apply --check` báo lỗi, không tiếp tục `git apply`: gửi log để kiểm tra. Không áp dụng patch hai lần. File `.patch` nằm ở root không cần commit.
++
++## 4. Cấu hình Local – Development
++
++Không lưu file vào `wwwroot`, thư mục source hoặc `bin`.
++
++Gợi ý thư mục riêng trên Windows: `D:\TindyData\private-media` (cần quyền ghi). Ví dụ trong `src/Tindy.Api/appsettings.Development.json` (file này đã được Git ignore):
++
++```json
++{
++  "MediaStorage": {
++    "Provider": "local",
++    "Local": {
++      "RootPath": "D:/TindyData/private-media"
++    }
++  }
++}
++```
++
++**Không thay toàn bộ nội dung appsettings Development hiện tại:** chỉ thêm phần `MediaStorage` vào JSON đang có để giữ cấu hình CORS/OAuth/database khác. Có thể dùng environment variables để tránh sửa file:
++
++```powershell
++$env:MediaStorage__Provider = "local"
++$env:MediaStorage__Local__RootPath = "D:\TindyData\private-media"
++```
++
++`appsettings.json` chỉ có cấu trúc config với `RootPath` trống; cần thiết lập đường dẫn hợp lệ trước khi gọi storage. Config được kiểm tra khi Service được resolve, không phá vỡ khởi động các API cũ chưa dùng media.
++
++## 5. Cấu hình S3 – Production
++
++Dùng bucket riêng, bật **S3 Block Public Access cho cả bucket** và bật mã hóa mặc định tại bucket. Bucket private không có public ACL và không tạo presigned URL công khai. Ví dụ env vars:
++
++```powershell
++$env:MediaStorage__Provider = "s3"
++$env:MediaStorage__S3__BucketName = "<your-private-media-bucket>"
++$env:MediaStorage__S3__Region = "ap-southeast-1"
++```
++
++App trên ECS/EC2 sử dụng **Task Role/Instance Profile** thay vì AWS Access Key ghi trong config hoặc mã nguồn. Khi chạy local để thử S3, có thể dùng AWS profile/SSO đã cấu hình bằng AWS CLI. Cần AWS IAM tối thiểu trên chính bucket/prefix:
++
++- `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` trên `arn:aws:s3:::<bucket>/profiles/*` và `arn:aws:s3:::<bucket>/certificates/*`.
++- Nếu bật versioning và thao tác một `VersionId` cụ thể: `s3:GetObjectVersion`, `s3:DeleteObjectVersion` tương ứng.
++- Không cần `s3:PutObjectAcl` và không cho public access.
++
++S3 Provider dùng `object_etag` và `object_version_id` từ kết quả PUT để lưu vào `media_assets` ở STEP tiếp theo. Nếu bucket bật versioning, caller cần cung cấp `object_version_id` khi đọc/xóa phiên bản đó. Chỉ test S3 integration trên môi trường/bucket thử nghiệm riêng. **Không dùng Production bucket cho kiểm thử.**
++
++## 6. Contract và lưu ý khi gọi ở STEP 03/04
++
++```csharp
++// Ví dụ bên trong Application Service, KHÔNG phải Controller và chưa triển khai trong STEP 02.
++var stored = await storage.SaveAsync(
++    new StorageSaveRequest(userId, MediaStorageKind.Avatar, processedWebPStream), cancellationToken);
++
++await using var readHandle = await storage.OpenReadAsync(
++    stored.StorageKey, stored.ObjectVersionId, cancellationToken);
++// Sử dụng readHandle.Content khi thật sự cần đọc, rồi tự đóng handle.
++
++await storage.DeleteAsync(stored.StorageKey, stored.ObjectVersionId, cancellationToken);
++```
++
++- Caller **sở hữu upload stream** và phải dispose. SaveAsync không đóng stream được truyền vào.
++- Caller **phải dispose `StorageReadHandle`** (`await using`) để đóng stream + response HTTP của S3.
++- `SaveAsync` tự sinh GUID/object key và chỉ cho phép 4 loại storage: Avatar, Cover, Certificate Image, Certificate PDF. Output ảnh thống nhất WebP theo kế hoạch. **STEP 02 không xác minh file thực sự là WebP/PDF**; các bước sau bắt buộc decode/re-encode/scan trước khi công khai.
++- Giới hạn file dưới dạng byte thập phân: Avatar 5,000,000 B; Cover/PDF/Certificate Image 10,000,000 B; stream được đọc có giới hạn dù không có Content-Length.
++- File `.pdf` trong `certificates/pdf/` **chưa được cho phép download bằng API**; việc kiểm tra malware và trạng thái `active` là yêu cầu bắt buộc trước khi mở API media read trong các bước sau.
++- Application phải kiểm tra **JWT, ownership, status và visibility** trước khi gọi `OpenReadAsync`. `IFileStorageService` là internal service, không tự cấp quyền truy cập.
++- `StorageKey` và đường dẫn ổ đĩa **không được trả từ public DTO**.
++
++## 7. Lỗi, cleanup và giới hạn STEP 02
++
++- Local: ghi vào file `.partial` rồi rename trong cùng thư mục; gặp exception thì xóa file tạm. File xóa nhiều lần không gây lỗi.
++- S3: PUT dùng `IfNoneMatch = "*"` để ngăn overwrite key; nếu upload có lỗi, thử xóa object còn sót (best-effort). Không xóa object đang có nếu S3 trả `412 Precondition Failed`.
++- Nếu mất điện/crash giữa chừng hoặc cleanup S3 cũng thất bại, có thể còn file rác. **Retry bền vững và orphan reconciliation thuộc STEP 05**, không giả vờ đã giải quyết ở STEP 02.
++- Local không cho truyền VersionId; S3 hỗ trợ VersionId để xử lý bucket có versioning.
++- Hiện tại mỗi file được buffer tối đa 10 MB trong memory để xử lý kể cả stream không seekable. Cần tính đến giới hạn đồng thời/rate limiting ở STEP 03/04; chưa phù hợp cho upload file lớn tùy ý.
++
++## 8. Build & Tests
++
++Từ Backend root:
++
++```powershell
++dotnet restore
++dotnet build .\Tindy.slnx
++
++dotnet test .\tests\Tindy.Tests\Tindy.Tests.csproj `
++    --filter "FullyQualifiedName~LocalFileStorageTests" `
++    --verbosity normal
++
++# Kiểm tra toàn bộ tests nếu môi trường đã có các dịch vụ phụ thuộc (PostgreSQL/Docker).
++dotnet test .\Tindy.slnx
++```
++
++Các tests Local không cần PostgreSQL, AWS credentials hoặc Internet, sau khi package NuGet được restore. Test gồm:
++
++1. Save → Read → Delete cho Avatar/Cover/Certificate Image/PDF.
++2. Delete hai lần và đọc file đã xóa.
++3. Chống traversal/key giả mạo.
++4. Giới hạn file 5 MB, file rỗng và không để lại orphan.
++5. Concurrent upload tạo key khác nhau.
++6. Storage root phải nằm ngoài application content root.
++7. Cancellation không để lại file.
++
++S3 integration test chạy **riêng** sau khi tạo bucket/IAM test; trong STEP 02 chưa claim PASS cho S3 thực tế.
++
++## 9. Điều kiện nghiệm thu và commit
++
++- [ ] `git apply --check` và `git apply` thành công trên repo thật.
++- [ ] `dotnet restore`, `dotnet build` thành công.
++- [ ] Tất cả `LocalFileStorageTests` PASS.
++- [ ] Cấu hình Local path nằm ngoài repo, lưu/đọc/xóa thật PASS (đã được cover bởi unit/integration-style tests sử dụng filesystem).
++- [ ] Config switch sang S3 và xác minh với **test bucket riêng** trước khi đánh giá S3 end-to-end PASS.
++- [ ] Không tạo API upload/media public, không tạo migration.
++- [ ] Không thay đổi logic Auth/Profile/Certificate có sẵn.
++
++```powershell
++git add src/Tindy.Application/Interfaces/Services/IFileStorageService.cs
++git add src/Tindy.Application/Models/Storage/
++git add src/Tindy.Infrastructure/Storage/
++git add src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
++git add src/Tindy.Infrastructure/Tindy.Infrastructure.csproj
++git add src/Tindy.Api/appsettings.json
++git add src/Tindy.Api/appsettings.Development.example.json
++git add tests/Tindy.Tests/Media/
++git add docs/guide/PROFILE_MEDIA_STEP02_STORAGE_HANDOFF.md
++
++git -c core.whitespace=cr-at-eol diff --cached --check
++git commit -m "feat(media): add local and s3 storage providers"
++```
++
++> Nếu test fail, gửi log terminal và giữ STEP 02 chưa commit. Không chạy `dotnet ef database update` trong bước này.
+diff --git a/src/Tindy.Api/appsettings.Development.example.json b/src/Tindy.Api/appsettings.Development.example.json
+index 79a92c0..ec405d2 100644
+--- a/src/Tindy.Api/appsettings.Development.example.json
++++ b/src/Tindy.Api/appsettings.Development.example.json
+@@ -1,4 +1,10 @@
+ {
++  "MediaStorage": {
++    "Provider": "local",
++    "Local": {
++      "RootPath": "D:/TindyData/private-media"
++    }
++  },
+   "Cors": {
+     "AllowedOrigins": [
+       "http://localhost:8443",
+diff --git a/src/Tindy.Api/appsettings.json b/src/Tindy.Api/appsettings.json
+index ed9de15..d51a51a 100644
+--- a/src/Tindy.Api/appsettings.json
++++ b/src/Tindy.Api/appsettings.json
+@@ -1,5 +1,15 @@
+ 
+ {
++  "MediaStorage": {
++    "Provider": "local",
++    "Local": {
++      "RootPath": ""
++    },
++    "S3": {
++      "BucketName": "",
++      "Region": ""
++    }
++  },
+   "Logging": {
+     "LogLevel": {
+       "Default": "Information",
+diff --git a/src/Tindy.Application/Interfaces/Services/IFileStorageService.cs b/src/Tindy.Application/Interfaces/Services/IFileStorageService.cs
+new file mode 100644
+index 0000000..8ac9acd
+--- /dev/null
++++ b/src/Tindy.Application/Interfaces/Services/IFileStorageService.cs
+@@ -0,0 +1,11 @@
++using Tindy.Application.Models.Storage;
++
++namespace Tindy.Application.Interfaces.Services;
++
++// Infrastructure owns the storage technology; Application knows only this contract.
++public interface IFileStorageService
++{
++    Task<StoredFileResult> SaveAsync(StorageSaveRequest request, CancellationToken cancellationToken = default);
++    Task<StorageReadHandle> OpenReadAsync(string storageKey, string? objectVersionId = null, CancellationToken cancellationToken = default);
++    Task DeleteAsync(string storageKey, string? objectVersionId = null, CancellationToken cancellationToken = default);
++}
+diff --git a/src/Tindy.Application/Models/Storage/MediaStorageKind.cs b/src/Tindy.Application/Models/Storage/MediaStorageKind.cs
+new file mode 100644
+index 0000000..450909f
+--- /dev/null
++++ b/src/Tindy.Application/Models/Storage/MediaStorageKind.cs
+@@ -0,0 +1,9 @@
++namespace Tindy.Application.Models.Storage;
++
++public enum MediaStorageKind
++{
++    Avatar = 1,
++    Cover = 2,
++    CertificateImage = 3,
++    CertificatePdf = 4
++}
+diff --git a/src/Tindy.Application/Models/Storage/StorageReadHandle.cs b/src/Tindy.Application/Models/Storage/StorageReadHandle.cs
+new file mode 100644
+index 0000000..0bdc286
+--- /dev/null
++++ b/src/Tindy.Application/Models/Storage/StorageReadHandle.cs
+@@ -0,0 +1,33 @@
++namespace Tindy.Application.Models.Storage;
++
++// A GET response may own network resources in addition to the content stream.
++// Callers must use: await using var handle = await storage.OpenReadAsync(...);
++public sealed class StorageReadHandle : IAsyncDisposable, IDisposable
++{
++    private readonly IDisposable? _responseOwner;
++    private bool _disposed;
++
++    public StorageReadHandle(Stream content, IDisposable? responseOwner = null)
++    {
++        Content = content ?? throw new ArgumentNullException(nameof(content));
++        _responseOwner = responseOwner;
++    }
++
++    public Stream Content { get; }
++
++    public async ValueTask DisposeAsync()
++    {
++        if (_disposed) return;
++        _disposed = true;
++        try { await Content.DisposeAsync(); }
++        finally { _responseOwner?.Dispose(); }
++    }
++
++    public void Dispose()
++    {
++        if (_disposed) return;
++        _disposed = true;
++        try { Content.Dispose(); }
++        finally { _responseOwner?.Dispose(); }
++    }
++}
+diff --git a/src/Tindy.Application/Models/Storage/StorageSaveRequest.cs b/src/Tindy.Application/Models/Storage/StorageSaveRequest.cs
+new file mode 100644
+index 0000000..f332c86
+--- /dev/null
++++ b/src/Tindy.Application/Models/Storage/StorageSaveRequest.cs
+@@ -0,0 +1,4 @@
++namespace Tindy.Application.Models.Storage;
++
++// The caller owns Content; SaveAsync never disposes it. Keys and extensions are generated server-side.
++public sealed record StorageSaveRequest(Guid OwnerUserId, MediaStorageKind Kind, Stream Content);
+diff --git a/src/Tindy.Application/Models/Storage/StoredFileResult.cs b/src/Tindy.Application/Models/Storage/StoredFileResult.cs
+new file mode 100644
+index 0000000..5af5936
+--- /dev/null
++++ b/src/Tindy.Application/Models/Storage/StoredFileResult.cs
+@@ -0,0 +1,11 @@
++namespace Tindy.Application.Models.Storage;
++
++// These values can be persisted in media_assets; never expose StorageKey in a public API DTO.
++public sealed record StoredFileResult(
++    string StorageProvider,
++    string StorageContainer,
++    string StorageKey,
++    long FileSizeBytes,
++    string ContentType,
++    string? ObjectETag,
++    string? ObjectVersionId);
+diff --git a/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs b/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
+index d2d3115..e9cf75a 100644
+--- a/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
++++ b/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
+@@ -7,6 +7,7 @@ using Tindy.Application.Interfaces.Services;
+ using Tindy.Infrastructure.Services;
+ using Tindy.Application.Interfaces.Repositories;
+ using Tindy.Infrastructure.Repositories;
++using Tindy.Infrastructure.Storage;
+ 
+ namespace Tindy.Infrastructure.Extensions;
+ 
+@@ -80,6 +81,9 @@ public static class ServicesCollectionExtensions
+         // ===================================
+         services.AddScoped<IJwtTokenService, JwtTokenService>();
+ 
++        // STEP 02: storage is resolved only when a media feature requests it.
++        services.AddMediaStorage(configuration);
++
+         return services;
+     }
+ }
+diff --git a/src/Tindy.Infrastructure/Storage/BoundedStorageContent.cs b/src/Tindy.Infrastructure/Storage/BoundedStorageContent.cs
+new file mode 100644
+index 0000000..e775bc6
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Storage/BoundedStorageContent.cs
+@@ -0,0 +1,35 @@
++namespace Tindy.Infrastructure.Storage;
++
++internal static class BoundedStorageContent
++{
++    // A small, bounded buffer makes streams with unknown length safe for both Local and S3.
++    // Higher-level image/PDF content verification belongs to STEP 03/04/05.
++    public static async Task<MemoryStream> ReadAsync(Stream source, long limitBytes, CancellationToken cancellationToken)
++    {
++        ArgumentNullException.ThrowIfNull(source);
++        if (!source.CanRead) throw new ArgumentException("Content stream must be readable.", nameof(source));
++
++        var buffer = new byte[64 * 1024];
++        var result = new MemoryStream();
++        try
++        {
++            while (true)
++            {
++                int read = await source.ReadAsync(buffer.AsMemory(), cancellationToken);
++                if (read == 0) break;
++                if (result.Length > limitBytes - read)
++                    throw new InvalidDataException($"Storage object exceeds the {limitBytes}-byte limit.");
++                await result.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
++            }
++
++            if (result.Length == 0) throw new InvalidDataException("Storage object cannot be empty.");
++            result.Position = 0;
++            return result;
++        }
++        catch
++        {
++            await result.DisposeAsync();
++            throw;
++        }
++    }
++}
+diff --git a/src/Tindy.Infrastructure/Storage/LocalFileStorageService.cs b/src/Tindy.Infrastructure/Storage/LocalFileStorageService.cs
+new file mode 100644
+index 0000000..83e151f
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Storage/LocalFileStorageService.cs
+@@ -0,0 +1,82 @@
++using Tindy.Application.Interfaces.Services;
++using Tindy.Application.Models.Storage;
++
++namespace Tindy.Infrastructure.Storage;
++
++public sealed class LocalFileStorageService : IFileStorageService
++{
++    private readonly string _rootPath;
++    private readonly string _rootPrefix;
++    private readonly StringComparison _comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
++
++    public LocalFileStorageService(string rootPath, string contentRootPath)
++    {
++        if (string.IsNullOrWhiteSpace(rootPath) || !Path.IsPathFullyQualified(rootPath))
++            throw new InvalidOperationException("MediaStorage:Local:RootPath must be an absolute path outside the application.");
++        if (string.IsNullOrWhiteSpace(contentRootPath)) throw new ArgumentException("Content root is required.", nameof(contentRootPath));
++
++        _rootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
++        if (_rootPath.Equals(Path.GetPathRoot(_rootPath), _comparison))
++            throw new InvalidOperationException("The filesystem root cannot be used for media storage.");
++        _rootPrefix = _rootPath + Path.DirectorySeparatorChar;
++        var contentRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(contentRootPath));
++        if (_rootPath.Equals(contentRoot, _comparison) || _rootPath.StartsWith(contentRoot + Path.DirectorySeparatorChar, _comparison)
++            || contentRoot.StartsWith(_rootPrefix, _comparison))
++            throw new InvalidOperationException("Local media root must be outside the application content root.");
++
++        // Do not create a directory until the first write.
++    }
++
++    public async Task<StoredFileResult> SaveAsync(StorageSaveRequest request, CancellationToken cancellationToken = default)
++    {
++        ArgumentNullException.ThrowIfNull(request);
++        var (key, contentType, maxBytes) = StorageObjectKeys.Create(request.OwnerUserId, request.Kind);
++        await using var data = await BoundedStorageContent.ReadAsync(request.Content, maxBytes, cancellationToken);
++        var destination = Resolve(key);
++        var directory = Path.GetDirectoryName(destination)!;
++        Directory.CreateDirectory(directory);
++        var temporary = destination + ".partial";
++        try
++        {
++            await using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous))
++            {
++                await data.CopyToAsync(file, cancellationToken);
++                await file.FlushAsync(cancellationToken);
++            }
++            cancellationToken.ThrowIfCancellationRequested();
++            File.Move(temporary, destination); // Same-directory atomic move; never overwrite.
++            return new StoredFileResult("local", "local", key, data.Length, contentType, null, null);
++        }
++        finally
++        {
++            if (File.Exists(temporary)) File.Delete(temporary);
++        }
++    }
++
++    public Task<StorageReadHandle> OpenReadAsync(string storageKey, string? objectVersionId = null, CancellationToken cancellationToken = default)
++    {
++        cancellationToken.ThrowIfCancellationRequested();
++        if (objectVersionId is not null) throw new ArgumentException("Local storage has no object versions.", nameof(objectVersionId));
++        var path = Resolve(storageKey);
++        Stream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous);
++        return Task.FromResult(new StorageReadHandle(stream));
++    }
++
++    public Task DeleteAsync(string storageKey, string? objectVersionId = null, CancellationToken cancellationToken = default)
++    {
++        cancellationToken.ThrowIfCancellationRequested();
++        if (objectVersionId is not null) throw new ArgumentException("Local storage has no object versions.", nameof(objectVersionId));
++        var path = Resolve(storageKey);
++        File.Delete(path); // .NET's File.Delete does nothing when the file does not exist.
++        return Task.CompletedTask;
++    }
++
++    private string Resolve(string storageKey)
++    {
++        var key = StorageObjectKeys.Validate(storageKey);
++        var path = Path.GetFullPath(Path.Combine(_rootPath, key.Replace('/', Path.DirectorySeparatorChar)));
++        if (!path.StartsWith(_rootPrefix, _comparison))
++            throw new InvalidOperationException("Storage key resolves outside the local media root.");
++        return path;
++    }
++}
+diff --git a/src/Tindy.Infrastructure/Storage/MediaStorageOptions.cs b/src/Tindy.Infrastructure/Storage/MediaStorageOptions.cs
+new file mode 100644
+index 0000000..1d0705f
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Storage/MediaStorageOptions.cs
+@@ -0,0 +1,20 @@
++namespace Tindy.Infrastructure.Storage;
++
++public sealed class MediaStorageOptions
++{
++    public const string SectionName = "MediaStorage";
++    public string Provider { get; set; } = "";
++    public LocalStorageOptions Local { get; set; } = new();
++    public S3StorageOptions S3 { get; set; } = new();
++}
++
++public sealed class LocalStorageOptions
++{
++    public string RootPath { get; set; } = "";
++}
++
++public sealed class S3StorageOptions
++{
++    public string BucketName { get; set; } = "";
++    public string Region { get; set; } = "";
++}
+diff --git a/src/Tindy.Infrastructure/Storage/MediaStorageServiceRegistration.cs b/src/Tindy.Infrastructure/Storage/MediaStorageServiceRegistration.cs
+new file mode 100644
+index 0000000..ebcaa05
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Storage/MediaStorageServiceRegistration.cs
+@@ -0,0 +1,38 @@
++using Amazon;
++using Amazon.S3;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Hosting;
++using Tindy.Application.Interfaces.Services;
++
++namespace Tindy.Infrastructure.Storage;
++
++public static class MediaStorageServiceRegistration
++{
++    public static IServiceCollection AddMediaStorage(this IServiceCollection services, IConfiguration configuration)
++    {
++        // Lazy factory: keeps existing auth/profile startup unchanged until media is used.
++        services.AddSingleton<IFileStorageService>(sp =>
++        {
++            var options = configuration.GetSection(MediaStorageOptions.SectionName).Get<MediaStorageOptions>()
++                ?? throw new InvalidOperationException("MediaStorage configuration is missing.");
++            var host = sp.GetRequiredService<IHostEnvironment>();
++            switch (options.Provider.Trim().ToLowerInvariant())
++            {
++                case "local":
++                    return new LocalFileStorageService(options.Local.RootPath, host.ContentRootPath);
++                case "s3":
++                    if (string.IsNullOrWhiteSpace(options.S3.Region) || string.IsNullOrWhiteSpace(options.S3.BucketName))
++                        throw new InvalidOperationException("MediaStorage:S3:Region and BucketName are required.");
++                    var client = new AmazonS3Client(new AmazonS3Config
++                    {
++                        RegionEndpoint = RegionEndpoint.GetBySystemName(options.S3.Region)
++                    }); // AWS default credential chain: local profile, env, EC2/ECS role.
++                    return new S3FileStorageService(client, options.S3.BucketName, ownsClient: true);
++                default:
++                    throw new InvalidOperationException("MediaStorage:Provider must be 'local' or 's3'.");
++            }
++        });
++        return services;
++    }
++}
+diff --git a/src/Tindy.Infrastructure/Storage/S3FileStorageService.cs b/src/Tindy.Infrastructure/Storage/S3FileStorageService.cs
+new file mode 100644
+index 0000000..e702d53
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Storage/S3FileStorageService.cs
+@@ -0,0 +1,111 @@
++using System.Net;
++using Amazon.S3;
++using Amazon.S3.Model;
++using Tindy.Application.Interfaces.Services;
++using Tindy.Application.Models.Storage;
++
++namespace Tindy.Infrastructure.Storage;
++
++public sealed class S3FileStorageService : IFileStorageService, IDisposable
++{
++    private readonly IAmazonS3 _s3;
++    private readonly string _bucket;
++    private readonly bool _ownsClient;
++
++    public S3FileStorageService(IAmazonS3 s3, string bucketName, bool ownsClient = false)
++    {
++        _s3 = s3 ?? throw new ArgumentNullException(nameof(s3));
++        if (string.IsNullOrWhiteSpace(bucketName)) throw new ArgumentException("An S3 bucket name is required.", nameof(bucketName));
++        _bucket = bucketName;
++        _ownsClient = ownsClient;
++    }
++
++    public async Task<StoredFileResult> SaveAsync(StorageSaveRequest request, CancellationToken cancellationToken = default)
++    {
++        ArgumentNullException.ThrowIfNull(request);
++        var (key, contentType, maxBytes) = StorageObjectKeys.Create(request.OwnerUserId, request.Kind);
++        await using var data = await BoundedStorageContent.ReadAsync(request.Content, maxBytes, cancellationToken);
++        var length = data.Length;
++        try
++        {
++            var response = await _s3.PutObjectAsync(new PutObjectRequest
++            {
++                BucketName = _bucket,
++                Key = key,
++                InputStream = data,
++                AutoCloseStream = false,
++                ContentType = contentType,
++                IfNoneMatch = "*" // Never overwrite another object.
++                // Never add a public ACL or public URL here.
++            }, cancellationToken);
++
++            return new StoredFileResult("s3", _bucket, key, length, contentType, response.ETag, response.VersionId);
++        }
++        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
++        {
++            // IfNoneMatch prevented an overwrite; never delete the existing object.
++            throw;
++        }
++        catch
++        {
++            // An interrupted PUT can leave an orphan. This is best-effort only;
++            // STEP 05 adds durable orphan reconciliation and retries.
++            try
++            {
++                using var cleanupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
++                await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = _bucket, Key = key }, cleanupTimeout.Token);
++            }
++            catch { /* Preserve the original upload exception. */ }
++            throw;
++        }
++    }
++
++    public async Task<StorageReadHandle> OpenReadAsync(string storageKey, string? objectVersionId = null, CancellationToken cancellationToken = default)
++    {
++        var key = StorageObjectKeys.Validate(storageKey);
++        try
++        {
++            var response = await _s3.GetObjectAsync(new GetObjectRequest
++            {
++                BucketName = _bucket,
++                Key = key,
++                VersionId = objectVersionId
++            }, cancellationToken);
++            // Disposing the handle closes BOTH the response stream and the HTTP response.
++            if (response.ResponseStream is null)
++            {
++                response.Dispose();
++                throw new IOException("S3 returned no content stream.");
++            }
++            return new StorageReadHandle(response.ResponseStream, response);
++        }
++        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
++        {
++            throw new FileNotFoundException("Media object not found.", ex);
++        }
++    }
++
++    public void Dispose()
++    {
++        if (_ownsClient) _s3.Dispose();
++    }
++
++    public async Task DeleteAsync(string storageKey, string? objectVersionId = null, CancellationToken cancellationToken = default)
++    {
++        var key = StorageObjectKeys.Validate(storageKey);
++        try
++        {
++            // Explicit version ensures cleanup removes the stored version, not just a delete marker.
++            await _s3.DeleteObjectAsync(new DeleteObjectRequest
++            {
++                BucketName = _bucket,
++                Key = key,
++                VersionId = objectVersionId
++            }, cancellationToken);
++        }
++        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
++        {
++            // Idempotent delete, including already-removed object versions.
++        }
++    }
++}
+diff --git a/src/Tindy.Infrastructure/Storage/StorageObjectKeys.cs b/src/Tindy.Infrastructure/Storage/StorageObjectKeys.cs
+new file mode 100644
+index 0000000..ae4b0fa
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Storage/StorageObjectKeys.cs
+@@ -0,0 +1,37 @@
++using System.Text.RegularExpressions;
++using Tindy.Application.Models.Storage;
++
++namespace Tindy.Infrastructure.Storage;
++
++internal static partial class StorageObjectKeys
++{
++    // Strictly server-generated shape. Never accept a filename or path from the client.
++    [GeneratedRegex(@"\A(?:profiles/(?:avatars|covers)|certificates/(?:images|pdf))/[0-9a-f]{32}/[0-9a-f]{32}\.(?:webp|pdf)\z", RegexOptions.CultureInvariant)]
++    private static partial Regex GeneratedKeyPattern();
++
++    public static (string Key, string ContentType, long MaxBytes) Create(Guid ownerId, MediaStorageKind kind)
++    {
++        if (ownerId == Guid.Empty) throw new ArgumentException("A valid owner ID is required.", nameof(ownerId));
++
++        var (prefix, extension, contentType, maxBytes) = kind switch
++        {
++            MediaStorageKind.Avatar => ("profiles/avatars", "webp", "image/webp", 5_000_000L),
++            MediaStorageKind.Cover => ("profiles/covers", "webp", "image/webp", 10_000_000L),
++            MediaStorageKind.CertificateImage => ("certificates/images", "webp", "image/webp", 10_000_000L),
++            MediaStorageKind.CertificatePdf => ("certificates/pdf", "pdf", "application/pdf", 10_000_000L),
++            _ => throw new ArgumentOutOfRangeException(nameof(kind), "Unsupported storage kind.")
++        };
++        return ($"{prefix}/{ownerId:N}/{Guid.NewGuid():N}.{extension}", contentType, maxBytes);
++    }
++
++    public static string Validate(string storageKey)
++    {
++        if (string.IsNullOrWhiteSpace(storageKey) || !GeneratedKeyPattern().IsMatch(storageKey))
++            throw new ArgumentException("Invalid storage object key.", nameof(storageKey));
++
++        // Additional cross-field checks: a PDF may only live under the PDF prefix.
++        if (storageKey.EndsWith(".pdf", StringComparison.Ordinal) != storageKey.StartsWith("certificates/pdf/", StringComparison.Ordinal))
++            throw new ArgumentException("Invalid storage object key.", nameof(storageKey));
++        return storageKey;
++    }
++}
+diff --git a/src/Tindy.Infrastructure/Tindy.Infrastructure.csproj b/src/Tindy.Infrastructure/Tindy.Infrastructure.csproj
+index 115cc91..7d5257c 100644
+--- a/src/Tindy.Infrastructure/Tindy.Infrastructure.csproj
++++ b/src/Tindy.Infrastructure/Tindy.Infrastructure.csproj
+@@ -11,6 +11,9 @@
+   </PropertyGroup>
+ 
+   <ItemGroup>
++    <PackageReference Include="AWSSDK.S3" Version="4.0.104.5" />
++    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.8" />
++    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />
+     <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
+     <PackageReference Include="MailKit" Version="4.17.0" />
+     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.8" />
+diff --git a/tests/Tindy.Tests/Media/LocalFileStorageTests.cs b/tests/Tindy.Tests/Media/LocalFileStorageTests.cs
+new file mode 100644
+index 0000000..d1ff774
+--- /dev/null
++++ b/tests/Tindy.Tests/Media/LocalFileStorageTests.cs
+@@ -0,0 +1,126 @@
++using System.Text;
++using Tindy.Application.Models.Storage;
++using Tindy.Infrastructure.Storage;
++
++namespace Tindy.Tests.Media;
++
++public sealed class LocalFileStorageTests
++{
++    [Theory]
++    [InlineData(MediaStorageKind.Avatar, "profiles/avatars/", "image/webp")]
++    [InlineData(MediaStorageKind.Cover, "profiles/covers/", "image/webp")]
++    [InlineData(MediaStorageKind.CertificateImage, "certificates/images/", "image/webp")]
++    [InlineData(MediaStorageKind.CertificatePdf, "certificates/pdf/", "application/pdf")]
++    public async Task Save_Read_Delete_RoundTrip(MediaStorageKind kind, string expectedPrefix, string expectedContentType)
++    {
++        using var folder = new TemporaryMediaDirectory();
++        var service = folder.CreateProvider();
++        var ownerId = Guid.NewGuid();
++        var bytes = Encoding.UTF8.GetBytes("storage round trip for local provider");
++        using var source = new MemoryStream(bytes);
++
++        var saved = await service.SaveAsync(new StorageSaveRequest(ownerId, kind, source));
++        Assert.Equal("local", saved.StorageProvider);
++        Assert.Equal("local", saved.StorageContainer);
++        Assert.StartsWith(expectedPrefix + ownerId.ToString("N") + "/", saved.StorageKey);
++        Assert.Equal(expectedContentType, saved.ContentType);
++        Assert.Equal((long)bytes.Length, saved.FileSizeBytes);
++        Assert.Null(saved.ObjectVersionId);
++        Assert.Null(saved.ObjectETag);
++        Assert.True(source.CanRead); // The service does not take ownership of the upload stream.
++
++        await using (var handle = await service.OpenReadAsync(saved.StorageKey))
++        {
++            using var copy = new MemoryStream();
++            await handle.Content.CopyToAsync(copy);
++            Assert.Equal(bytes, copy.ToArray());
++        }
++
++        await service.DeleteAsync(saved.StorageKey);
++        await service.DeleteAsync(saved.StorageKey); // Delete is idempotent.
++        await Assert.ThrowsAsync<FileNotFoundException>(() => service.OpenReadAsync(saved.StorageKey));
++    }
++
++    [Fact]
++    public async Task Save_Rejects_Empty_And_TooLarge_Streams_Without_Orphans()
++    {
++        using var folder = new TemporaryMediaDirectory();
++        var service = folder.CreateProvider();
++        var user = Guid.NewGuid();
++
++        await Assert.ThrowsAsync<InvalidDataException>(() =>
++            service.SaveAsync(new StorageSaveRequest(user, MediaStorageKind.Avatar, new MemoryStream())));
++
++        using var oversized = new MemoryStream(new byte[5_000_001]);
++        await Assert.ThrowsAsync<InvalidDataException>(() =>
++            service.SaveAsync(new StorageSaveRequest(user, MediaStorageKind.Avatar, oversized)));
++
++        Assert.Empty(Directory.EnumerateFiles(folder.StorageRoot, "*", SearchOption.AllDirectories));
++    }
++
++    [Fact]
++    public async Task Read_Delete_Reject_Traversal_And_Forged_Keys()
++    {
++        using var folder = new TemporaryMediaDirectory();
++        var service = folder.CreateProvider();
++        foreach (var badKey in new[] { "../appsettings.json", "profiles/avatars/../../secret", "C:\\secret", "/etc/passwd", "certificates/pdf/" + Guid.NewGuid().ToString("N") + "/" + Guid.NewGuid().ToString("N") + ".webp" })
++        {
++            await Assert.ThrowsAsync<ArgumentException>(() => service.OpenReadAsync(badKey));
++            await Assert.ThrowsAsync<ArgumentException>(() => service.DeleteAsync(badKey));
++        }
++    }
++
++    [Fact]
++    public async Task Save_Creates_Unique_Keys_For_Concurrent_Writes()
++    {
++        using var folder = new TemporaryMediaDirectory();
++        var service = folder.CreateProvider();
++        var user = Guid.NewGuid();
++        var saved = await Task.WhenAll(Enumerable.Range(0, 12).Select(async _ =>
++        {
++            using var source = new MemoryStream(new byte[] { 1, 2, 3 });
++            return await service.SaveAsync(new StorageSaveRequest(user, MediaStorageKind.Cover, source));
++        }));
++
++        Assert.Equal(12, saved.Select(x => x.StorageKey).Distinct(StringComparer.Ordinal).Count());
++        foreach (var result in saved) await service.DeleteAsync(result.StorageKey);
++    }
++
++    [Fact]
++    public void LocalRoot_Rejects_ApplicationDirectory()
++    {
++        using var folder = new TemporaryMediaDirectory();
++        Assert.Throws<InvalidOperationException>(() => new LocalFileStorageService(folder.ContentRoot, folder.ContentRoot));
++        Assert.Throws<InvalidOperationException>(() => new LocalFileStorageService(Path.Combine(folder.ContentRoot, "wwwroot", "media"), folder.ContentRoot));
++        Assert.Throws<InvalidOperationException>(() => new LocalFileStorageService(folder.TemporaryRoot, folder.ContentRoot));
++    }
++
++    [Fact]
++    public async Task Save_Respects_Cancellation()
++    {
++        using var folder = new TemporaryMediaDirectory();
++        var service = folder.CreateProvider();
++        using var cts = new CancellationTokenSource();
++        cts.Cancel();
++        using var source = new MemoryStream(new byte[] { 1 });
++        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
++            service.SaveAsync(new StorageSaveRequest(Guid.NewGuid(), MediaStorageKind.Avatar, source), cts.Token));
++        Assert.Empty(Directory.EnumerateFiles(folder.StorageRoot, "*", SearchOption.AllDirectories));
++    }
++
++    private sealed class TemporaryMediaDirectory : IDisposable
++    {
++        public string TemporaryRoot { get; } = Path.Combine(Path.GetTempPath(), "tindy-media-tests-" + Guid.NewGuid().ToString("N"));
++        public string ContentRoot => Path.Combine(TemporaryRoot, "app");
++        public string StorageRoot => Path.Combine(TemporaryRoot, "private-media");
++
++        public TemporaryMediaDirectory()
++        {
++            Directory.CreateDirectory(ContentRoot);
++            Directory.CreateDirectory(StorageRoot);
++        }
++
++        public LocalFileStorageService CreateProvider() => new(StorageRoot, ContentRoot);
++        public void Dispose() => Directory.Delete(TemporaryRoot, recursive: true);
++    }
++}
