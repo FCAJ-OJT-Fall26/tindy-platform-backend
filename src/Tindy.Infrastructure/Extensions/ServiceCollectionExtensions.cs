@@ -7,6 +7,9 @@ using Tindy.Application.Interfaces.Services;
 using Tindy.Infrastructure.Services;
 using Tindy.Application.Interfaces.Repositories;
 using Tindy.Infrastructure.Repositories;
+using Tindy.Infrastructure.Ai;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Tindy.Infrastructure.Extensions;
 
@@ -79,6 +82,18 @@ public static class ServicesCollectionExtensions
         // JWT ACCESS TOKEN SERVICE
         // ===================================
         services.AddScoped<IJwtTokenService, JwtTokenService>();
+
+        services.Configure<BedrockOptions>(configuration.GetSection("Bedrock"));
+        services.AddSingleton<IProfileExtractionProvider>(provider =>
+            new BedrockProfileExtractionProvider(
+                new HttpClient(new SocketsHttpHandler
+                {
+                    AllowAutoRedirect = false,
+                    PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+                })
+                { Timeout = Timeout.InfiniteTimeSpan },
+                provider.GetRequiredService<IOptions<BedrockOptions>>(),
+                provider.GetRequiredService<ILogger<BedrockProfileExtractionProvider>>()));
 
         return services;
     }
