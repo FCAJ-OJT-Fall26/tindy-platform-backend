@@ -1,0 +1,233 @@
+openapi: 3.1.0
+info:
+  title: Tindy Profile Media — STEP 04/05
+  version: 1.0.0
+  description: >-
+    Phần mở rộng contract Profile. Bearer JWT, Active Account và completed onboarding bắt buộc.
+    1 MB = 1000000 bytes. File/bucket/storage key không nhận từ client.
+security:
+  - bearerAuth: []
+paths:
+  /api/me/profile/certificates/{certificate_id}/attachments:
+    parameters:
+      - $ref: '#/components/parameters/CertificateId'
+    post:
+      summary: Upload Certificate attachment
+      description: >-
+        Tối đa 10.000.000 bytes/file, 1 file/certificate, 200.000.000 bytes/user; ảnh JPEG/PNG/WebP được decode và encode lossless WebP.
+        PDF cần scan clean trước khi đọc. 20 upload/24 giờ/user; tối đa 2 HTTP upload đồng thời/user.
+        Mọi attachment còn liên kết đều chiếm slot, gồm pending_upload, processing, active và rejected.
+        Phải DELETE attachment hiện tại trước khi upload file khác; không có Replace File API.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          $ref: '#/components/responses/Attachment'
+        '202':
+          $ref: '#/components/responses/ProcessingAttachment'
+        '409':
+          description: Attachment slot occupied or certificate quota exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './PROFILE_OPENAPI.yaml#/components/schemas/ProblemDetails'
+              example:
+                type: about:blank
+                title: Conflict
+                status: 409
+                detail: Maximum one attachment per certificate. Delete the existing attachment before uploading another.
+                instance: /api/me/profile/certificates/00000000-0000-4000-8000-000000000001/attachments
+                error_code: MEDIA_ATTACHMENT_LIMIT
+                traceId: server-generated-trace-id
+        default:
+          $ref: '#/components/responses/Problem'
+    get:
+      summary: Owner đọc metadata, gồm processing/rejected
+      responses:
+        '200':
+          $ref: '#/components/responses/Attachments'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/me/profile/certificates/{certificate_id}/attachments/{attachment_id}/visibility:
+    parameters:
+      - $ref: '#/components/parameters/CertificateId'
+      - $ref: '#/components/parameters/AttachmentId'
+    patch:
+      summary: Owner đổi visibility
+      description: Chỉ cho members khi media active và PDF scan clean. 60 lần/giờ/user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visibility]
+              properties:
+                visibility:
+                  type: string
+                  enum: [owner_only, members]
+      responses:
+        '200':
+          $ref: '#/components/responses/Attachment'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/me/profile/certificates/{certificate_id}/attachments/{attachment_id}:
+    parameters:
+      - $ref: '#/components/parameters/CertificateId'
+      - $ref: '#/components/parameters/AttachmentId'
+    delete:
+      summary: Owner gỡ attachment và đưa media vào cleanup
+      description: Gỡ liên kết và giải phóng quota trong transaction; sau 204 có thể upload file mới trong khi file cũ được cleanup nền.
+      responses:
+        '204':
+          description: Đã gỡ, không có response body; gọi lại trả 404.
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/me/profile/media/quota:
+    get:
+      summary: Certificate quota, không cộng reservation và actual hai lần
+      responses:
+        '200':
+          description: Quota bytes
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [quota_bytes, used_bytes, reserved_bytes, available_bytes]
+                        properties:
+                          quota_bytes: {type: integer, format: int64, const: 200000000}
+                          used_bytes: {type: integer, format: int64, minimum: 0}
+                          reserved_bytes: {type: integer, format: int64, minimum: 0}
+                          available_bytes: {type: integer, format: int64, minimum: 0}
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/users/{user_id}/profile/certificates/{certificate_id}/attachments:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/CertificateId'
+    get:
+      summary: Metadata được chia sẻ cho member
+      description: Caller khác owner chỉ thấy members + active, PDF phải clean. Caller là owner thấy đầy đủ metadata.
+      responses:
+        '200':
+          $ref: '#/components/responses/Attachments'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/media/{media_asset_id}/content:
+    parameters:
+      - name: media_asset_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      summary: Private media download
+      description: >-
+        300 lần/phút/user. Chỉ media active, còn reference và đúng owner/visibility; PDF cần scan_status clean.
+        Trả 404 khi không có quyền; không tiết lộ file tồn tại. PDF Content-Disposition attachment.
+      responses:
+        '200':
+          description: Binary; Cache-Control private/no-store, X-Content-Type-Options nosniff.
+          content:
+            image/webp:
+              schema: {type: string, format: binary}
+            application/pdf:
+              schema: {type: string, format: binary}
+        default:
+          $ref: '#/components/responses/Problem'
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    CertificateId:
+      name: certificate_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    AttachmentId:
+      name: attachment_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    UserId:
+      name: user_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  schemas:
+    Envelope:
+      type: object
+      required: [success, message]
+      properties:
+        success: {type: boolean, const: true}
+        message: {type: string}
+    Attachment:
+      type: object
+      required: [attachment_id, media_asset_id, file_name, content_type, file_size_bytes, status, visibility, created_at]
+      properties:
+        attachment_id: {type: string, format: uuid}
+        media_asset_id: {type: string, format: uuid}
+        file_name: {type: string}
+        content_type: {type: string, enum: [image/webp, application/pdf]}
+        file_size_bytes: {type: integer, format: int64, minimum: 0}
+        status: {type: string, enum: [pending_upload, processing, active, rejected, pending_delete]}
+        visibility: {type: string, enum: [owner_only, members]}
+        created_at: {type: string, format: date-time}
+    AttachmentSuccess:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: '#/components/schemas/Attachment'
+  responses:
+    Attachment:
+      description: Attachment metadata; ảnh xử lý đồng bộ trả active.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AttachmentSuccess'
+    ProcessingAttachment:
+      description: PDF được nhận vào hàng đợi DB, processing/owner_only; chưa cho tải.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AttachmentSuccess'
+    Attachments:
+      description: Danh sách metadata đã lọc quyền.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Envelope'
+              - type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    maxItems: 1
+                    items:
+                      $ref: '#/components/schemas/Attachment'
+    Problem:
+      description: >-
+        400 invalid input, 401 JWT, 403 account/onboarding, 404 hidden/not found,
+        409 quota/attachment limit/not active, 413 too large, 415 unsupported, 429 rate limit, 500 unexpected error.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './PROFILE_OPENAPI.yaml#/components/schemas/ProblemDetails'

@@ -17,8 +17,8 @@ public sealed class CertificateServiceTests
     private static readonly Guid Stranger = Guid.Parse("22222222-2222-4222-8222-222222222222");
 
     private static CertificateUpsertRequest Request() => new(
-        "  AWS Certified Cloud Practitioner  ", " AWS ", "  CERT-123  ",
-        " https://www.credly.com/badges/example ", new DateOnly(2026, 9, 1), new DateOnly(2029, 9, 1));
+        "  AWS Certified Cloud Practitioner  ", " AWS ", "  Foundational AWS knowledge.  ",
+        " https://www.credly.com/badges/example ");
 
     [Theory]
     [InlineData("[]")]
@@ -41,19 +41,82 @@ public sealed class CertificateServiceTests
     [Fact]
     public void Parser_ValidNullableDataAndTrim()
     {
-        using var body = JsonDocument.Parse("""{"title":"  Badge  ","issuer":"  Organization ","credential_id":"  ","credential_url":null,"issued_at":"2024-02-29","expires_at":null}""");
+        using var body = JsonDocument.Parse("""{"title":"  Badge  ","issuer":"  Organization ","description":"  ","credential_url":null}""");
         var result = CertificateRequestParser.Parse(body.RootElement);
         Assert.Equal("Badge", result.Title);
         Assert.Equal("Organization", result.Issuer);
-        Assert.Null(result.CredentialId);
+        Assert.Null(result.Description);
         Assert.Null(result.CredentialUrl);
-        Assert.Equal(new DateOnly(2024, 2, 29), result.IssuedAt);
-        Assert.Null(result.ExpiresAt);
 
         using var minimal = JsonDocument.Parse("""{"title":"T","issuer":"I"}""");
         var noOptionals = CertificateRequestParser.Parse(minimal.RootElement);
-        Assert.Null(noOptionals.IssuedAt);
-        Assert.Null(noOptionals.ExpiresAt);
+        Assert.Null(noOptionals.Description);
+        Assert.Null(noOptionals.CredentialUrl);
+    }
+
+    [Theory]
+    [InlineData("credential_id", "\"legacy-id\"")]
+    [InlineData("issued_at", "\"2026-10-23\"")]
+    [InlineData("expires_at", "null")]
+    [InlineData("file", "null")]
+    [InlineData("Title", "\"wrong case\"")]
+    public void Parser_RejectsUnsupportedFieldsEvenWhenValuesAreValid(string field, string value)
+    {
+        using var body = JsonDocument.Parse($$"""{"title":"T","issuer":"I","{{field}}":{{value}}}""");
+        var error = Assert.Throws<ProfileValidationException>(() => CertificateRequestParser.Parse(body.RootElement));
+        Assert.Equal("This field is not supported.", Assert.Single(error.Errors[field]));
+    }
+
+    [Theory]
+    [InlineData("title")]
+    [InlineData("issuer")]
+    [InlineData("description")]
+    [InlineData("credential_url")]
+    public void Parser_RejectsDuplicateProperties(string field)
+    {
+        var value = field == "credential_url" ? "https://example.com" : "Value";
+        using var body = JsonDocument.Parse($$"""{"title":"T","issuer":"I","{{field}}":"{{value}}","{{field}}":"{{value}}"}""");
+        var error = Assert.Throws<ProfileValidationException>(() => CertificateRequestParser.Parse(body.RootElement));
+        Assert.Equal("Duplicate JSON properties are not allowed.", Assert.Single(error.Errors[field]));
+    }
+
+    [Theory]
+    [InlineData("title", 255)]
+    [InlineData("issuer", 255)]
+    [InlineData("description", 2000)]
+    [InlineData("credential_url", 1000)]
+    public void ParserAndApplication_EnforceTextLengthBoundaries(string field, int limit)
+    {
+        string Value(int size) => field == "credential_url" ? "https://example.com/" + new string('x', size - 20) : new string('x', size);
+        CertificateUpsertRequest RequestWith(int size) => field switch
+        {
+            "title" => Request() with { Title = Value(size) },
+            "issuer" => Request() with { Issuer = Value(size) },
+            "description" => Request() with { Description = Value(size) },
+            _ => Request() with { CredentialUrl = Value(size) }
+        };
+        JsonDocument Body(int size) => JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, object?>
+            { ["title"] = "T", ["issuer"] = "I", [field] = Value(size) }));
+        using var valid = Body(limit);
+        CertificateRequestParser.Parse(valid.RootElement);
+        CertificateInputValidator.Normalize(RequestWith(limit));
+        using var invalid = Body(limit + 1);
+        Assert.Throws<ProfileValidationException>(() => CertificateRequestParser.Parse(invalid.RootElement));
+        Assert.Throws<ProfileValidationException>(() => CertificateInputValidator.Normalize(RequestWith(limit + 1)));
+    }
+
+    [Fact]
+    public async Task Update_OmittedOptionalFieldsClearExistingValues()
+    {
+        var repo = new FakeRepository();
+        var existing = repo.Seed(Owner);
+        existing.CredentialUrl = "https://example.com";
+        using var body = JsonDocument.Parse("""{"title":"Replacement","issuer":"Org"}""");
+        var updated = await new CertificateService(repo).UpdateAsync(Owner, existing.CertificateId,
+            CertificateRequestParser.Parse(body.RootElement));
+        Assert.Null(updated.Description);
+        Assert.Null(updated.CredentialUrl);
+        Assert.Equal(existing.CreatedAt, updated.CreatedAt);
     }
 
     [Fact]
@@ -64,21 +127,19 @@ public sealed class CertificateServiceTests
         Assert.Throws<ProfileValidationException>(() => CertificateInputValidator.Normalize(
             Request() with { Title = " " }));
         Assert.Throws<ProfileValidationException>(() => CertificateInputValidator.Normalize(
-            Request() with { ExpiresAt = new DateOnly(2025, 1, 1) }));
+            Request() with { Description = new string('x', 2001) }));
         Assert.Throws<ProfileValidationException>(() => CertificateInputValidator.Normalize(null));
     }
 
     [Fact]
-    public async Task Create_NormalizesPersistsWithUTCAndDateOnlyResponse()
+    public async Task Create_NormalizesPersistsWithUTCAndDescription()
     {
         var repo = new FakeRepository();
         var result = await new CertificateService(repo).CreateAsync(Owner, Request());
         Assert.Equal("AWS Certified Cloud Practitioner", result.Title);
         Assert.Equal("AWS", result.Issuer);
-        Assert.Equal("CERT-123", result.CredentialId);
+        Assert.Equal("Foundational AWS knowledge.", result.Description);
         Assert.Equal("https://www.credly.com/badges/example", result.CredentialUrl);
-        Assert.Equal("2026-09-01", result.IssuedAt);
-        Assert.Equal("2029-09-01", result.ExpiresAt);
         Assert.Equal(DateTimeKind.Utc, result.CreatedAt.Kind);
         Assert.Null(result.UpdatedAt);
         Assert.Equal(1, repo.SaveCalls);
@@ -87,14 +148,12 @@ public sealed class CertificateServiceTests
     }
 
     [Fact]
-    public async Task Create_AllowsNullDatesAndCredentialData()
+    public async Task Create_AllowsNullDescriptionAndCredentialUrl()
     {
         var result = await new CertificateService(new FakeRepository()).CreateAsync(Owner,
-            Request() with { CredentialId = null, CredentialUrl = null, IssuedAt = null, ExpiresAt = null });
-        Assert.Null(result.CredentialId);
+            Request() with { Description = null, CredentialUrl = null });
+        Assert.Null(result.Description);
         Assert.Null(result.CredentialUrl);
-        Assert.Null(result.IssuedAt);
-        Assert.Null(result.ExpiresAt);
     }
 
     [Fact]
@@ -105,11 +164,11 @@ public sealed class CertificateServiceTests
         var service = new CertificateService(repo);
         var result = await service.UpdateAsync(Owner, cert.CertificateId, Request() with
         {
-            Title = "Renewed", CredentialId = null, CredentialUrl = null, IssuedAt = null, ExpiresAt = null
+            Title = "Renewed", Description = " Updated description ", CredentialUrl = null
         });
         Assert.Equal("Renewed", result.Title);
         Assert.Null(result.CredentialUrl);
-        Assert.Null(result.IssuedAt);
+        Assert.Equal("Updated description", result.Description);
         Assert.NotNull(result.UpdatedAt);
         Assert.Equal(cert.CertificateId, result.CertificateId);
         Assert.Equal(1, repo.SaveCalls);
@@ -178,15 +237,17 @@ public sealed class CertificateServiceTests
     }
 
     [Fact]
-    public void EfMetadata_HasExpectedFKColumnsIndexAndDateTypes()
+    public void EfMetadata_HasExpectedFKColumnsIndexAndDescription()
     {
         using var context = new TindyDbContext(new DbContextOptionsBuilder<TindyDbContext>()
             .UseNpgsql("Host=localhost;Database=unused;Username=unused;Password=unused").Options);
         var entity = context.Model.FindEntityType(typeof(UserCertificate));
         Assert.NotNull(entity);
         Assert.Equal("user_certificates", entity!.GetTableName());
-        Assert.Equal("date", entity.FindProperty(nameof(UserCertificate.IssuedAt))!.GetColumnType());
-        Assert.Equal("date", entity.FindProperty(nameof(UserCertificate.ExpiresAt))!.GetColumnType());
+        Assert.Equal(2000, entity.FindProperty(nameof(UserCertificate.Description))!.GetMaxLength());
+        Assert.True(entity.FindProperty(nameof(UserCertificate.Description))!.IsNullable);
+        Assert.Equal(new[] { "CertificateId", "CreatedAt", "CredentialUrl", "Description", "Issuer", "Title", "UpdatedAt", "UserId" },
+            entity.GetProperties().Select(p => p.Name).Order().ToArray());
         Assert.Contains(entity.GetForeignKeys(), fk => fk.PrincipalEntityType.ClrType == typeof(User) &&
             fk.DeleteBehavior == DeleteBehavior.Cascade);
         Assert.Contains(entity.GetIndexes(), idx => idx.Properties.Select(p => p.Name)
@@ -194,9 +255,7 @@ public sealed class CertificateServiceTests
     }
 
     private static CertificateResponse ToResponse(UserCertificate value) => new(
-        value.CertificateId, value.Title, value.Issuer, value.CredentialId, value.CredentialUrl,
-        value.IssuedAt?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
-        value.ExpiresAt?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+        value.CertificateId, value.Title, value.Issuer, value.Description, value.CredentialUrl,
         value.CreatedAt, value.UpdatedAt);
 
     private sealed class FakeRepository : ICertificateRepository
@@ -212,7 +271,7 @@ public sealed class CertificateServiceTests
             var item = new UserCertificate
             {
                 UserId = userId, CertificateId = Guid.NewGuid(), Title = "Existing", Issuer = "Org",
-                CreatedAt = DateTime.UtcNow, IssuedAt = new DateOnly(2024, 1, 1)
+                CreatedAt = DateTime.UtcNow, Description = "Existing description"
             };
             Items.Add(item.CertificateId, item);
             return item;
@@ -233,6 +292,7 @@ public sealed class CertificateServiceTests
 
         public void Add(UserCertificate certificate) => Items.Add(certificate.CertificateId, certificate);
         public void Remove(UserCertificate certificate) => Items.Remove(certificate.CertificateId);
+        public Task DetachMediaAsync(Guid ownerUserId, Guid certificateId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             SaveCalls++;
@@ -256,8 +316,7 @@ public sealed class CertificateServiceTests
         private static UserCertificate Copy(UserCertificate source) => new()
         {
             CertificateId = source.CertificateId, UserId = source.UserId, Title = source.Title,
-            Issuer = source.Issuer, CredentialId = source.CredentialId, CredentialUrl = source.CredentialUrl,
-            IssuedAt = source.IssuedAt, ExpiresAt = source.ExpiresAt,
+            Issuer = source.Issuer, Description = source.Description, CredentialUrl = source.CredentialUrl,
             CreatedAt = source.CreatedAt, UpdatedAt = source.UpdatedAt
         };
     }

@@ -54,7 +54,8 @@ public sealed class ProfileRepository : IProfileRepository
                     .Select(link => new ProfileSkillSummary(link.SkillId, link.Skill.Name))
                     .ToList(),
                 _context.ProfileExperiences.Count(experience => experience.UserId == user.UserId),
-                _context.UserCertificates.Count(certificate => certificate.UserId == user.UserId)))
+                _context.UserCertificates.Count(certificate => certificate.UserId == user.UserId),
+                user.Profile.AvatarSource, user.Profile.AvatarAssetId, user.Profile.CoverAssetId))
             .SingleOrDefaultAsync(cancellationToken);
     }
 
@@ -99,7 +100,8 @@ public sealed class ProfileRepository : IProfileRepository
                     .Select(link => new ProfileSkillSummary(link.SkillId, link.Skill.Name))
                     .ToList(),
                 _context.ProfileExperiences.Count(experience => experience.UserId == user.UserId),
-                _context.UserCertificates.Count(certificate => certificate.UserId == user.UserId)))
+                _context.UserCertificates.Count(certificate => certificate.UserId == user.UserId),
+                user.Profile.AvatarSource, user.Profile.AvatarAssetId, user.Profile.CoverAssetId))
             .SingleOrDefaultAsync(cancellationToken);
     }
 

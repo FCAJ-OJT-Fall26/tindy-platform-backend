@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 using Tindy.Application.Exceptions;
 
@@ -9,7 +8,7 @@ public static class CertificateRequestParser
 {
     private static readonly HashSet<string> Allowed = new(StringComparer.Ordinal)
     {
-        "title", "issuer", "credential_id", "credential_url", "issued_at", "expires_at"
+        "title", "issuer", "description", "credential_url"
     };
 
     public static CertificateUpsertRequest Parse(JsonElement body)
@@ -48,34 +47,15 @@ public static class CertificateRequestParser
             return value;
         }
 
-        DateOnly? Date(string key)
-        {
-            if (!fields.TryGetValue(key, out var element) || element.ValueKind == JsonValueKind.Null) return null;
-            var raw = element.ValueKind == JsonValueKind.String ? element.GetString() : null;
-            if (raw is null || raw.Length != 10 || raw[4] != '-' || raw[7] != '-' ||
-                !raw.Where((ch, index) => index != 4 && index != 7).All(ch => ch is >= '0' and <= '9') ||
-                !DateOnly.TryParseExact(raw, "yyyy-MM-dd", CultureInfo.InvariantCulture,
-                    DateTimeStyles.None, out var date))
-            {
-                errors[key] = ["The date must be a valid YYYY-MM-DD calendar date."];
-                return null;
-            }
-            return date;
-        }
-
         var title = Text("title", true, 255);
         var issuer = Text("issuer", true, 255);
-        var credentialId = Text("credential_id", false, 255);
+        var description = Text("description", false, 2000);
         var credentialUrl = Text("credential_url", false, 1000);
-        var issued = Date("issued_at");
-        var expires = Date("expires_at");
 
         if (credentialUrl is not null && !IsWebUrl(credentialUrl))
             errors["credential_url"] = ["A valid absolute http:// or https:// URL is required."];
-        if (issued is not null && expires is not null && expires < issued)
-            errors["expires_at"] = ["Expiry must not precede issuance."];
         if (errors.Count > 0) throw new ProfileValidationException(errors);
-        return new CertificateUpsertRequest(title!, issuer!, credentialId, credentialUrl, issued, expires);
+        return new CertificateUpsertRequest(title!, issuer!, description, credentialUrl);
     }
 
     internal static bool IsWebUrl(string value) =>
@@ -96,19 +76,17 @@ public static class CertificateInputValidator
         var errors = new Dictionary<string, string[]>(StringComparer.Ordinal);
         var title = Clean(request.Title);
         var issuer = Clean(request.Issuer);
-        var credentialId = Clean(request.CredentialId);
+        var description = Clean(request.Description);
         var credentialUrl = Clean(request.CredentialUrl);
         if (title is null || title.Length > 255)
             errors["title"] = ["Title must contain 1 to 255 characters."];
         if (issuer is null || issuer.Length > 255)
             errors["issuer"] = ["Issuer must contain 1 to 255 characters."];
-        if (credentialId?.Length > 255)
-            errors["credential_id"] = ["Credential ID must not exceed 255 characters."];
+        if (description?.Length > 2000)
+            errors["description"] = ["Description must not exceed 2000 characters."];
         if (credentialUrl is not null && (credentialUrl.Length > 1000 || !CertificateRequestParser.IsWebUrl(credentialUrl)))
             errors["credential_url"] = ["A valid absolute http:// or https:// URL up to 1000 characters is required."];
-        if (request.IssuedAt is not null && request.ExpiresAt is not null && request.ExpiresAt < request.IssuedAt)
-            errors["expires_at"] = ["Expiry must not precede issuance."];
         if (errors.Count > 0) throw new ProfileValidationException(errors);
-        return request with { Title = title!, Issuer = issuer!, CredentialId = credentialId, CredentialUrl = credentialUrl };
+        return request with { Title = title!, Issuer = issuer!, Description = description, CredentialUrl = credentialUrl };
     }
 }

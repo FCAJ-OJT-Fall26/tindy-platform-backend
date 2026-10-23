@@ -7,12 +7,26 @@ info:
 servers:
 - url: http://localhost:5217
   description: Development example — actual host may differ
+security:
+- bearerAuth: []
 tags:
 - name: My Profile
 - name: Member Profile
 - name: Experiences
 - name: Certificates
 paths:
+  /api/me/profile/certificates/{certificate_id}/attachments:
+    $ref: './PROFILE_MEDIA_OPENAPI.yaml#/paths/~1api~1me~1profile~1certificates~1%7Bcertificate_id%7D~1attachments'
+  /api/me/profile/certificates/{certificate_id}/attachments/{attachment_id}/visibility:
+    $ref: './PROFILE_MEDIA_OPENAPI.yaml#/paths/~1api~1me~1profile~1certificates~1%7Bcertificate_id%7D~1attachments~1%7Battachment_id%7D~1visibility'
+  /api/me/profile/certificates/{certificate_id}/attachments/{attachment_id}:
+    $ref: './PROFILE_MEDIA_OPENAPI.yaml#/paths/~1api~1me~1profile~1certificates~1%7Bcertificate_id%7D~1attachments~1%7Battachment_id%7D'
+  /api/me/profile/media/quota:
+    $ref: './PROFILE_MEDIA_OPENAPI.yaml#/paths/~1api~1me~1profile~1media~1quota'
+  /api/users/{user_id}/profile/certificates/{certificate_id}/attachments:
+    $ref: './PROFILE_MEDIA_OPENAPI.yaml#/paths/~1api~1users~1%7Buser_id%7D~1profile~1certificates~1%7Bcertificate_id%7D~1attachments'
+  /api/media/{media_asset_id}/content:
+    $ref: './PROFILE_MEDIA_OPENAPI.yaml#/paths/~1api~1media~1%7Bmedia_asset_id%7D~1content'
   /api/me/profile:
     get:
       summary: Read owner profile
@@ -441,6 +455,7 @@ paths:
   /api/me/profile/certificates:
     get:
       summary: List own certificates
+      description: Ordered by created_at DESC, then certificate_id ASC.
       security:
       - bearerAuth: []
       responses:
@@ -499,10 +514,8 @@ paths:
             example: &id005
               title: AWS Certified Cloud Practitioner
               issuer: Amazon Web Services
-              credential_id: null
+              description: Foundational knowledge of AWS Cloud services.
               credential_url: https://www.credly.com/badges/example
-              issued_at: '2026-09-01'
-              expires_at: null
       responses:
         '201':
           description: Success
@@ -549,6 +562,7 @@ paths:
   /api/me/profile/certificates/{certificate_id}:
     put:
       summary: Replace own certificate
+      description: Full replacement. Omitted optional description and credential_url are cleared to null.
       security:
       - bearerAuth: []
       parameters: &id006
@@ -653,6 +667,7 @@ paths:
   /api/users/{user_id}/profile/certificates:
     get:
       summary: List member certificates
+      description: Ordered by created_at DESC, then certificate_id ASC. Same CertificateResponse as the owner list.
       security:
       - bearerAuth: []
       parameters: *id004
@@ -952,25 +967,25 @@ components:
       type: object
       properties:
         certificate_id: *id001
-        title: *id007
-        issuer: *id007
-        credential_id:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        issuer:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
           oneOf:
-          - *id007
+          - type: string
+            maxLength: 2000
           - type: 'null'
         credential_url:
           oneOf:
-          - *id007
-          - type: 'null'
-        issued_at:
-          oneOf:
           - type: string
-            format: date
-          - type: 'null'
-        expires_at:
-          oneOf:
-          - type: string
-            format: date
+            format: uri
+            pattern: '^[Hh][Tt][Tt][Pp][Ss]?://'
+            maxLength: 1000
           - type: 'null'
         created_at:
           type: string
@@ -985,10 +1000,8 @@ components:
       - certificate_id
       - title
       - issuer
-      - credential_id
+      - description
       - credential_url
-      - issued_at
-      - expires_at
       - created_at
       - updated_at
     ProfilePatch:
@@ -1132,6 +1145,9 @@ components:
       additionalProperties: false
     CertificateUpsert:
       type: object
+      description: >-
+        Text is trimmed; blank optional values become null. Unknown and duplicate JSON properties are rejected.
+        A file is optional and uploaded separately through the attachment endpoints; at most one linked file per certificate.
       properties:
         title:
           type: string
@@ -1141,25 +1157,17 @@ components:
           type: string
           minLength: 1
           maxLength: 255
-        credential_id:
+        description:
           oneOf:
           - type: string
-            maxLength: 255
+            maxLength: 2000
           - type: 'null'
         credential_url:
           oneOf:
           - type: string
+            format: uri
+            pattern: '^[Hh][Tt][Tt][Pp][Ss]?://'
             maxLength: 1000
-          - type: 'null'
-        issued_at:
-          oneOf:
-          - type: string
-            format: date
-          - type: 'null'
-        expires_at:
-          oneOf:
-          - type: string
-            format: date
           - type: 'null'
       required:
       - title

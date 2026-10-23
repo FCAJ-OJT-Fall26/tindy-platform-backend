@@ -52,6 +52,31 @@ public sealed class AccountConnectionsRepository : IAccountConnectionsRepository
             if (!hasLocal && externalCount <= 1)
                 throw new ConflictException("Cannot unlink the final sign-in method.");
 
+            // Composite FK forbids unlinking the provider while its avatar is selected.
+            // Release the private avatar in the same transaction before unlinking.
+            var profile = await _db.UserProfiles.SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+            if (profile?.AvatarSource == "oauth" && profile.AvatarOAuthProvider == provider)
+            {
+                var formerId = profile.AvatarAssetId;
+                profile.AvatarSource = "default";
+                profile.AvatarAssetId = null;
+                profile.AvatarOAuthProvider = null;
+                profile.AvatarUrl = null;
+                profile.UpdatedAt = DateTime.UtcNow;
+                if (formerId.HasValue)
+                {
+                    var old = await _db.MediaAssets.SingleOrDefaultAsync(x => x.MediaAssetId == formerId.Value && x.OwnerUserId == userId, cancellationToken);
+                    if (old is not null)
+                    {
+                        old.Status = "pending_delete";
+                        old.DeleteRequestedAt = DateTime.UtcNow;
+                        old.NextCleanupAt = DateTime.UtcNow;
+                        old.UpdatedAt = DateTime.UtcNow;
+                    }
+                }
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+
             var deleted = await _db.ExternalAuthAccounts.Where(x => x.UserId == userId &&
                 x.Provider == provider).ExecuteDeleteAsync(cancellationToken);
             if (deleted != 1)

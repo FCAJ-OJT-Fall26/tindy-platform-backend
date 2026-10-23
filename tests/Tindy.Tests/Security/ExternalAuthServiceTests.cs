@@ -276,7 +276,9 @@ public sealed class ExternalAuthServiceTests
         var repo = new InMemoryExternalAuthRepository();
         await new ExternalAuthService(repo).ResolveSignInAsync(
             Identity(provider) with { AvatarUrl = avatar });
-        Assert.Equal(avatar, Assert.Single(repo.Users).Profile!.AvatarUrl);
+        Assert.Null(Assert.Single(repo.Users).Profile!.AvatarUrl);
+        Assert.Equal("default", Assert.Single(repo.Users).Profile!.AvatarSource);
+        Assert.Equal(avatar, Assert.Single(repo.Users).ExternalAuthAccounts.Single().ProviderAvatarUrl);
     }
 
     [Theory]
@@ -294,7 +296,7 @@ public sealed class ExternalAuthServiceTests
     [Theory]
     [InlineData("Google")]
     [InlineData("GitHub")]
-    public async Task LinkingProvider_FillsOnlyEmptyAvatar(string provider)
+    public async Task LinkingProvider_DoesNotAlterAvatar(string provider)
     {
         var repo = new InMemoryExternalAuthRepository();
         var existingProvider = provider == "Google" ? "GitHub" : "Google";
@@ -304,7 +306,8 @@ public sealed class ExternalAuthServiceTests
         var service = new ExternalAuthService(repo);
         Assert.True(await service.LinkAsync(user.UserId, Identity(provider, provider + "-new",
             email: null, verified: false) with { AvatarUrl = "https://avatars.githubusercontent.com/u/12" }));
-        Assert.Equal("https://avatars.githubusercontent.com/u/12", profile.AvatarUrl);
+        Assert.Null(profile.AvatarUrl);
+        Assert.Equal("https://avatars.githubusercontent.com/u/12", repo.Users[0].ExternalAuthAccounts.Single(x => x.Provider == provider).ProviderAvatarUrl);
         Assert.Equal(2, repo.SaveCount);
     }
 
@@ -323,7 +326,7 @@ public sealed class ExternalAuthServiceTests
         {
             AvatarUrl = "https://example.com/github.png"
         });
-        Assert.Equal("https://example.com/original.png", Assert.Single(repo.Users).Profile!.AvatarUrl);
+        Assert.Null(Assert.Single(repo.Users).Profile!.AvatarUrl);
     }
 
     [Fact]
@@ -391,13 +394,20 @@ public sealed class ExternalAuthServiceTests
             return Task.CompletedTask;
         }
 
+        public Task UpdateProviderAvatarAsync(Guid externalAuthAccountId, string providerAvatarUrl,
+            CancellationToken cancellationToken = default)
+        {
+            var account = Users.SelectMany(x => x.ExternalAuthAccounts)
+                .Single(x => x.ExternalAuthAccountId == externalAuthAccountId);
+            account.ProviderAvatarUrl = providerAvatarUrl;
+            return Task.CompletedTask;
+        }
+
         public async Task AddExternalAccountAndFillAvatarAsync(ExternalAuthAccount account,
             string? avatarUrl, CancellationToken cancellationToken = default)
         {
             await AddExternalAccountAsync(account, cancellationToken);
-            var profile = Users.Single(x => x.UserId == account.UserId).Profile!;
-            if (profile.AvatarUrl is null && avatarUrl is not null)
-                profile.AvatarUrl = avatarUrl;
+            account.ProviderAvatarUrl = avatarUrl;
             await SaveChangesAsync(cancellationToken);
         }
 

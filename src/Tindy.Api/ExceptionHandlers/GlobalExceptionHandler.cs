@@ -18,6 +18,8 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         // 1. Map Exception -> HTTP Status Code
         var statusCode = exception switch
         {
+            MediaRequestException media => media.StatusCode,
+
             InvalidCredentialsException =>
                 StatusCodes.Status401Unauthorized,
 
@@ -65,7 +67,12 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
 
             Title = statusCode switch
             {
+                400 => "Bad Request",
                 401 => "Unauthorized",
+                403 => "Forbidden",
+                413 => "Payload Too Large",
+                415 => "Unsupported Media Type",
+                429 => "Too Many Requests",
                 404 => "Not Found",
                 409 => "Conflict",
                 422 => "Unprocessable Entity",
@@ -82,6 +89,8 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         problemDetails.Extensions["error_code"] =
             exception switch
             {
+                MediaRequestException media => media.ErrorCode,
+
                 ProfileValidationException =>
                     "VALIDATION_FAILED",
 

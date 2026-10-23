@@ -38,10 +38,8 @@ public sealed class CertificateService : ICertificateService
                 UserId = callerUserId,
                 Title = normalized.Title,
                 Issuer = normalized.Issuer,
-                CredentialId = normalized.CredentialId,
+                Description = normalized.Description,
                 CredentialUrl = normalized.CredentialUrl,
-                IssuedAt = normalized.IssuedAt,
-                ExpiresAt = normalized.ExpiresAt,
                 CreatedAt = DateTime.UtcNow
             };
             _repository.Add(certificate);
@@ -61,10 +59,8 @@ public sealed class CertificateService : ICertificateService
                 ?? throw new NotFoundException("Certificate was not found.");
             certificate.Title = normalized.Title;
             certificate.Issuer = normalized.Issuer;
-            certificate.CredentialId = normalized.CredentialId;
+            certificate.Description = normalized.Description;
             certificate.CredentialUrl = normalized.CredentialUrl;
-            certificate.IssuedAt = normalized.IssuedAt;
-            certificate.ExpiresAt = normalized.ExpiresAt;
             certificate.UpdatedAt = DateTime.UtcNow;
             await _repository.SaveChangesAsync(token);
             return await _repository.GetOwnedAsync(callerUserId, certificateId, token)
@@ -79,6 +75,7 @@ public sealed class CertificateService : ICertificateService
             await RequireEligibleUserAsync(callerUserId, token);
             var certificate = await _repository.FindOwnedForUpdateAsync(callerUserId, certificateId, token)
                 ?? throw new NotFoundException("Certificate was not found.");
+            await _repository.DetachMediaAsync(callerUserId, certificateId, token);
             _repository.Remove(certificate);
             await _repository.SaveChangesAsync(token);
             return true;

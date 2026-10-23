@@ -1,0 +1,34 @@
+name: tindy-media-local
+
+services:
+  clamav:
+    # Official ClamAV 1.5.4 base image, verified locally. Update the digest deliberately.
+    image: clamav/clamav@sha256:751df8dc649cc977696f107c80db4960b6317a7cb511aebc8066f3b91db6b631
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3310:3310"
+    volumes:
+      - type: bind
+        source: ./deploy/local/clamd.conf
+        target: /etc/clamav/clamd.conf
+        read_only: true
+        bind:
+          create_host_path: false
+      - clamav-signatures:/var/lib/clamav
+    mem_limit: 4g
+    cpus: 2.0
+    healthcheck:
+      # Use IPv4 explicitly; localhost may resolve to ::1 while clamd binds IPv4.
+      test: ["CMD-SHELL", "printf 'nPING\\n' | nc -w 5 127.0.0.1 3310 | grep -qx PONG"]
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 10m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  clamav-signatures:

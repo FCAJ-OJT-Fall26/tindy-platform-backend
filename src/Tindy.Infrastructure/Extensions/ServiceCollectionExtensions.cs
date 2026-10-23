@@ -7,6 +7,8 @@ using Tindy.Application.Interfaces.Services;
 using Tindy.Infrastructure.Services;
 using Tindy.Application.Interfaces.Repositories;
 using Tindy.Infrastructure.Repositories;
+using Tindy.Infrastructure.Storage;
+using Tindy.Infrastructure.Media;
 
 namespace Tindy.Infrastructure.Extensions;
 
@@ -80,6 +82,25 @@ public static class ServicesCollectionExtensions
         // ===================================
         services.AddScoped<IJwtTokenService, JwtTokenService>();
 
+        // STEP 02: storage is resolved only when a media feature requests it.
+        services.AddMediaStorage(configuration);
+        services.AddMediaProcessing(configuration);
+
+        // STEP 03 media; only accessed after authorization and onboarding.
+        services.AddScoped<IProfileMediaService, ProfileMediaService>();
+        services.AddScoped<ICertificateAttachmentRepository, CertificateAttachmentRepository>();
+        services.AddScoped<ICertificateAttachmentService, Tindy.Application.Services.CertificateAttachmentService>();
+        services.AddSingleton<ICertificateFileProcessor, CertificateFileProcessor>();
+        services.AddHttpClient("tindy-provider-avatar", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("TindyMedia/1.0");
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AllowAutoRedirect = false,
+            UseCookies = false,
+            UseProxy = false
+        });
         return services;
     }
 }

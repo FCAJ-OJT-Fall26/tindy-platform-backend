@@ -11,6 +11,7 @@ public interface ICertificateRepository
     Task<UserCertificate?> FindOwnedForUpdateAsync(Guid userId, Guid certificateId, CancellationToken cancellationToken = default);
     void Add(UserCertificate certificate);
     void Remove(UserCertificate certificate);
+    Task DetachMediaAsync(Guid ownerUserId, Guid certificateId, CancellationToken cancellationToken = default);
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
     Task<T> ExecuteInTransactionAsync<T>(Guid ownerUserId, Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default);
 }

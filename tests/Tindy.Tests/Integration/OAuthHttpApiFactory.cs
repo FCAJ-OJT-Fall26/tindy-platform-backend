@@ -49,6 +49,8 @@ internal sealed class OAuthHttpApiFactory(bool oauthEnabled = true) : WebApplica
                 ["Jwt:ClockSkewSeconds"] = "0",
                 ["ConnectionStrings:DefaultConnection"] = "Host=127.0.0.1;Database=unused_http_tests;Username=unused",
                 ["OAuth:Enabled"] = oauthEnabled.ToString(),
+                ["MediaLifecycle:Enabled"] = "false",
+                ["GuardDuty:Enabled"] = "false",
                 ["OAuth:Google:ClientId"] = "http-test-google-client",
                 ["OAuth:Google:ClientSecret"] = "http-test-google-placeholder",
                 ["OAuth:GitHub:ClientId"] = "http-test-github-client",

@@ -22,6 +22,10 @@ public class TindyDbContext : DbContext
 
     public DbSet<UserCertificate> UserCertificates => Set<UserCertificate>();
 
+    public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
+
+    public DbSet<UserCertificateAttachment> UserCertificateAttachments => Set<UserCertificateAttachment>();
+
     public DbSet<Role> Roles
         => Set<Role>();
 

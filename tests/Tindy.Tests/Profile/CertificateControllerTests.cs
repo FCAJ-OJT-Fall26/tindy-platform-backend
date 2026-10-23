@@ -19,11 +19,11 @@ public sealed class CertificateControllerTests
     private static readonly Guid CertificateId = Guid.Parse("33333333-3333-4333-8333-333333333333");
     private static readonly JsonSerializerOptions Snake = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
     private const string Body = """
-    {"title":" AWS Badge ","issuer":"AWS","credential_id":"ID-123","credential_url":"https://www.credly.com/badges/test","issued_at":"2026-09-01","expires_at":null}
+    {"title":" AWS Badge ","issuer":"AWS","description":" AWS knowledge ","credential_url":"https://www.credly.com/badges/test"}
     """;
 
-    private static CertificateResponse Example() => new(CertificateId, "AWS Badge", "AWS", "ID-123",
-        "https://www.credly.com/badges/test", "2026-09-01", null,
+    private static CertificateResponse Example() => new(CertificateId, "AWS Badge", "AWS", "AWS knowledge",
+        "https://www.credly.com/badges/test",
         new DateTime(2026, 10, 20, 10, 0, 0, DateTimeKind.Utc), null);
 
     private static T Attach<T>(T controller, string? sub) where T : ControllerBase
@@ -51,7 +51,7 @@ public sealed class CertificateControllerTests
     }
 
     [Fact]
-    public async Task Post_UsesJwtSub_ParsesDateAndReturns201WithoutPrivateFields()
+    public async Task Post_UsesJwtSub_ParsesDescriptionAndReturns201WithoutPrivateFields()
     {
         var fake = new StubCertificateService();
         var controller = Attach(new MyCertificatesController(fake), Owner.ToString("D"));
@@ -62,12 +62,12 @@ public sealed class CertificateControllerTests
         Assert.Equal(Owner, fake.LastCaller);
         Assert.Equal(cts.Token, fake.LastToken);
         Assert.Equal("AWS Badge", fake.LastRequest?.Title);
-        Assert.Equal(new DateOnly(2026, 9, 1), fake.LastRequest?.IssuedAt);
+        Assert.Equal("AWS knowledge", fake.LastRequest?.Description);
         using var json = Serialize(response.Value);
         var item = json.RootElement.GetProperty("data");
         Assert.Equal(CertificateId.ToString("D"), item.GetProperty("certificate_id").GetString());
-        Assert.Equal("2026-09-01", item.GetProperty("issued_at").GetString());
-        foreach (var forbidden in new[] { "user_id", "primary_email", "phone_number", "is_verified", "verification_status", "file_url" })
+        Assert.Equal("AWS knowledge", item.GetProperty("description").GetString());
+        foreach (var forbidden in new[] { "user_id", "primary_email", "phone_number", "is_verified", "verification_status", "file_url", "credential_id", "issued_at", "expires_at" })
             Assert.False(item.TryGetProperty(forbidden, out _));
     }
 

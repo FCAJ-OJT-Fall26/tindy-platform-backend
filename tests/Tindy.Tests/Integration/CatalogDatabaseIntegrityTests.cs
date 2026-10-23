@@ -28,7 +28,7 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
     }
 
     [Fact]
-    public async Task Schema_HasNineteenTables_AndForeignKeyColumns()
+    public async Task Schema_HasExpectedTablesIncludingMedia_AndForeignKeyColumns()
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<TindyDbContext>();
@@ -52,10 +52,10 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
             "user_credentials", "external_auth_accounts", "professional_roles", "skill_categories",
             "skills", "skill_category_skills", "user_skills", "user_onboarding_steps",
             "profile_experiences", "profile_experience_skills", "user_certificates",
-            "oauth_login_tickets", "oauth_link_transactions"
+            "oauth_login_tickets", "oauth_link_transactions", "media_assets", "user_certificate_attachments"
         };
         Assert.True(expected.ToHashSet().SetEquals(tables),
-            $"Expected 19 business tables. Actual: {string.Join(", ", tables.OrderBy(x => x))}");
+            $"Expected {expected.Length} business tables. Actual: {string.Join(", ", tables.OrderBy(x => x))}");
 
         command.CommandText = """
             SELECT table_name || '.' || column_name
@@ -89,7 +89,7 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
             WHERE table_schema = 'public'
               AND ((table_name = 'profile_experiences' AND column_name IN ('experience_id', 'user_id', 'start_date', 'end_date'))
                 OR (table_name = 'profile_experience_skills' AND column_name IN ('experience_id', 'skill_id'))
-                OR (table_name = 'user_certificates' AND column_name IN ('certificate_id', 'user_id', 'issued_at', 'expires_at')))
+                OR (table_name = 'user_certificates' AND column_name IN ('certificate_id', 'user_id', 'description', 'credential_url')))
             """;
         var profileColumns = new List<string>();
         await using (var reader = await command.ExecuteReaderAsync())
@@ -97,6 +97,7 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
             while (await reader.ReadAsync()) profileColumns.Add(reader.GetString(0));
         }
         Assert.Equal(10, profileColumns.Count);
+        Assert.Contains("user_certificates.description", profileColumns);
     }
 
     [Fact]
