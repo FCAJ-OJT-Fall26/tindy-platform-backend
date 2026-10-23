@@ -1,0 +1,784 @@
+diff --git a/docs/guide/PROFILE_MEDIA_STEP01_HANDOFF.md b/docs/guide/PROFILE_MEDIA_STEP01_HANDOFF.md
+new file mode 100644
+index 0000000..0eb0928
+--- /dev/null
++++ b/docs/guide/PROFILE_MEDIA_STEP01_HANDOFF.md
+@@ -0,0 +1,257 @@
++# Tindy Profile Module — STEP 01: Database Schema & Migration
++
++> **Phạm vi:** Chuẩn bị Entity, EF Core Configuration, quan hệ Database, ràng buộc và kiểm thử schema. **Chưa triển khai API upload, File Storage, PDF Scanner hoặc Frontend.**
++>
++> **Source đối chiếu:** `tindy-backend-platform(20261022-065605).zip` (.NET 10, EF Core, PostgreSQL).
++>
++> **Trạng thái bàn giao:** Đã chuẩn bị source C# và test; **chưa sinh EF migration và chưa chạy build/test thực tế** vì môi trường chuẩn bị không có `dotnet` và PostgreSQL. Vui lòng hoàn thành phần kiểm chứng bên dưới trước khi commit.
++
++## 1. Mục tiêu STEP 01
++
++Thiết lập cấu trúc dữ liệu **Full Media Assets V3**, có khả năng mở rộng cho Avatar, Cover Image và Certificate Attachments mà không phá vỡ dữ liệu Profile/OAuth/Certificate đang tồn tại.
++
++Ở STEP này:
++
++- Giữ nguyên các field cũ `user_profiles.avatar_url` và `user_profiles.cover_image_url`.
++- Không tự động tải ảnh OAuth, thay Avatar hoặc chỉnh sửa luồng đăng nhập.
++- Không upload hay xóa file vật lý.
++- Không thực thi quota, giới hạn ba Attachment hoặc antivirus scanner. Chỉ chuẩn bị schema và mô tả quy tắc cho STEP sau.
++- Không chạy `database drop`, không reset dữ liệu hiện tại.
++
++## 2. Các file đã chuẩn bị
++
++| Khu vực | Thay đổi |
++|---|---|
++| `src/Tindy.Application/Entities/` | Tạo `MediaAsset.cs`, `UserCertificateAttachment.cs`; cập nhật navigation cho `User`, `UserCertificate`, `UserProfile`; thêm `ExternalAuthAccount.ProviderAvatarUrl` |
++| `src/Tindy.Infrastructure/Persistence/Configurations/` | Tạo `MediaAssetConfiguration.cs`, `UserCertificateAttachmentConfiguration.cs`; bổ sung cấu hình Profile/OAuth/Certificate |
++| `src/Tindy.Infrastructure/Persistence/TindyDbContext.cs` | Thêm `DbSet<MediaAsset>` và `DbSet<UserCertificateAttachment>` |
++| `tests/Tindy.Tests/Profile/` | Tạo `MediaSchemaModelTests.cs` kiểm tra EF model, quan hệ và constraints |
++| `tests/Tindy.Tests/Integration/` | Tạo `MediaSchemaMigrationTests.cs` kiểm tra migration và FK trên PostgreSQL Testcontainers |
++| `docs/guide/PROFILE_MEDIA_STEP01_HANDOFF.md` | Hướng dẫn tiếng Việt này |
++
++**Chú ý:** ZIP và patch đi kèm chứa **15 file mới/chỉnh sửa**, không chứa migration do EF sinh. Tên migration sẽ được tạo bằng CLI ở mục 6.
++
++## 3. Database & Constraints cần review
++
++### 3.1. Bảng `media_assets` (Full V3)
++
++- **Identity:** `media_asset_id`, `owner_user_id`, `purpose`.
++- **Storage:** `storage_provider`, `storage_container`, `storage_key`, `object_version_id`, `object_etag`.
++- **File:** `original_file_name`, `content_type`, `file_size_bytes`, `reserved_bytes`, `width`, `height`.
++- **Trạng thái:** `status`, `scan_status`, `scan_provider`, `scan_completed_at`, `upload_expires_at`, `activated_at`, `delete_requested_at`.
++- **Cleanup và audit:** `cleanup_attempts`, `next_cleanup_at`, `last_cleanup_error`, `created_at`, `updated_at`.
++
++Các ràng buộc quan trọng:
++
++| Nhóm | Quy tắc |
++|---|---|
++| `purpose` | Chỉ `avatar`, `cover`, `certificate` |
++| `storage_provider` | Chỉ `local`, `s3` |
++| `status` | `pending_upload`, `processing`, `active`, `rejected`, `pending_delete` |
++| `scan_status` | `pending`, `clean`, `threat_detected`, `unsupported`, `access_denied`, `failed`, `not_required` |
++| Kích thước | `file_size_bytes > 0` nếu đã có giá trị; `reserved_bytes >= 0`; `width` và `height` dương nếu đã có |
++| File `active` | Phải có `file_size_bytes`, `content_type`, `reserved_bytes = 0`; nếu PDF phải có `scan_status = clean` |
++| Storage duy nhất | Unique `(storage_provider, storage_container, storage_key)` |
++| Ownership | `owner_user_id` tham chiếu `users`, không tự cascade xóa Media |
++
++Indexes chỉ tập trung vào owner/purpose, file đang xử lý, file chờ cleanup và upload hết hạn. Không index mọi metadata không cần thiết.
++
++### 3.2. Bảng `user_profiles`
++
++Thêm bốn cột nullable:
++
++- `avatar_source`: `default`, `uploaded`, `oauth`; **NULL tạm thời để giữ dữ liệu cũ chưa phân loại**.
++- `avatar_asset_id`: tham chiếu Avatar trong `media_assets`.
++- `avatar_oauth_provider`: dùng `Google`/`GitHub` (đúng chữ hoa chữ thường đang lưu trong source).
++- `cover_asset_id`: tham chiếu Cover trong `media_assets`.
++
++Sử dụng **composite FK** `(avatar_asset_id, user_id)` và `(cover_asset_id, user_id)` để đảm bảo ảnh được tham chiếu thuộc đúng chủ sở hữu.
++
++Ảnh OAuth đang được chọn sử dụng quan hệ `(user_id, avatar_oauth_provider)` đến `(user_id, provider)` của `external_auth_accounts`. Quy tắc CHECK bảo đảm tổ hợp `avatar_source`, `avatar_asset_id`, `avatar_oauth_provider` nhất quán.
++
++**Không xóa hoặc tự phân loại `avatar_url`/`cover_image_url` cũ.** NULL ở `avatar_source` trong STEP này mang nghĩa *legacy/chưa phân loại*, không tự đồng nhất với `default`.
++
++### 3.3. Bảng `user_certificate_attachments`
++
++Các trường: `attachment_id`, `certificate_id`, `owner_user_id`, `media_asset_id`, `visibility`, `created_at`, `updated_at`.
++
++- `visibility` mặc định `owner_only`, giá trị hợp lệ: `owner_only`, `members`.
++- `media_asset_id` là UNIQUE, tránh dùng cùng một file cho nhiều Attachment.
++- Composite FK `(certificate_id, owner_user_id)` → `user_certificates(certificate_id, user_id)`.
++- Composite FK `(media_asset_id, owner_user_id)` → `media_assets(media_asset_id, owner_user_id)`.
++- Không tự cascade xóa metadata Media từ Certificate/Attachment.
++
++**Giới hạn của CHECK:** PostgreSQL CHECK không tự kiểm tra quan hệ chéo rằng asset thật sự có `purpose = certificate` hay `status = active`. Giới hạn **3 Attachments/Certificate**, **200 MB/User** và quyền đọc file phải được thực thi trong các STEP nghiệp vụ sau bằng transaction/authorization tương ứng.
++
++### 3.4. OAuth và khóa duy nhất
++
++Bổ sung `external_auth_accounts.provider_avatar_url` (nullable, tối đa 1000 ký tự). **Không sửa hành vi đăng nhập/link/unlink OAuth ở STEP 01**.
++
++Composite FK OAuth sử dụng một alternate key `(user_id, provider)`; source đã có unique index cùng cặp cột này, nên EF Core có thể sinh thêm một UNIQUE structure tương đương. **Cần review migration được sinh và cân nhắc trùng index trước khi đưa lên database dùng chung.**
++
++## 4. Quy tắc `reserved_bytes` và Quota
++
++Quota cho **Certificate Attachments** là **200.000.000 bytes / user (200 MB hệ thập phân)**. Avatar/Cover không tính vào quota này. Một Certificate tối đa **3 attachments**, tính cả Attachment đang upload/processing để không vượt giới hạn khi có nhiều request đồng thời.
++
++| Trạng thái Media | Dung lượng tính vào quota |
++|---|---|
++| `pending_upload`, `processing` | Ưu tiên `reserved_bytes` nếu > 0; nếu không thì tính `file_size_bytes` đã biết |
++| `active` | `file_size_bytes` |
++| `rejected`, `pending_delete` | 0 bytes quota logic; file vật lý vẫn có thể chờ cleanup |
++
++**Không bao giờ cộng `reserved_bytes + file_size_bytes` cho cùng một file.** Ví dụ file PDF 8 MB đang chờ quét chỉ giữ quota 8 MB, không phải 16 MB. Khi file `active`, giải phóng giữ chỗ bằng cách đưa `reserved_bytes` về 0 và xác nhận dung lượng thật.
++
++Kiểm tra quota và số lượng attachment ở STEP 04 phải sử dụng PostgreSQL transaction và cơ chế khóa phù hợp để chặn hai request đồng thời cùng vượt hạn mức. **STEP 01 chỉ lưu metadata và tài liệu quy tắc.**
++
++## 5. Áp dụng Git Patch (PowerShell 7 — Windows)
++
++**Cách khuyến nghị:** Dùng file `Tindy_Profile_STEP01_VI.patch` ở phiên bản bàn giao này. Patch áp dụng từ **thư mục gốc repository** `tindy-backend-platform` (nơi có `Tindy.slnx`).
++
++### 5.1. Kiểm tra branch và local changes
++
++```powershell
++cd "D:\FPT\Semester 6\OJT\aws\tindy-platform\tindy-backend-platform"
++
++git branch --show-current
++git status --short
++```
++
++Nên commit/stash các thay đổi cá nhân trước khi áp dụng để dễ review và tránh patch conflict. **Không chạy `git reset --hard`.**
++
++### 5.2. Kiểm tra và áp dụng Patch
++
++Giả sử file patch vừa tải nằm trong `Downloads`:
++
++```powershell
++$patch = Join-Path $HOME "Downloads\Tindy_Profile_STEP01_VI.patch"
++
++# Kiểm tra patch có áp dụng được không (chưa sửa bất kỳ file nào)
++git apply --check $patch
++
++# Chỉ chạy nếu lệnh kiểm tra không báo lỗi
++git apply $patch
++
++# Xem những file vừa thay đổi
++git status --short
++git diff --stat
++git diff --check
++```
++
++Nếu `git apply --check` báo lỗi, **dừng lại**, chưa chạy `git apply`; kiểm tra đúng source ZIP ngày 22/10, branch và các thay đổi cục bộ. Nếu bạn đã áp dụng patch STEP 01 cũ, **không áp dụng lần hai**; chỉ thay nội dung file `docs/guide/PROFILE_MEDIA_STEP01_HANDOFF.md` bằng bản tiếng Việt rồi tiếp tục kiểm thử.
++
++Nếu cần **hoàn tác đúng bản patch vừa áp dụng** khi chưa sửa thêm các file liên quan:
++
++```powershell
++# Kiểm tra khả năng hoàn tác trước
++git apply --reverse --check $patch
++
++# Chỉ chạy nếu kiểm tra thành công
++git apply --reverse $patch
++```
++
++Không dùng lệnh hoàn tác trên nếu các file đã được tiếp tục chỉnh sửa hoặc đã có migration mới: hãy review thay đổi Git trước.
++
++## 6. Tạo EF Migration theo quy ước của Tindy
++
++Tuân theo `docs/guide/MIGRATION_NAMING_CONVENTION.md`. **Không đánh số migration thủ công, không tự sửa timestamp.**
++
++Đứng ở **repo root** sau khi áp dụng patch:
++
++```powershell
++dotnet restore
++
++dotnet ef migrations add Profile_CreateMediaAssetsAndAttachments `
++    --project .\src\Tindy.Infrastructure\Tindy.Infrastructure.csproj `
++    --startup-project .\src\Tindy.Api\Tindy.Api.csproj `
++    --context TindyDbContext `
++    -- --environment Development
++```
++
++EF Core sẽ sinh `*.cs`, `*.Designer.cs` và cập nhật `TindyDbContextModelSnapshot.cs` trong `src/Tindy.Infrastructure/Persistence/Migrations/`.
++
++**Review kỹ trước khi cập nhật Database:**
++
++```powershell
++git status --short
++git diff -- src/Tindy.Infrastructure/Persistence/Migrations
++```
++
++Vì migration mới là file **untracked**, `git diff` có thể chưa hiển thị toàn bộ. Mở trực tiếp file migration mới để kiểm tra `Up()`/`Down()`, sau đó kiểm tra cả ModelSnapshot.
++
++Migration hợp lệ phải:
++
++- Tạo `media_assets` và `user_certificate_attachments`.
++- Thêm bốn cột mới cho `user_profiles` và `provider_avatar_url` cho OAuth.
++- Tạo đúng Composite FK, alternate key, CHECK, indexes và delete behaviors.
++- **Không drop bảng** `users`, `user_profiles`, `user_certificates` hay cột `avatar_url`/`cover_image_url` cũ.
++- `Down()` chỉ hoàn tác những thay đổi STEP 01; rollback trên Database chứa media mới sẽ làm mất metadata đó — chỉ thử rollback ở DB test.
++
++## 7. Build và chạy Tests
++
++### 7.1. Build solution
++
++```powershell
++dotnet build .\Tindy.slnx
++```
++
++### 7.2. EF Model Tests (không cần Docker)
++
++```powershell
++dotnet test .\tests\Tindy.Tests\Tindy.Tests.csproj `
++    --filter "FullyQualifiedName~MediaSchemaModelTests"
++```
++
++### 7.3. PostgreSQL Migration Tests (cần Docker Desktop)
++
++Bật Docker Desktop trước khi chạy; test dùng **PostgreSQL Testcontainers tách biệt** với DB Development.
++
++```powershell
++dotnet test .\tests\Tindy.Tests\Tindy.Tests.csproj `
++    --filter "FullyQualifiedName~MediaSchemaMigrationTests"
++```
++
++Test nhằm kiểm chứng Migration Up/Down, giữ dữ liệu User/Profile/Certificate cũ và lỗi FK cross-owner (PostgreSQL SQLSTATE `23503`). Nếu test fail, **chưa commit**; gửi log và migration vừa sinh để kiểm tra.
++
++### 7.4. Chỉ áp dụng vào DB Development sau khi kiểm tra xong
++
++Đảm bảo connection string trỏ đúng DB Development riêng được phép chỉnh sửa:
++
++```powershell
++dotnet ef database update `
++    --project .\src\Tindy.Infrastructure\Tindy.Infrastructure.csproj `
++    --startup-project .\src\Tindy.Api\Tindy.Api.csproj `
++    --context TindyDbContext `
++    -- --environment Development
++```
++
++**Tuyệt đối không dùng `dotnet ef database drop`** cho STEP này. Nên sao lưu DB có dữ liệu quan trọng trước khi cập nhật, kể cả ở Development.
++
++## 8. Checklist nghiệm thu trước khi commit
++
++- [ ] `git apply --check` và `git apply` thành công trên source đúng phiên bản.
++- [ ] `dotnet build .\Tindy.slnx` thành công.
++- [ ] EF Model Tests thành công.
++- [ ] PostgreSQL Migration Tests thành công (Docker Desktop).
++- [ ] Migration `Up()`/`Down()` và ModelSnapshot được review đầy đủ.
++- [ ] Dữ liệu `users`, `user_profiles`, `user_certificates` cũ được giữ nguyên.
++- [ ] `avatar_url`, `cover_image_url` cũ không bị xóa hay tự thay đổi.
++- [ ] Composite FK từ chối media/certificate của owner khác.
++- [ ] Không phát sinh API upload, media read hoặc thay đổi OAuth flow ở STEP này.
++
++### Commit sau khi tất cả đã pass
++
++```powershell
++git add src/Tindy.Application/Entities/ `
++    src/Tindy.Infrastructure/Persistence/ `
++    tests/Tindy.Tests/ `
++    docs/guide/PROFILE_MEDIA_STEP01_HANDOFF.md
++
++git diff --cached --check
++git diff --cached --stat
++
++git commit -m "feat(profile): add media assets and certificate attachment schema"
++```
++
++## 9. Bàn giao sang STEP 02
++
++Chỉ chuyển sang **STEP 02 – File Storage Foundation** sau khi xác minh build, migration và tests. STEP 02 sẽ triển khai Local/S3 Storage; **chưa xem STEP 01 là hoàn thành chỉ vì patch đã áp dụng**.
+diff --git a/src/Tindy.Application/Entities/ExternalAuthAccount.cs b/src/Tindy.Application/Entities/ExternalAuthAccount.cs
+index 5d41b4e..c5c8060 100644
+--- a/src/Tindy.Application/Entities/ExternalAuthAccount.cs
++++ b/src/Tindy.Application/Entities/ExternalAuthAccount.cs
+@@ -13,6 +13,7 @@ public class ExternalAuthAccount
+     public string? ProviderUsername { get; set; }
+ 
+     public string? ProviderEmail { get; set; }
++    public string? ProviderAvatarUrl { get; set; }
+ 
+     public DateTime CreatedAt { get; set; }
+ 
+diff --git a/src/Tindy.Application/Entities/MediaAsset.cs b/src/Tindy.Application/Entities/MediaAsset.cs
+new file mode 100644
+index 0000000..7ee3330
+--- /dev/null
++++ b/src/Tindy.Application/Entities/MediaAsset.cs
+@@ -0,0 +1,40 @@
++namespace Tindy.Application.Entities;
++
++/// <summary>
++/// Metadata only. Storage access and state transitions belong to later media services.
++/// Never delete this record before its physical object has been cleaned up.
++/// </summary>
++public sealed class MediaAsset
++{
++    public Guid MediaAssetId { get; set; }
++    public Guid OwnerUserId { get; set; }
++    public string Purpose { get; set; } = null!; // avatar | cover | certificate
++
++    public string StorageProvider { get; set; } = null!; // local | s3
++    public string StorageContainer { get; set; } = null!;
++    public string StorageKey { get; set; } = null!;
++    public string? ObjectVersionId { get; set; }
++    public string? ObjectEtag { get; set; }
++
++    public string? OriginalFileName { get; set; }
++    public string? ContentType { get; set; }
++    public long? FileSizeBytes { get; set; }
++    public long ReservedBytes { get; set; }
++    public int? Width { get; set; }
++    public int? Height { get; set; }
++
++    public string Status { get; set; } = "pending_upload";
++    public string ScanStatus { get; set; } = "not_required";
++    public string? ScanProvider { get; set; }
++    public DateTime? ScanCompletedAt { get; set; }
++    public DateTime? UploadExpiresAt { get; set; }
++    public DateTime? ActivatedAt { get; set; }
++    public DateTime? DeleteRequestedAt { get; set; }
++    public int CleanupAttempts { get; set; }
++    public DateTime? NextCleanupAt { get; set; }
++    public string? LastCleanupError { get; set; }
++    public DateTime CreatedAt { get; set; }
++    public DateTime? UpdatedAt { get; set; }
++
++    public User Owner { get; set; } = null!;
++}
+diff --git a/src/Tindy.Application/Entities/User.cs b/src/Tindy.Application/Entities/User.cs
+index 81ef209..ae31efc 100644
+--- a/src/Tindy.Application/Entities/User.cs
++++ b/src/Tindy.Application/Entities/User.cs
+@@ -16,6 +16,7 @@ public class User
+     public DateTime CreatedAt {get; set;} 
+     public DateTime? UpdatedAt {get;set;}
+     public DateTime? DeletedAt {get;set;}
++    public ICollection<MediaAsset> MediaAssets { get; set; } = new List<MediaAsset>();
+     public UserProfile? Profile { get; set; }
+     public ICollection<ProfileExperience> ProfileExperiences { get; set; } = new List<ProfileExperience>();
+     public ICollection<UserCertificate> Certificates { get; set; } = new List<UserCertificate>();
+diff --git a/src/Tindy.Application/Entities/UserCertificate.cs b/src/Tindy.Application/Entities/UserCertificate.cs
+index 3475451..2a0d0ed 100644
+--- a/src/Tindy.Application/Entities/UserCertificate.cs
++++ b/src/Tindy.Application/Entities/UserCertificate.cs
+@@ -14,4 +14,5 @@ public class UserCertificate
+     public DateTime? UpdatedAt { get; set; }
+ 
+     public User User { get; set; } = null!;
++    public ICollection<UserCertificateAttachment> Attachments { get; set; } = new List<UserCertificateAttachment>();
+ }
+diff --git a/src/Tindy.Application/Entities/UserCertificateAttachment.cs b/src/Tindy.Application/Entities/UserCertificateAttachment.cs
+new file mode 100644
+index 0000000..ffd0766
+--- /dev/null
++++ b/src/Tindy.Application/Entities/UserCertificateAttachment.cs
+@@ -0,0 +1,19 @@
++namespace Tindy.Application.Entities;
++
++/// <summary>
++/// Attachment relationship and visibility; physical-file metadata lives in MediaAsset.
++/// OwnerUserId is repeated intentionally to enforce composite ownership FKs.
++/// </summary>
++public sealed class UserCertificateAttachment
++{
++    public Guid AttachmentId { get; set; }
++    public Guid CertificateId { get; set; }
++    public Guid OwnerUserId { get; set; }
++    public Guid MediaAssetId { get; set; }
++    public string Visibility { get; set; } = "owner_only";
++    public DateTime CreatedAt { get; set; }
++    public DateTime? UpdatedAt { get; set; }
++
++    public UserCertificate Certificate { get; set; } = null!;
++    public MediaAsset MediaAsset { get; set; } = null!;
++}
+diff --git a/src/Tindy.Application/Entities/UserProfile.cs b/src/Tindy.Application/Entities/UserProfile.cs
+index c7582fa..d6ba9db 100644
+--- a/src/Tindy.Application/Entities/UserProfile.cs
++++ b/src/Tindy.Application/Entities/UserProfile.cs
+@@ -10,6 +10,16 @@ public class UserProfile
+     public string? Location { get; set; }
+     public string? AvatarUrl { get; set; }
+     public string? CoverImageUrl { get; set; }
++
++    // Nullable while legacy avatar_url / cover_image_url values are migrated.
++    // Null means legacy/unclassified, not "default".
++    public string? AvatarSource { get; set; }
++    public Guid? AvatarAssetId { get; set; }
++    public string? AvatarOAuthProvider { get; set; }
++    public Guid? CoverAssetId { get; set; }
++    public MediaAsset? AvatarAsset { get; set; }
++    public MediaAsset? CoverAsset { get; set; }
++    public ExternalAuthAccount? AvatarOAuthAccount { get; set; }
+     public string? University { get; set; }
+     public int? AvailableHoursPerWeek { get; set; }
+     public string? CurrentRole { get; set; }
+diff --git a/src/Tindy.Infrastructure/Persistence/Configurations/ExternalAuthAccountConfiguration.cs b/src/Tindy.Infrastructure/Persistence/Configurations/ExternalAuthAccountConfiguration.cs
+index f464030..f60bbde 100644
+--- a/src/Tindy.Infrastructure/Persistence/Configurations/ExternalAuthAccountConfiguration.cs
++++ b/src/Tindy.Infrastructure/Persistence/Configurations/ExternalAuthAccountConfiguration.cs
+@@ -37,6 +37,10 @@ public class ExternalAuthAccountConfiguration
+             .HasColumnName("provider_email")
+             .HasMaxLength(255);
+ 
++        builder.Property(x => x.ProviderAvatarUrl)
++            .HasColumnName("provider_avatar_url")
++            .HasMaxLength(1000);
++
+         builder.Property(x => x.CreatedAt)
+             .HasColumnName("created_at")
+             .IsRequired();
+diff --git a/src/Tindy.Infrastructure/Persistence/Configurations/MediaAssetConfiguration.cs b/src/Tindy.Infrastructure/Persistence/Configurations/MediaAssetConfiguration.cs
+new file mode 100644
+index 0000000..2d0af7c
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Persistence/Configurations/MediaAssetConfiguration.cs
+@@ -0,0 +1,75 @@
++using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Metadata.Builders;
++using Tindy.Application.Entities;
++
++namespace Tindy.Infrastructure.Persistence.Configurations;
++
++public sealed class MediaAssetConfiguration : IEntityTypeConfiguration<MediaAsset>
++{
++    public void Configure(EntityTypeBuilder<MediaAsset> builder)
++    {
++        builder.ToTable("media_assets", table =>
++        {
++            table.HasCheckConstraint("ck_media_assets_purpose", "purpose IN ('avatar', 'cover', 'certificate')");
++            table.HasCheckConstraint("ck_media_assets_storage_provider", "storage_provider IN ('local', 's3')");
++            table.HasCheckConstraint("ck_media_assets_storage_identity", "btrim(storage_container) <> '' AND btrim(storage_key) <> ''");
++            table.HasCheckConstraint("ck_media_assets_status", "status IN ('pending_upload', 'processing', 'active', 'rejected', 'pending_delete')");
++            table.HasCheckConstraint("ck_media_assets_scan_status", "scan_status IN ('pending', 'clean', 'threat_detected', 'unsupported', 'access_denied', 'failed', 'not_required')");
++            table.HasCheckConstraint("ck_media_assets_scan_provider", "scan_provider IS NULL OR scan_provider IN ('clamav', 'guardduty')");
++            table.HasCheckConstraint("ck_media_assets_positive_sizes", "(file_size_bytes IS NULL OR file_size_bytes > 0) AND reserved_bytes >= 0");
++            table.HasCheckConstraint("ck_media_assets_positive_dimensions", "(width IS NULL OR width > 0) AND (height IS NULL OR height > 0)");
++            table.HasCheckConstraint("ck_media_assets_cleanup_attempts", "cleanup_attempts >= 0");
++            // Keep all uploaded PDFs inaccessible until a trusted scan result is persisted.
++            table.HasCheckConstraint("ck_media_assets_active_safe", "status <> 'active' OR (file_size_bytes IS NOT NULL AND file_size_bytes > 0 AND content_type IS NOT NULL AND reserved_bytes = 0 AND " +
++                "((content_type = 'application/pdf' AND scan_status = 'clean') OR (content_type <> 'application/pdf' AND scan_status IN ('not_required', 'clean'))))");
++        });
++
++        builder.HasKey(x => x.MediaAssetId);
++        builder.Property(x => x.MediaAssetId).HasColumnName("media_asset_id").ValueGeneratedNever();
++        builder.Property(x => x.OwnerUserId).HasColumnName("owner_user_id").IsRequired();
++        builder.Property(x => x.Purpose).HasColumnName("purpose").HasMaxLength(30).IsRequired();
++        builder.Property(x => x.StorageProvider).HasColumnName("storage_provider").HasMaxLength(20).IsRequired();
++        builder.Property(x => x.StorageContainer).HasColumnName("storage_container").HasMaxLength(255).IsRequired();
++        builder.Property(x => x.StorageKey).HasColumnName("storage_key").HasMaxLength(500).IsRequired();
++        builder.Property(x => x.ObjectVersionId).HasColumnName("object_version_id").HasMaxLength(255);
++        builder.Property(x => x.ObjectEtag).HasColumnName("object_etag").HasMaxLength(255);
++        builder.Property(x => x.OriginalFileName).HasColumnName("original_file_name").HasMaxLength(255);
++        builder.Property(x => x.ContentType).HasColumnName("content_type").HasMaxLength(100);
++        builder.Property(x => x.FileSizeBytes).HasColumnName("file_size_bytes");
++        builder.Property(x => x.ReservedBytes).HasColumnName("reserved_bytes").HasDefaultValue(0L).IsRequired();
++        builder.Property(x => x.Width).HasColumnName("width");
++        builder.Property(x => x.Height).HasColumnName("height");
++        builder.Property(x => x.Status).HasColumnName("status").HasMaxLength(30).HasDefaultValue("pending_upload").IsRequired();
++        builder.Property(x => x.ScanStatus).HasColumnName("scan_status").HasMaxLength(30).HasDefaultValue("not_required").IsRequired();
++        builder.Property(x => x.ScanProvider).HasColumnName("scan_provider").HasMaxLength(30);
++        builder.Property(x => x.ScanCompletedAt).HasColumnName("scan_completed_at").HasColumnType("timestamp with time zone");
++        builder.Property(x => x.UploadExpiresAt).HasColumnName("upload_expires_at").HasColumnType("timestamp with time zone");
++        builder.Property(x => x.ActivatedAt).HasColumnName("activated_at").HasColumnType("timestamp with time zone");
++        builder.Property(x => x.DeleteRequestedAt).HasColumnName("delete_requested_at").HasColumnType("timestamp with time zone");
++        builder.Property(x => x.CleanupAttempts).HasColumnName("cleanup_attempts").HasDefaultValue(0).IsRequired();
++        builder.Property(x => x.NextCleanupAt).HasColumnName("next_cleanup_at").HasColumnType("timestamp with time zone");
++        builder.Property(x => x.LastCleanupError).HasColumnName("last_cleanup_error").HasMaxLength(100);
++        builder.Property(x => x.CreatedAt).HasColumnName("created_at").HasColumnType("timestamp with time zone").IsRequired();
++        builder.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamp with time zone");
++
++        // Composite principal key prevents cross-user profile/attachment references.
++        builder.HasAlternateKey(x => new { x.MediaAssetId, x.OwnerUserId })
++            .HasName("ak_media_assets_media_asset_id_owner_user_id");
++        builder.HasOne(x => x.Owner).WithMany(x => x.MediaAssets)
++            .HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.Restrict);
++
++        builder.HasIndex(x => new { x.StorageProvider, x.StorageContainer, x.StorageKey })
++            .IsUnique().HasDatabaseName("ux_media_assets_storage_object");
++        builder.HasIndex(x => new { x.OwnerUserId, x.Purpose })
++            .HasDatabaseName("ix_media_assets_owner_purpose");
++        builder.HasIndex(x => new { x.Status, x.NextCleanupAt })
++            .HasFilter("status = 'pending_delete'")
++            .HasDatabaseName("ix_media_assets_cleanup");
++        builder.HasIndex(x => new { x.Status, x.CreatedAt })
++            .HasFilter("status = 'processing'")
++            .HasDatabaseName("ix_media_assets_processing");
++        builder.HasIndex(x => x.UploadExpiresAt)
++            .HasFilter("status = 'pending_upload'")
++            .HasDatabaseName("ix_media_assets_expiring_uploads");
++    }
++}
+diff --git a/src/Tindy.Infrastructure/Persistence/Configurations/UserCertificateAttachmentConfiguration.cs b/src/Tindy.Infrastructure/Persistence/Configurations/UserCertificateAttachmentConfiguration.cs
+new file mode 100644
+index 0000000..6f16cf3
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Persistence/Configurations/UserCertificateAttachmentConfiguration.cs
+@@ -0,0 +1,41 @@
++using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Metadata.Builders;
++using Tindy.Application.Entities;
++
++namespace Tindy.Infrastructure.Persistence.Configurations;
++
++public sealed class UserCertificateAttachmentConfiguration : IEntityTypeConfiguration<UserCertificateAttachment>
++{
++    public void Configure(EntityTypeBuilder<UserCertificateAttachment> builder)
++    {
++        builder.ToTable("user_certificate_attachments", table =>
++        {
++            table.HasCheckConstraint("ck_user_certificate_attachments_visibility", "visibility IN ('owner_only', 'members')");
++        });
++
++        builder.HasKey(x => x.AttachmentId);
++        builder.Property(x => x.AttachmentId).HasColumnName("attachment_id").ValueGeneratedNever();
++        builder.Property(x => x.CertificateId).HasColumnName("certificate_id").IsRequired();
++        builder.Property(x => x.OwnerUserId).HasColumnName("owner_user_id").IsRequired();
++        builder.Property(x => x.MediaAssetId).HasColumnName("media_asset_id").IsRequired();
++        builder.Property(x => x.Visibility).HasColumnName("visibility").HasMaxLength(20)
++            .HasDefaultValue("owner_only").IsRequired();
++        builder.Property(x => x.CreatedAt).HasColumnName("created_at").HasColumnType("timestamp with time zone").IsRequired();
++        builder.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamp with time zone");
++
++        builder.HasOne(x => x.Certificate).WithMany(x => x.Attachments)
++            .HasForeignKey(x => new { x.CertificateId, x.OwnerUserId })
++            .HasPrincipalKey(x => new { x.CertificateId, x.UserId })
++            .OnDelete(DeleteBehavior.NoAction);
++        builder.HasOne(x => x.MediaAsset).WithMany()
++            .HasForeignKey(x => new { x.MediaAssetId, x.OwnerUserId })
++            .HasPrincipalKey(x => new { x.MediaAssetId, x.OwnerUserId })
++            .OnDelete(DeleteBehavior.NoAction);
++
++        builder.HasIndex(x => x.MediaAssetId).IsUnique()
++            .HasDatabaseName("ux_user_certificate_attachments_media_asset_id");
++        builder.HasIndex(x => new { x.CertificateId, x.OwnerUserId })
++            .HasDatabaseName("ix_user_certificate_attachments_certificate_owner");
++        builder.HasIndex(x => x.OwnerUserId).HasDatabaseName("ix_user_certificate_attachments_owner_user_id");
++    }
++}
+diff --git a/src/Tindy.Infrastructure/Persistence/Configurations/UserCertificateConfiguration.cs b/src/Tindy.Infrastructure/Persistence/Configurations/UserCertificateConfiguration.cs
+index 9b1cbc0..f21aa8d 100644
+--- a/src/Tindy.Infrastructure/Persistence/Configurations/UserCertificateConfiguration.cs
++++ b/src/Tindy.Infrastructure/Persistence/Configurations/UserCertificateConfiguration.cs
+@@ -28,5 +28,8 @@ public sealed class UserCertificateConfiguration : IEntityTypeConfiguration<User
+         builder.HasOne(x => x.User).WithMany(x => x.Certificates)
+             .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+         builder.HasIndex(x => x.UserId).HasDatabaseName("ix_user_certificates_user_id");
++        // Needed by user_certificate_attachments(certificate_id, owner_user_id).
++        builder.HasAlternateKey(x => new { x.CertificateId, x.UserId })
++            .HasName("ak_user_certificates_certificate_id_user_id");
+     }
+ }
+diff --git a/src/Tindy.Infrastructure/Persistence/Configurations/UserProfileConfiguration.cs b/src/Tindy.Infrastructure/Persistence/Configurations/UserProfileConfiguration.cs
+index 457535e..0cd3bac 100644
+--- a/src/Tindy.Infrastructure/Persistence/Configurations/UserProfileConfiguration.cs
++++ b/src/Tindy.Infrastructure/Persistence/Configurations/UserProfileConfiguration.cs
+@@ -12,6 +12,11 @@ public class UserProfileConfiguration
+         builder.ToTable("user_profiles", table =>
+         {
+             table.HasCheckConstraint("ck_user_profiles_available_hours_per_week", "available_hours_per_week IS NULL OR " + "available_hours_per_week BETWEEN 1 AND 40");
++            // Leave AvatarSource null for legacy rows until the later media migration step.
++            table.HasCheckConstraint("ck_user_profiles_avatar_selection", "(avatar_source IS NULL AND avatar_asset_id IS NULL AND avatar_oauth_provider IS NULL) OR " +
++                "(avatar_source = 'default' AND avatar_asset_id IS NULL AND avatar_oauth_provider IS NULL) OR " +
++                "(avatar_source = 'uploaded' AND avatar_asset_id IS NOT NULL AND avatar_oauth_provider IS NULL) OR " +
++                "(avatar_source = 'oauth' AND avatar_asset_id IS NOT NULL AND avatar_oauth_provider IN ('Google', 'GitHub'))");
+         });
+ 
+         builder.HasKey(x => x.UserId);
+@@ -48,6 +53,27 @@ public class UserProfileConfiguration
+             .HasColumnName("cover_image_url")
+             .HasMaxLength(1000);
+ 
++        builder.Property(x => x.AvatarSource).HasColumnName("avatar_source").HasMaxLength(20);
++        builder.Property(x => x.AvatarAssetId).HasColumnName("avatar_asset_id");
++        builder.Property(x => x.AvatarOAuthProvider).HasColumnName("avatar_oauth_provider").HasMaxLength(30);
++        builder.Property(x => x.CoverAssetId).HasColumnName("cover_asset_id");
++
++        builder.HasOne(x => x.AvatarAsset).WithMany()
++            .HasForeignKey(x => new { x.AvatarAssetId, x.UserId })
++            .HasPrincipalKey(x => new { x.MediaAssetId, x.OwnerUserId })
++            .OnDelete(DeleteBehavior.NoAction);
++        builder.HasOne(x => x.CoverAsset).WithMany()
++            .HasForeignKey(x => new { x.CoverAssetId, x.UserId })
++            .HasPrincipalKey(x => new { x.MediaAssetId, x.OwnerUserId })
++            .OnDelete(DeleteBehavior.NoAction);
++        // The provider strings in the existing codebase are "Google" and "GitHub".
++        builder.HasOne(x => x.AvatarOAuthAccount).WithMany()
++            .HasForeignKey(x => new { x.UserId, x.AvatarOAuthProvider })
++            .HasPrincipalKey(x => new { x.UserId, x.Provider })
++            .OnDelete(DeleteBehavior.NoAction);
++        builder.HasIndex(x => x.AvatarAssetId).HasDatabaseName("ix_user_profiles_avatar_asset_id");
++        builder.HasIndex(x => x.CoverAssetId).HasDatabaseName("ix_user_profiles_cover_asset_id");
++
+         builder.Property(x => x.CurrentRole)
+             .HasColumnName("current_role")
+             .HasMaxLength(255);
+diff --git a/src/Tindy.Infrastructure/Persistence/TindyDbContext.cs b/src/Tindy.Infrastructure/Persistence/TindyDbContext.cs
+index a648bf1..91cf8ec 100644
+--- a/src/Tindy.Infrastructure/Persistence/TindyDbContext.cs
++++ b/src/Tindy.Infrastructure/Persistence/TindyDbContext.cs
+@@ -22,6 +22,10 @@ public class TindyDbContext : DbContext
+ 
+     public DbSet<UserCertificate> UserCertificates => Set<UserCertificate>();
+ 
++    public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
++
++    public DbSet<UserCertificateAttachment> UserCertificateAttachments => Set<UserCertificateAttachment>();
++
+     public DbSet<Role> Roles
+         => Set<Role>();
+ 
+diff --git a/tests/Tindy.Tests/Integration/MediaSchemaMigrationTests.cs b/tests/Tindy.Tests/Integration/MediaSchemaMigrationTests.cs
+new file mode 100644
+index 0000000..7865182
+--- /dev/null
++++ b/tests/Tindy.Tests/Integration/MediaSchemaMigrationTests.cs
+@@ -0,0 +1,88 @@
++using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Infrastructure;
++using Microsoft.EntityFrameworkCore.Migrations;
++using Npgsql;
++using Testcontainers.PostgreSql;
++using Tindy.Infrastructure.Persistence;
++using Xunit;
++
++namespace Tindy.Tests.Integration;
++
++/// <summary>
++/// Requires Docker. Runs on an isolated PostgreSQL container; never modifies a developer database.
++/// Migration Up/Down and actual PostgreSQL ownership-FK checks (not just EF metadata).
++/// </summary>
++public sealed class MediaSchemaMigrationTests
++{
++    private const string PreviousMigration = "20261020130314_Auth_AddOAuthLinkAvatarMetadata";
++
++    [Fact]
++    public async Task Migration_UpDown_PreservesExistingProfileCertificateAndRejectsForeignOwners()
++    {
++        await using var postgres = new PostgreSqlBuilder()
++            .WithImage("postgres:16-alpine")
++            .WithDatabase("tindy_media_migration_test")
++            .WithUsername("postgres")
++            .WithPassword("postgres_test_only")
++            .Build();
++        await postgres.StartAsync();
++        var options = new DbContextOptionsBuilder<TindyDbContext>()
++            .UseNpgsql(postgres.GetConnectionString()).Options;
++        await using var db = new TindyDbContext(options);
++        var migrator = db.GetService<IMigrator>();
++        await migrator.MigrateAsync(PreviousMigration);
++
++        var ownerA = Guid.NewGuid();
++        var ownerB = Guid.NewGuid();
++        var certificate = Guid.NewGuid();
++        var now = DateTime.UtcNow;
++        foreach (var id in new[] { ownerA, ownerB })
++            await db.Database.ExecuteSqlInterpolatedAsync(
++                $"INSERT INTO users (user_id, status, is_onboarding_completed, created_at) VALUES ({id}, {"active"}, {true}, {now})");
++        await db.Database.ExecuteSqlInterpolatedAsync(
++            $"INSERT INTO user_profiles (user_id, display_name, avatar_url, cover_image_url, created_at) VALUES ({ownerA}, {"Owner A"}, {"https://legacy.example/avatar"}, {"https://legacy.example/cover"}, {now})");
++        await db.Database.ExecuteSqlInterpolatedAsync(
++            $"INSERT INTO user_certificates (certificate_id, user_id, title, issuer, created_at) VALUES ({certificate}, {ownerA}, {"AWS"}, {"AWS"}, {now})");
++
++        await db.Database.MigrateAsync();
++        Assert.Contains(await db.Database.GetAppliedMigrationsAsync(), id =>
++            id.EndsWith("_Profile_CreateMediaAssetsAndAttachments", StringComparison.Ordinal));
++        Assert.Equal("https://legacy.example/avatar", (await db.UserProfiles.AsNoTracking().SingleAsync(x => x.UserId == ownerA)).AvatarUrl);
++        Assert.Null((await db.UserProfiles.AsNoTracking().SingleAsync(x => x.UserId == ownerA)).AvatarSource);
++        Assert.Equal("AWS", (await db.UserCertificates.AsNoTracking().SingleAsync(x => x.CertificateId == certificate)).Title);
++
++        var foreignAvatar = Guid.NewGuid();
++        await db.Database.ExecuteSqlInterpolatedAsync(
++            $"INSERT INTO media_assets (media_asset_id, owner_user_id, purpose, storage_provider, storage_container, storage_key, created_at) VALUES ({foreignAvatar}, {ownerB}, {"avatar"}, {"local"}, {"test"}, {"avatar/b"}, {now})");
++        var avatarEx = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
++            $"UPDATE user_profiles SET avatar_source = {"uploaded"}, avatar_asset_id = {foreignAvatar} WHERE user_id = {ownerA}"));
++        Assert.Equal(PostgresErrorCodes.ForeignKeyViolation, avatarEx.SqlState);
++
++        var foreignCertificate = Guid.NewGuid();
++        await db.Database.ExecuteSqlInterpolatedAsync(
++            $"INSERT INTO media_assets (media_asset_id, owner_user_id, purpose, storage_provider, storage_container, storage_key, created_at) VALUES ({foreignCertificate}, {ownerB}, {"certificate"}, {"local"}, {"test"}, {"certificate/b"}, {now})");
++        var attachmentEx = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
++            $"INSERT INTO user_certificate_attachments (attachment_id, certificate_id, owner_user_id, media_asset_id, created_at) VALUES ({Guid.NewGuid()}, {certificate}, {ownerA}, {foreignCertificate}, {now})"));
++        Assert.Equal(PostgresErrorCodes.ForeignKeyViolation, attachmentEx.SqlState);
++
++        // A valid owner-owned media reference must work as well.
++        var ownAvatar = Guid.NewGuid();
++        await db.Database.ExecuteSqlInterpolatedAsync(
++            $"INSERT INTO media_assets (media_asset_id, owner_user_id, purpose, storage_provider, storage_container, storage_key, created_at) VALUES ({ownAvatar}, {ownerA}, {"avatar"}, {"local"}, {"test"}, {"avatar/a"}, {now})");
++        await db.Database.ExecuteSqlInterpolatedAsync(
++            $"UPDATE user_profiles SET avatar_source = {"uploaded"}, avatar_asset_id = {ownAvatar} WHERE user_id = {ownerA}");
++
++        // Rolling back deliberately drops the new media schema only; legacy data must remain.
++        await migrator.MigrateAsync(PreviousMigration);
++        await using var connection = new NpgsqlConnection(postgres.GetConnectionString());
++        await connection.OpenAsync();
++        await using var command = new NpgsqlCommand(
++            "SELECT avatar_url FROM user_profiles WHERE user_id = @user_id", connection);
++        command.Parameters.AddWithValue("user_id", ownerA);
++        Assert.Equal("https://legacy.example/avatar", (string?)await command.ExecuteScalarAsync());
++        await using var checkCertificate = new NpgsqlCommand(
++            "SELECT title FROM user_certificates WHERE certificate_id = @certificate_id", connection);
++        checkCertificate.Parameters.AddWithValue("certificate_id", certificate);
++        Assert.Equal("AWS", (string?)await checkCertificate.ExecuteScalarAsync());
++    }
++}
+diff --git a/tests/Tindy.Tests/Profile/MediaSchemaModelTests.cs b/tests/Tindy.Tests/Profile/MediaSchemaModelTests.cs
+new file mode 100644
+index 0000000..8549323
+--- /dev/null
++++ b/tests/Tindy.Tests/Profile/MediaSchemaModelTests.cs
+@@ -0,0 +1,80 @@
++using Microsoft.EntityFrameworkCore;
++using Tindy.Application.Entities;
++using Tindy.Infrastructure.Persistence;
++using Xunit;
++
++namespace Tindy.Tests.Profile;
++
++/// <summary>EF metadata tests; no database/Docker required.</summary>
++public sealed class MediaSchemaModelTests
++{
++    private static TindyDbContext NewContext()
++    {
++        var options = new DbContextOptionsBuilder<TindyDbContext>()
++            .UseNpgsql("Host=localhost;Database=metadata_only;Username=none;Password=none").Options;
++        return new TindyDbContext(options);
++    }
++
++    [Fact]
++    public void MediaAssets_HavePurposeScanLifecycleSafetyChecks_AndStorageUniqueness()
++    {
++        using var db = NewContext();
++        var media = db.Model.FindEntityType(typeof(MediaAsset))!;
++        Assert.Equal("media_assets", media.GetTableName());
++        var checks = media.GetCheckConstraints().ToDictionary(c => c.Name!, c => c.Sql);
++        foreach (var name in new[] { "ck_media_assets_purpose", "ck_media_assets_storage_provider",
++            "ck_media_assets_status", "ck_media_assets_scan_status", "ck_media_assets_active_safe",
++            "ck_media_assets_positive_sizes", "ck_media_assets_positive_dimensions" })
++            Assert.True(checks.ContainsKey(name), $"Missing {name}");
++        Assert.Contains("application/pdf", checks["ck_media_assets_active_safe"]);
++        Assert.Contains("scan_status = 'clean'", checks["ck_media_assets_active_safe"]);
++        Assert.Contains(media.GetIndexes(), i => i.IsUnique &&
++            i.Properties.Select(x => x.Name).SequenceEqual(new[] { "StorageProvider", "StorageContainer", "StorageKey" }));
++        Assert.Contains(media.GetKeys(), k => k.Properties.Select(x => x.Name)
++            .SequenceEqual(new[] { "MediaAssetId", "OwnerUserId" }));
++        Assert.Equal(DeleteBehavior.Restrict,
++            media.GetForeignKeys().Single(f => f.PrincipalEntityType.ClrType == typeof(User)).DeleteBehavior);
++    }
++
++    [Fact]
++    public void Profile_AvatarCoverAndOAuth_RequireSameOwnerAndNoCascades()
++    {
++        using var db = NewContext();
++        var profile = db.Model.FindEntityType(typeof(UserProfile))!;
++        foreach (var fkProperties in new[] {
++            new[] { "AvatarAssetId", "UserId" }, new[] { "CoverAssetId", "UserId" } })
++        {
++            var fk = Assert.Single(profile.GetForeignKeys().Where(f => f.PrincipalEntityType.ClrType == typeof(MediaAsset)
++                && f.Properties.Select(p => p.Name).SequenceEqual(fkProperties)));
++            Assert.Equal(new[] { "MediaAssetId", "OwnerUserId" },
++                fk.PrincipalKey.Properties.Select(p => p.Name));
++            Assert.Equal(DeleteBehavior.NoAction, fk.DeleteBehavior);
++        }
++        var oauth = Assert.Single(profile.GetForeignKeys().Where(f =>
++            f.PrincipalEntityType.ClrType == typeof(ExternalAuthAccount)));
++        Assert.Equal(new[] { "UserId", "AvatarOAuthProvider" }, oauth.Properties.Select(x => x.Name));
++        Assert.Equal(DeleteBehavior.NoAction, oauth.DeleteBehavior);
++        Assert.True(profile.FindProperty(nameof(UserProfile.AvatarSource))!.IsNullable);
++        Assert.NotNull(profile.FindProperty(nameof(UserProfile.AvatarUrl)));
++        Assert.NotNull(profile.FindProperty(nameof(UserProfile.CoverImageUrl)));
++    }
++
++    [Fact]
++    public void Attachments_HaveTwoOwnerForeignKeys_RestrictDeletes_AndOwnerOnlyDefault()
++    {
++        using var db = NewContext();
++        var attachment = db.Model.FindEntityType(typeof(UserCertificateAttachment))!;
++        Assert.Equal("user_certificate_attachments", attachment.GetTableName());
++        var certificate = Assert.Single(attachment.GetForeignKeys().Where(f =>
++            f.PrincipalEntityType.ClrType == typeof(UserCertificate)));
++        Assert.Equal(new[] { "CertificateId", "OwnerUserId" }, certificate.Properties.Select(p => p.Name));
++        Assert.Equal(DeleteBehavior.NoAction, certificate.DeleteBehavior);
++        var media = Assert.Single(attachment.GetForeignKeys().Where(f =>
++            f.PrincipalEntityType.ClrType == typeof(MediaAsset)));
++        Assert.Equal(new[] { "MediaAssetId", "OwnerUserId" }, media.Properties.Select(p => p.Name));
++        Assert.Equal(DeleteBehavior.NoAction, media.DeleteBehavior);
++        Assert.Equal("owner_only", attachment.FindProperty(nameof(UserCertificateAttachment.Visibility))!.GetDefaultValue());
++        Assert.Contains(attachment.GetIndexes(), i => i.IsUnique &&
++            i.Properties.Select(p => p.Name).SequenceEqual(new[] { "MediaAssetId" }));
++    }
++}

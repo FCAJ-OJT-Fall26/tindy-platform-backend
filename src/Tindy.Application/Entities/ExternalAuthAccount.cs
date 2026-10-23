@@ -13,6 +13,7 @@ public class ExternalAuthAccount
     public string? ProviderUsername { get; set; }
 
     public string? ProviderEmail { get; set; }
+    public string? ProviderAvatarUrl { get; set; }
 
     public DateTime CreatedAt { get; set; }
 

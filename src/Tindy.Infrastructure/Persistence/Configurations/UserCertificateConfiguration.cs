@@ -28,5 +28,8 @@ public sealed class UserCertificateConfiguration : IEntityTypeConfiguration<User
         builder.HasOne(x => x.User).WithMany(x => x.Certificates)
             .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(x => x.UserId).HasDatabaseName("ix_user_certificates_user_id");
+        // Needed by user_certificate_attachments(certificate_id, owner_user_id).
+        builder.HasAlternateKey(x => new { x.CertificateId, x.UserId })
+            .HasName("ak_user_certificates_certificate_id_user_id");
     }
 }

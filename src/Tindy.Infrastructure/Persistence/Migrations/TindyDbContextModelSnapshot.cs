@@ -39,6 +39,11 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(50)")
                         .HasColumnName("provider");
 
+                    b.Property<string>("ProviderAvatarUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("provider_avatar_url");
+
                     b.Property<string>("ProviderEmail")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -77,6 +82,186 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ux_external_auth_accounts_user_provider");
 
                     b.ToTable("external_auth_accounts", (string)null);
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.MediaAsset", b =>
+                {
+                    b.Property<Guid>("MediaAssetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("media_asset_id");
+
+                    b.Property<DateTime?>("ActivatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("activated_at");
+
+                    b.Property<int>("CleanupAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("cleanup_attempts");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("content_type");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTime?>("DeleteRequestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("delete_requested_at");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("file_size_bytes");
+
+                    b.Property<int?>("Height")
+                        .HasColumnType("integer")
+                        .HasColumnName("height");
+
+                    b.Property<string>("LastCleanupError")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("last_cleanup_error");
+
+                    b.Property<DateTime?>("NextCleanupAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_cleanup_at");
+
+                    b.Property<string>("ObjectEtag")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("object_etag");
+
+                    b.Property<string>("ObjectVersionId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("object_version_id");
+
+                    b.Property<string>("OriginalFileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("original_file_name");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_user_id");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("purpose");
+
+                    b.Property<long>("ReservedBytes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L)
+                        .HasColumnName("reserved_bytes");
+
+                    b.Property<DateTime?>("ScanCompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("scan_completed_at");
+
+                    b.Property<string>("ScanProvider")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("scan_provider");
+
+                    b.Property<string>("ScanStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("not_required")
+                        .HasColumnName("scan_status");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("pending_upload")
+                        .HasColumnName("status");
+
+                    b.Property<string>("StorageContainer")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("storage_container");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("storage_key");
+
+                    b.Property<string>("StorageProvider")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("storage_provider");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<DateTime?>("UploadExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("upload_expires_at");
+
+                    b.Property<int?>("Width")
+                        .HasColumnType("integer")
+                        .HasColumnName("width");
+
+                    b.HasKey("MediaAssetId");
+
+                    b.HasAlternateKey("MediaAssetId", "OwnerUserId")
+                        .HasName("ak_media_assets_media_asset_id_owner_user_id");
+
+                    b.HasIndex("UploadExpiresAt")
+                        .HasDatabaseName("ix_media_assets_expiring_uploads")
+                        .HasFilter("status = 'pending_upload'");
+
+                    b.HasIndex("OwnerUserId", "Purpose")
+                        .HasDatabaseName("ix_media_assets_owner_purpose");
+
+                    b.HasIndex("Status", "CreatedAt")
+                        .HasDatabaseName("ix_media_assets_processing")
+                        .HasFilter("status = 'processing'");
+
+                    b.HasIndex("Status", "NextCleanupAt")
+                        .HasDatabaseName("ix_media_assets_cleanup")
+                        .HasFilter("status = 'pending_delete'");
+
+                    b.HasIndex("StorageProvider", "StorageContainer", "StorageKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_media_assets_storage_object");
+
+                    b.ToTable("media_assets", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_media_assets_active_safe", "status <> 'active' OR (file_size_bytes IS NOT NULL AND file_size_bytes > 0 AND content_type IS NOT NULL AND reserved_bytes = 0 AND ((content_type = 'application/pdf' AND scan_status = 'clean') OR (content_type <> 'application/pdf' AND scan_status IN ('not_required', 'clean'))))");
+
+                            t.HasCheckConstraint("ck_media_assets_cleanup_attempts", "cleanup_attempts >= 0");
+
+                            t.HasCheckConstraint("ck_media_assets_positive_dimensions", "(width IS NULL OR width > 0) AND (height IS NULL OR height > 0)");
+
+                            t.HasCheckConstraint("ck_media_assets_positive_sizes", "(file_size_bytes IS NULL OR file_size_bytes > 0) AND reserved_bytes >= 0");
+
+                            t.HasCheckConstraint("ck_media_assets_purpose", "purpose IN ('avatar', 'cover', 'certificate')");
+
+                            t.HasCheckConstraint("ck_media_assets_scan_provider", "scan_provider IS NULL OR scan_provider IN ('clamav', 'guardduty')");
+
+                            t.HasCheckConstraint("ck_media_assets_scan_status", "scan_status IN ('pending', 'clean', 'threat_detected', 'unsupported', 'access_denied', 'failed', 'not_required')");
+
+                            t.HasCheckConstraint("ck_media_assets_status", "status IN ('pending_upload', 'processing', 'active', 'rejected', 'pending_delete')");
+
+                            t.HasCheckConstraint("ck_media_assets_storage_identity", "btrim(storage_container) <> '' AND btrim(storage_key) <> ''");
+
+                            t.HasCheckConstraint("ck_media_assets_storage_provider", "storage_provider IN ('local', 's3')");
+                        });
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.Permission", b =>
@@ -493,12 +678,69 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
                     b.HasKey("CertificateId");
 
+                    b.HasAlternateKey("CertificateId", "UserId")
+                        .HasName("ak_user_certificates_certificate_id_user_id");
+
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_user_certificates_user_id");
 
                     b.ToTable("user_certificates", null, t =>
                         {
                             t.HasCheckConstraint("ck_user_certificates_dates_order", "issued_at IS NULL OR expires_at IS NULL OR expires_at >= issued_at");
+                        });
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.UserCertificateAttachment", b =>
+                {
+                    b.Property<Guid>("AttachmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("attachment_id");
+
+                    b.Property<Guid>("CertificateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("certificate_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("MediaAssetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("media_asset_id");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_user_id");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("Visibility")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("owner_only")
+                        .HasColumnName("visibility");
+
+                    b.HasKey("AttachmentId");
+
+                    b.HasIndex("MediaAssetId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_user_certificate_attachments_media_asset_id");
+
+                    b.HasIndex("OwnerUserId")
+                        .HasDatabaseName("ix_user_certificate_attachments_owner_user_id");
+
+                    b.HasIndex("CertificateId", "OwnerUserId")
+                        .HasDatabaseName("ix_user_certificate_attachments_certificate_owner");
+
+                    b.HasIndex("MediaAssetId", "OwnerUserId");
+
+                    b.ToTable("user_certificate_attachments", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_user_certificate_attachments_visibility", "visibility IN ('owner_only', 'members')");
                         });
                 });
 
@@ -595,6 +837,20 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("available_hours_per_week");
 
+                    b.Property<Guid?>("AvatarAssetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("avatar_asset_id");
+
+                    b.Property<string>("AvatarOAuthProvider")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("avatar_oauth_provider");
+
+                    b.Property<string>("AvatarSource")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("avatar_source");
+
                     b.Property<string>("AvatarUrl")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)")
@@ -603,6 +859,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Property<string>("Bio")
                         .HasColumnType("text")
                         .HasColumnName("bio");
+
+                    b.Property<Guid?>("CoverAssetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cover_asset_id");
 
                     b.Property<string>("CoverImageUrl")
                         .HasMaxLength(1000)
@@ -695,12 +955,26 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
                     b.HasKey("UserId");
 
+                    b.HasIndex("AvatarAssetId")
+                        .HasDatabaseName("ix_user_profiles_avatar_asset_id");
+
+                    b.HasIndex("CoverAssetId")
+                        .HasDatabaseName("ix_user_profiles_cover_asset_id");
+
                     b.HasIndex("PreferredRoleId")
                         .HasDatabaseName("ix_user_profiles_preferred_role_id");
+
+                    b.HasIndex("AvatarAssetId", "UserId");
+
+                    b.HasIndex("CoverAssetId", "UserId");
+
+                    b.HasIndex("UserId", "AvatarOAuthProvider");
 
                     b.ToTable("user_profiles", null, t =>
                         {
                             t.HasCheckConstraint("ck_user_profiles_available_hours_per_week", "available_hours_per_week IS NULL OR available_hours_per_week BETWEEN 1 AND 40");
+
+                            t.HasCheckConstraint("ck_user_profiles_avatar_selection", "(avatar_source IS NULL AND avatar_asset_id IS NULL AND avatar_oauth_provider IS NULL) OR (avatar_source = 'default' AND avatar_asset_id IS NULL AND avatar_oauth_provider IS NULL) OR (avatar_source = 'uploaded' AND avatar_asset_id IS NOT NULL AND avatar_oauth_provider IS NULL) OR (avatar_source = 'oauth' AND avatar_asset_id IS NOT NULL AND avatar_oauth_provider IN ('Google', 'GitHub'))");
                         });
                 });
 
@@ -870,6 +1144,17 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.MediaAsset", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.User", "Owner")
+                        .WithMany("MediaAssets")
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Owner");
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.ProfileExperience", b =>
                 {
                     b.HasOne("Tindy.Application.Entities.User", "User")
@@ -949,6 +1234,27 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.UserCertificateAttachment", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.UserCertificate", "Certificate")
+                        .WithMany("Attachments")
+                        .HasForeignKey("CertificateId", "OwnerUserId")
+                        .HasPrincipalKey("CertificateId", "UserId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("Tindy.Application.Entities.MediaAsset", "MediaAsset")
+                        .WithMany()
+                        .HasForeignKey("MediaAssetId", "OwnerUserId")
+                        .HasPrincipalKey("MediaAssetId", "OwnerUserId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("Certificate");
+
+                    b.Navigation("MediaAsset");
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.UserCredential", b =>
                 {
                     b.HasOne("Tindy.Application.Entities.User", "User")
@@ -983,6 +1289,30 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasForeignKey("Tindy.Application.Entities.UserProfile", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("Tindy.Application.Entities.MediaAsset", "AvatarAsset")
+                        .WithMany()
+                        .HasForeignKey("AvatarAssetId", "UserId")
+                        .HasPrincipalKey("MediaAssetId", "OwnerUserId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("Tindy.Application.Entities.MediaAsset", "CoverAsset")
+                        .WithMany()
+                        .HasForeignKey("CoverAssetId", "UserId")
+                        .HasPrincipalKey("MediaAssetId", "OwnerUserId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("Tindy.Application.Entities.ExternalAuthAccount", "AvatarOAuthAccount")
+                        .WithMany()
+                        .HasForeignKey("UserId", "AvatarOAuthProvider")
+                        .HasPrincipalKey("UserId", "Provider")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.Navigation("AvatarAsset");
+
+                    b.Navigation("AvatarOAuthAccount");
+
+                    b.Navigation("CoverAsset");
 
                     b.Navigation("PreferredProfessionalRole");
 
@@ -1089,6 +1419,8 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
                     b.Navigation("ExternalAuthAccounts");
 
+                    b.Navigation("MediaAssets");
+
                     b.Navigation("OnboardingSteps");
 
                     b.Navigation("Profile");
@@ -1096,6 +1428,11 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("ProfileExperiences");
 
                     b.Navigation("UserRoles");
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.UserCertificate", b =>
+                {
+                    b.Navigation("Attachments");
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.UserProfile", b =>

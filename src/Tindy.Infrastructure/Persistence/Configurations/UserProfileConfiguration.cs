@@ -12,6 +12,11 @@ public class UserProfileConfiguration
         builder.ToTable("user_profiles", table =>
         {
             table.HasCheckConstraint("ck_user_profiles_available_hours_per_week", "available_hours_per_week IS NULL OR " + "available_hours_per_week BETWEEN 1 AND 40");
+            // Leave AvatarSource null for legacy rows until the later media migration step.
+            table.HasCheckConstraint("ck_user_profiles_avatar_selection", "(avatar_source IS NULL AND avatar_asset_id IS NULL AND avatar_oauth_provider IS NULL) OR " +
+                "(avatar_source = 'default' AND avatar_asset_id IS NULL AND avatar_oauth_provider IS NULL) OR " +
+                "(avatar_source = 'uploaded' AND avatar_asset_id IS NOT NULL AND avatar_oauth_provider IS NULL) OR " +
+                "(avatar_source = 'oauth' AND avatar_asset_id IS NOT NULL AND avatar_oauth_provider IN ('Google', 'GitHub'))");
         });
 
         builder.HasKey(x => x.UserId);
@@ -47,6 +52,27 @@ public class UserProfileConfiguration
         builder.Property(x => x.CoverImageUrl)
             .HasColumnName("cover_image_url")
             .HasMaxLength(1000);
+
+        builder.Property(x => x.AvatarSource).HasColumnName("avatar_source").HasMaxLength(20);
+        builder.Property(x => x.AvatarAssetId).HasColumnName("avatar_asset_id");
+        builder.Property(x => x.AvatarOAuthProvider).HasColumnName("avatar_oauth_provider").HasMaxLength(30);
+        builder.Property(x => x.CoverAssetId).HasColumnName("cover_asset_id");
+
+        builder.HasOne(x => x.AvatarAsset).WithMany()
+            .HasForeignKey(x => new { x.AvatarAssetId, x.UserId })
+            .HasPrincipalKey(x => new { x.MediaAssetId, x.OwnerUserId })
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne(x => x.CoverAsset).WithMany()
+            .HasForeignKey(x => new { x.CoverAssetId, x.UserId })
+            .HasPrincipalKey(x => new { x.MediaAssetId, x.OwnerUserId })
+            .OnDelete(DeleteBehavior.NoAction);
+        // The provider strings in the existing codebase are "Google" and "GitHub".
+        builder.HasOne(x => x.AvatarOAuthAccount).WithMany()
+            .HasForeignKey(x => new { x.UserId, x.AvatarOAuthProvider })
+            .HasPrincipalKey(x => new { x.UserId, x.Provider })
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasIndex(x => x.AvatarAssetId).HasDatabaseName("ix_user_profiles_avatar_asset_id");
+        builder.HasIndex(x => x.CoverAssetId).HasDatabaseName("ix_user_profiles_cover_asset_id");
 
         builder.Property(x => x.CurrentRole)
             .HasColumnName("current_role")

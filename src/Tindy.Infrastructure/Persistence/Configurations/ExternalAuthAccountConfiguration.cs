@@ -37,6 +37,10 @@ public class ExternalAuthAccountConfiguration
             .HasColumnName("provider_email")
             .HasMaxLength(255);
 
+        builder.Property(x => x.ProviderAvatarUrl)
+            .HasColumnName("provider_avatar_url")
+            .HasMaxLength(1000);
+
         builder.Property(x => x.CreatedAt)
             .HasColumnName("created_at")
             .IsRequired();

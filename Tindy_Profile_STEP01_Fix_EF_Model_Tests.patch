@@ -1,0 +1,54 @@
+--- a/tests/Tindy.Tests/Profile/MediaSchemaModelTests.cs
++++ b/tests/Tindy.Tests/Profile/MediaSchemaModelTests.cs
+@@ -1,4 +1,6 @@
+ using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Infrastructure;
++using Microsoft.EntityFrameworkCore.Metadata;
+ using Tindy.Application.Entities;
+ using Tindy.Infrastructure.Persistence;
+ using Xunit;
+@@ -19,7 +21,7 @@
+     public void MediaAssets_HavePurposeScanLifecycleSafetyChecks_AndStorageUniqueness()
+     {
+         using var db = NewContext();
+-        var media = db.Model.FindEntityType(typeof(MediaAsset))!;
++        var media = db.GetService<IDesignTimeModel>().Model.FindEntityType(typeof(MediaAsset))!;
+         Assert.Equal("media_assets", media.GetTableName());
+         var checks = media.GetCheckConstraints().ToDictionary(c => c.Name!, c => c.Sql);
+         foreach (var name in new[] { "ck_media_assets_purpose", "ck_media_assets_storage_provider",
+@@ -44,14 +46,14 @@
+         foreach (var fkProperties in new[] {
+             new[] { "AvatarAssetId", "UserId" }, new[] { "CoverAssetId", "UserId" } })
+         {
+-            var fk = Assert.Single(profile.GetForeignKeys().Where(f => f.PrincipalEntityType.ClrType == typeof(MediaAsset)
+-                && f.Properties.Select(p => p.Name).SequenceEqual(fkProperties)));
++            var fk = Assert.Single(profile.GetForeignKeys(), f => f.PrincipalEntityType.ClrType == typeof(MediaAsset)
++                && f.Properties.Select(p => p.Name).SequenceEqual(fkProperties));
+             Assert.Equal(new[] { "MediaAssetId", "OwnerUserId" },
+                 fk.PrincipalKey.Properties.Select(p => p.Name));
+             Assert.Equal(DeleteBehavior.NoAction, fk.DeleteBehavior);
+         }
+-        var oauth = Assert.Single(profile.GetForeignKeys().Where(f =>
+-            f.PrincipalEntityType.ClrType == typeof(ExternalAuthAccount)));
++        var oauth = Assert.Single(profile.GetForeignKeys(), f =>
++            f.PrincipalEntityType.ClrType == typeof(ExternalAuthAccount));
+         Assert.Equal(new[] { "UserId", "AvatarOAuthProvider" }, oauth.Properties.Select(x => x.Name));
+         Assert.Equal(DeleteBehavior.NoAction, oauth.DeleteBehavior);
+         Assert.True(profile.FindProperty(nameof(UserProfile.AvatarSource))!.IsNullable);
+@@ -65,12 +67,12 @@
+         using var db = NewContext();
+         var attachment = db.Model.FindEntityType(typeof(UserCertificateAttachment))!;
+         Assert.Equal("user_certificate_attachments", attachment.GetTableName());
+-        var certificate = Assert.Single(attachment.GetForeignKeys().Where(f =>
+-            f.PrincipalEntityType.ClrType == typeof(UserCertificate)));
++        var certificate = Assert.Single(attachment.GetForeignKeys(), f =>
++            f.PrincipalEntityType.ClrType == typeof(UserCertificate));
+         Assert.Equal(new[] { "CertificateId", "OwnerUserId" }, certificate.Properties.Select(p => p.Name));
+         Assert.Equal(DeleteBehavior.NoAction, certificate.DeleteBehavior);
+-        var media = Assert.Single(attachment.GetForeignKeys().Where(f =>
+-            f.PrincipalEntityType.ClrType == typeof(MediaAsset)));
++        var media = Assert.Single(attachment.GetForeignKeys(), f =>
++            f.PrincipalEntityType.ClrType == typeof(MediaAsset));
+         Assert.Equal(new[] { "MediaAssetId", "OwnerUserId" }, media.Properties.Select(p => p.Name));
+         Assert.Equal(DeleteBehavior.NoAction, media.DeleteBehavior);
+         Assert.Equal("owner_only", attachment.FindProperty(nameof(UserCertificateAttachment.Visibility))!.GetDefaultValue());

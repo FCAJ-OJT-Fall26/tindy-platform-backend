@@ -14,4 +14,5 @@ public class UserCertificate
     public DateTime? UpdatedAt { get; set; }
 
     public User User { get; set; } = null!;
+    public ICollection<UserCertificateAttachment> Attachments { get; set; } = new List<UserCertificateAttachment>();
 }
