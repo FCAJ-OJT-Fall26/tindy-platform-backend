@@ -20,7 +20,10 @@ public interface IExternalAuthRepository
 
     Task AddExternalAccountAsync(ExternalAuthAccount account, CancellationToken cancellationToken = default);
 
-    /// <summary>Atomically link the external identity and fill an unset profile avatar only.</summary>
+    Task UpdateProviderAvatarAsync(Guid externalAuthAccountId, string providerAvatarUrl,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Link external identity without changing Profile avatar; remember provider avatar URL only.</summary>
     Task AddExternalAccountAndFillAvatarAsync(ExternalAuthAccount account, string? avatarUrl,
         CancellationToken cancellationToken = default);
 

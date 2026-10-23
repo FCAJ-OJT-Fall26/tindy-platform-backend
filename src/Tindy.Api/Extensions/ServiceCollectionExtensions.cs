@@ -292,6 +292,27 @@ public static class ServiceCollectionExtensions
                     QueueLimit = 0, AutoReplenishment = true
                 }));
 
+            // STEP 03: limits are per authenticated user. Single-instance in-memory limits;
+            // move to a distributed store when horizontal scaling is enabled.
+            static string MediaPartitionKey(HttpContext context) =>
+                context.User.FindFirst("sub")?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+            options.AddPolicy("media-avatar", context => RateLimitPartition.GetFixedWindowLimiter(
+                MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10, Window = TimeSpan.FromHours(1), QueueLimit = 0, AutoReplenishment = true
+                }));
+            options.AddPolicy("media-cover", context => RateLimitPartition.GetFixedWindowLimiter(
+                MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 6, Window = TimeSpan.FromHours(1), QueueLimit = 0, AutoReplenishment = true
+                }));
+            options.AddPolicy("media-read", context => RateLimitPartition.GetFixedWindowLimiter(
+                MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 300, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true
+                }));
+
             // ===================================
             // 2. CUSTOM 429 ERROR RESPONSE
             // ===================================
@@ -303,12 +324,13 @@ public static class ServiceCollectionExtensions
                 {
                     Status = StatusCodes.Status429TooManyRequests,
                     Title = "Too Many Requests",
-                    Detail = "Too many login attempts. Please try again later.",
+                    Detail = "Too many requests. Please try again later.",
                     Instance = httpContext.Request.Path.ToString()
                 };
 
                 problem.Extensions["error_code"] =
-                    "AUTH_TOO_MANY_ATTEMPTS";
+                    httpContext.Request.Path.StartsWithSegments("/api/media") || httpContext.Request.Path.StartsWithSegments("/api/me/profile")
+                        ? "MEDIA_RATE_LIMITED" : "AUTH_TOO_MANY_ATTEMPTS";
 
                 problem.Extensions["traceId"] =
                     httpContext.TraceIdentifier;

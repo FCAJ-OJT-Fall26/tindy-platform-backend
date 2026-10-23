@@ -1,0 +1,1171 @@
+diff --git a/docs/guide/PROFILE_MEDIA_STEP03_AVATAR_COVER_HANDOFF_VI.md b/docs/guide/PROFILE_MEDIA_STEP03_AVATAR_COVER_HANDOFF_VI.md
+new file mode 100644
+index 0000000..f2c49a2
+--- /dev/null
++++ b/docs/guide/PROFILE_MEDIA_STEP03_AVATAR_COVER_HANDOFF_VI.md
+@@ -0,0 +1,167 @@
++# Tindy Profile Module — STEP 03: Avatar & Cover Upload + Private Media Read
++
++> Ngôn ngữ: tiếng Việt; tên class, API, database field và Git commit giữ tiếng Anh.
++> Cơ sở: `tindy-backend-platform(20261023-023055).zip`.
++> **Không chạy migration hoặc database drop ở STEP 03.** Schema Full Media Assets V3 đã tồn tại từ STEP 01.
++
++## 1. Phạm vi
++
++Triển khai upload/replace/remove Avatar (5 MB), Cover (10 MB); ảnh JPEG, PNG, WebP được kiểm tra bằng **magic bytes + codec**, giới hạn decoded pixels (20 MP), crop trung tâm và re-encode sang WebP. Avatar 512×512; Cover 1500×500 (đề xuất kích thước xử lý được chọn trong STEP 03). Crop trên frontend nếu cần lựa chọn bố cục khác; backend vẫn áp dụng center crop.
++
++Local Storage là provider Development. AWS S3 provider từ STEP 02 vẫn sẵn code nhưng **không yêu cầu bucket/IAM/credentials hoặc S3 tests ở bước này**.
++
++`media_assets` chỉ lưu metadata; binary lưu ngoài PostgreSQL. Các `storage_key` không bao giờ xuất hiện trong response HTTP.
++
++## 2. Thay đổi source
++
++| Nhóm | Thay đổi |
++| --- | --- |
++| Application | `IProfileMediaService`, `ProfileMediaState`, `PrivateMediaRead`, `MediaRequestException` |
++| Infrastructure | `ProfileImageProcessor` (SkiaSharp), `ProfileMediaService`, DI/HttpClient |
++| API | `ProfileMediaController`, `PrivateMediaController`, `ProblemDetails` và per-user rate limits |
++| OAuth | Link provider **không tự thay Avatar**; lưu URL provider vào `provider_avatar_url`; unlink provider đang được chọn chuyển về default |
++| Profile | `MyProfileResponse` và `MemberProfileResponse` bổ sung `avatar_source`, `avatar_media_asset_id`, `cover_media_asset_id`; giữ `avatar_url` và `cover_image_url` cũ trong giai đoạn tương thích |
++| Tests | `ProfileImageProcessorTests`, `ProfileMediaServiceIntegrationTests`, điều chỉnh unit test OAuth theo quy tắc Avatar mới |
++
++**Package mới:** `SkiaSharp 3.119.2`, `SkiaSharp.NativeAssets.Linux.NoDependencies 3.119.2` (để có thể chạy Linux sau này) và `Microsoft.Extensions.Http 10.0.8`. SkiaSharp có giấy phép MIT. Không dùng ImageSharp vì cần rà riêng license thương mại.
++
++## 3. API Contract
++
++Tất cả endpoint mới dùng JWT Bearer và `[Authorize]` mặc định (Active + Completed Onboarding). Chỉ owner được upload/replace/remove; member hợp lệ được đọc avatar/cover của profile Active + completed onboarding.
++
++| Method | Endpoint | Payload | Thành công |
++| --- | --- | --- | --- |
++| POST | `/api/me/profile/avatar` | multipart `file` | 200 JSON |
++| DELETE | `/api/me/profile/avatar` | — | 204 |
++| PUT | `/api/me/profile/avatar/source` | JSON `{ "source":"oauth", "provider":"google" }` hoặc `{ "source":"default" }` | 200 JSON |
++| POST | `/api/me/profile/cover-image` | multipart `file` | 200 JSON |
++| DELETE | `/api/me/profile/cover-image` | — | 204 |
++| GET | `/api/media/{media_asset_id}/content` | Bearer JWT | 200 binary `image/webp` |
++
++Ví dụ response POST:
++
++```json
++{
++  "success": true,
++  "message": "Avatar updated successfully.",
++  "data": {
++    "avatar_source": "uploaded",
++    "avatar_media_asset_id": "550e8400-e29b-41d4-a716-446655440001",
++    "cover_media_asset_id": null
++  }
++}
++```
++
++`GET /api/media/.../content` chỉ phục vụ Avatar/Cover `active` **đang được UserProfile tham chiếu**; không mở quyền đọc PDF/Certificate ở STEP 03. Media ID cũ sau replace và media không được tham chiếu đều trả 404; anonymous hoặc pre-onboarding không có quyền. Kết quả binary có `Cache-Control: private, no-store` và `X-Content-Type-Options: nosniff`.
++
++Frontend lấy ảnh bằng fetch mang JWT Bearer, rồi `URL.createObjectURL(blob)` và `URL.revokeObjectURL(...)` khi không dùng nữa. `<img src="/api/media/...">` trực tiếp **không gửi Authorization Bearer** nên không sử dụng kiểu này.
++
++## 4. Xử lý replace và remove
++
++1. Kiểm tra size, magic bytes, pixel dimensions và decode ảnh; luôn re-encode WebP.
++2. Lưu file mới bằng `IFileStorageService` từ STEP 02 (object key do backend sinh).
++3. PostgreSQL transaction, khóa hàng `users` (`FOR UPDATE`), kiểm tra profile và owner, thêm `MediaAsset status=active`, đổi Profile reference.
++4. Asset cũ (nếu có) chuyển `pending_delete`, thu hồi quyền đọc ngay lập tức.
++5. Nếu transaction thất bại, file mới được xóa best-effort; profile cũ không thay đổi. Nếu storage cleanup thất bại, orphan reconciliation bền vững nằm ở STEP 05.
++
++DELETE không xóa file vật lý ngay trong transaction để tránh làm hỏng rollback. File không còn được đọc qua API sau khi Profile gỡ reference.
++
++## 5. Quy tắc OAuth
++
++- **Link Google/GitHub không được tự fill hoặc thay `user_profiles.avatar_url`.** URL do provider cung cấp được lưu riêng vào `external_auth_accounts.provider_avatar_url`.
++- Người dùng chủ động gọi `PUT /api/me/profile/avatar/source` với provider `google`/`github`: backend chỉ cho phép URL HTTPS từ hostname tin cậy (`lh3.googleusercontent.com`, `avatars.githubusercontent.com`), cấm redirect, giới hạn file và decode/re-encode trước khi lưu private.
++- Remove Avatar luôn trả về `default`, không tự động dùng OAuth.
++- Unlink provider đang được chọn: chuyển `default` trong transaction, sau đó unlink; không unlink phương thức đăng nhập cuối cùng.
++- Khi OAuth signup lần đầu, mặc định Tindy avatar (`avatar_source=default`) và lưu provider URL; muốn hiển thị avatar provider thì người dùng chọn sau onboarding. Đây là cách an toàn, vì URL public từ provider không bảo đảm chính sách members-only.
++- Legacy URLs hiện vẫn được giữ để tương thích dữ liệu. Chuyển đổi toàn bộ legacy avatar/cover sang private storage là việc migration dữ liệu riêng; không coi legacy URL là private.
++
++**Giới hạn còn lại:** URL cũ đã có của OAuth account trước STEP 03 có thể đang để NULL trong `provider_avatar_url`; đăng nhập lại bằng OAuth để refresh metadata rồi chọn source. Không tự import dữ liệu URL chưa xác minh.
++
++## 6. Rate limiting và lỗi
++
++- Avatar upload / chọn ảnh provider: 10 lần/giờ/user.
++- Cover upload: 6 lần/giờ/user.
++- Media read: 300 lần/phút/user.
++- Số upload avatar/cover/OAuth image đồng thời: tối đa 2/user trên **một API instance**.
++- Rate limiting đang lưu trong bộ nhớ instance. Khi scale nhiều API instance, phải chuyển sang distributed limiter để bảo đảm giới hạn toàn cụm.
++- `400`: ảnh rỗng/không decode/dimensions; `413`: quá size; `415`: không phải JPEG/PNG/WebP; `404`: media không active hoặc không tham chiếu; `409`: provider avatar không khả dụng; `429`: rate/concurrency; `401/403`: auth.
++- `ProblemDetails` bao gồm `error_code` và `traceId`.
++
++## 7. Áp dụng Git Patch
++
++**Trên PowerShell 7, từ root Backend:**
++
++```powershell
++cd "D:\FPT\Semester 6\OJT\aws\tindy-platform\tindy-backend-platform"
++git status
++git apply --check .\Tindy_Profile_STEP03_Avatar_Cover.patch
++git apply .\Tindy_Profile_STEP03_Avatar_Cover.patch
++git status
++git -c core.whitespace=cr-at-eol diff --check
++```
++
++Patch được xây trên đúng ZIP ngày 23/10/2026. Nếu repository đã thay đổi sau ZIP, `git apply --check` có thể báo conflict; **không dùng `--force` và không tự ghi đè code thành viên khác**.
++
++Không commit file `.patch` và không đưa media từ `D:\FPT\Semester 6\OJT\aws\TindyData\private-media` lên Git.
++
++## 8. Build & Tests
++
++```powershell
++dotnet restore
++dotnet build .\Tindy.slnx
++
++dotnet test .\tests\Tindy.Tests\Tindy.Tests.csproj `
++    --filter "FullyQualifiedName~ProfileImageProcessorTests" `
++    --verbosity normal
++
++dotnet test .\tests\Tindy.Tests\Tindy.Tests.csproj `
++    --filter "FullyQualifiedName~ExternalAuthServiceTests" `
++    --verbosity normal
++```
++
++**PostgreSQL Integration Tests (Docker Desktop + Testcontainers):**
++
++```powershell
++dotnet test .\tests\Tindy.Tests\Tindy.Tests.csproj `
++    --filter "FullyQualifiedName~ProfileMediaServiceIntegrationTests" `
++    --verbosity normal
++```
++
++Sau đó chạy đầy đủ `dotnet test .\Tindy.slnx`. Không coi bước hoàn thành khi chưa PASS; environment tạo patch chưa có dotnet SDK và Docker nên chưa có log build/xUnit thực tế.
++
++## 9. Test API với Postman
++
++1. Chạy backend bằng `dotnet run --project .\src\Tindy.Api --environment Development`.
++2. Dùng JWT của một user đang **active** và đã `is_onboarding_completed=true`.
++3. POST `/api/me/profile/avatar`, tab `Body > form-data`, field `file` chọn một `.png` dung lượng nhỏ.
++4. Xem `data.avatar_media_asset_id`; GET `/api/me/profile` kiểm tra `avatar_source=uploaded`.
++5. GET `/api/media/{id}/content` với JWT: nhận `image/webp`.
++6. Upload Avatar lần nữa: id thay đổi, id cũ GET trả 404 (nhưng file còn đợi STEP 05 cleanup).
++7. DELETE Avatar: GET Profile trả `avatar_source=default`, id null.
++8. Thử file `.txt` => 415, ảnh hỏng => 400, file quá 5MB => 413.
++9. Thử không JWT => 401, chưa onboarding => 403, user suspended => 403.
++10. Cover tương tự, tối đa 10MB. Member hợp lệ có thể GET Avatar/Cover, không thể POST/DELETE thay user khác.
++11. Link Google/GitHub: avatar hiện tại **không đổi**. Chọn OAuth source chủ động mới thay; unlink provider đang được chọn trả default.
++
++> HTTPS: vì frontend dùng Vite và backend có `UseHttpsRedirection`, gọi URL/port theo launchSettings thực tế. Không dùng `http://` trong Production.
++
++## 10. Điều kiện nghiệm thu
++
++- [ ] `dotnet restore`, `dotnet build` PASS không errors.
++- [ ] `ProfileImageProcessorTests` và OAuth tests PASS.
++- [ ] PostgreSQL integration tests PASS trên môi trường Docker thử nghiệm.
++- [ ] Avatar/Cover upload, replace, delete, private GET qua JWT hoạt động.
++- [ ] 401/403/404, quota per-file 413, 415 và 429 hoạt động đúng.
++- [ ] Link OAuth không đổi Avatar; unlink provider đang chọn về default.
++- [ ] Profile DTO giữ thông tin cũ, đồng thời trả Media Asset IDs.
++- [ ] Không có migration mới ở STEP 03; Database không bị drop.
++
++## 11. Commit đề xuất
++
++```powershell
++git add src/Tindy.Application/ src/Tindy.Infrastructure/ src/Tindy.Api/ tests/Tindy.Tests/ docs/guide/PROFILE_MEDIA_STEP03_AVATAR_COVER_HANDOFF_VI.md
++git -c core.whitespace=cr-at-eol diff --cached --check
++git commit -m "feat(profile): add private avatar and cover media APIs"
++```
++
++**Chưa triển khai ở bước này:** Certificate Attachments (STEP 04), ClamAV/GuardDuty, persistent cleanup worker (STEP 05), Frontend Integration đầy đủ (STEP 06), S3 thật.
+diff --git a/src/Tindy.Api/Controllers/ProfileMediaController.cs b/src/Tindy.Api/Controllers/ProfileMediaController.cs
+new file mode 100644
+index 0000000..b5baeea
+--- /dev/null
++++ b/src/Tindy.Api/Controllers/ProfileMediaController.cs
+@@ -0,0 +1,93 @@
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Mvc;
++using Microsoft.AspNetCore.RateLimiting;
++using Tindy.Application.Exceptions;
++using Tindy.Application.Interfaces.Services;
++
++namespace Tindy.Api.Controllers;
++
++[ApiController]
++[Authorize]
++[Route("api/me/profile")]
++public sealed class ProfileMediaController : ControllerBase
++{
++    private readonly IProfileMediaService _media;
++    public ProfileMediaController(IProfileMediaService media) => _media = media;
++
++    [HttpPost("avatar")]
++    [EnableRateLimiting("media-avatar")]
++    [Consumes("multipart/form-data")]
++    [RequestSizeLimit(6_000_000)]
++    public async Task<IActionResult> UploadAvatar([FromForm] IFormFile file, CancellationToken ct)
++    {
++        if (file is null) throw new MediaRequestException(400, "MEDIA_FILE_REQUIRED", "A file is required.");
++        await using var stream = file.OpenReadStream();
++        var data = await _media.UploadAsync(CurrentUserId(), true, stream, file.FileName, file.Length, ct);
++        return Ok(new { success = true, message = "Avatar updated successfully.", data });
++    }
++
++    [HttpDelete("avatar")]
++    public async Task<IActionResult> DeleteAvatar(CancellationToken ct)
++    {
++        await _media.RemoveAsync(CurrentUserId(), true, ct);
++        return NoContent();
++    }
++
++    public sealed record AvatarSourceRequest(string Source, string? Provider);
++
++    [HttpPut("avatar/source")]
++    [EnableRateLimiting("media-avatar")]
++    public async Task<IActionResult> SelectAvatar([FromBody] AvatarSourceRequest request, CancellationToken ct)
++    {
++        if (request is null) throw new MediaRequestException(400, "MEDIA_INVALID_SOURCE", "Avatar source is required.");
++        var data = await _media.ChooseAvatarAsync(CurrentUserId(), request.Source, request.Provider, ct);
++        return Ok(new { success = true, message = "Avatar source updated successfully.", data });
++    }
++
++    [HttpPost("cover-image")]
++    [EnableRateLimiting("media-cover")]
++    [Consumes("multipart/form-data")]
++    [RequestSizeLimit(11_000_000)]
++    public async Task<IActionResult> UploadCover([FromForm] IFormFile file, CancellationToken ct)
++    {
++        if (file is null) throw new MediaRequestException(400, "MEDIA_FILE_REQUIRED", "A file is required.");
++        await using var stream = file.OpenReadStream();
++        var data = await _media.UploadAsync(CurrentUserId(), false, stream, file.FileName, file.Length, ct);
++        return Ok(new { success = true, message = "Cover image updated successfully.", data });
++    }
++
++    [HttpDelete("cover-image")]
++    public async Task<IActionResult> DeleteCover(CancellationToken ct)
++    {
++        await _media.RemoveAsync(CurrentUserId(), false, ct);
++        return NoContent();
++    }
++
++    private Guid CurrentUserId()
++    {
++        if (!Guid.TryParse(User.FindFirst("sub")?.Value, out var id) || id == Guid.Empty)
++            throw new InvalidCredentialsException();
++        return id;
++    }
++}
++
++[ApiController]
++[Authorize]
++[Route("api/media")]
++public sealed class PrivateMediaController : ControllerBase
++{
++    private readonly IProfileMediaService _media;
++    public PrivateMediaController(IProfileMediaService media) => _media = media;
++
++    [HttpGet("{media_asset_id:guid}/content")]
++    [EnableRateLimiting("media-read")]
++    public async Task<IActionResult> Content([FromRoute(Name = "media_asset_id")] Guid id, CancellationToken ct)
++    {
++        Response.Headers["Cache-Control"] = "private, no-store";
++        Response.Headers["X-Content-Type-Options"] = "nosniff";
++        var content = await _media.ReadAsync(id, ct);
++        // The response owns this handle; disposing here would close the stream before MVC sends it.
++        HttpContext.Response.RegisterForDisposeAsync(content.Handle);
++        return File(content.Handle.Content, content.ContentType, enableRangeProcessing: false);
++    }
++}
+diff --git a/src/Tindy.Api/ExceptionHandlers/GlobalExceptionHandler.cs b/src/Tindy.Api/ExceptionHandlers/GlobalExceptionHandler.cs
+index a29400c..44ebe93 100644
+--- a/src/Tindy.Api/ExceptionHandlers/GlobalExceptionHandler.cs
++++ b/src/Tindy.Api/ExceptionHandlers/GlobalExceptionHandler.cs
+@@ -18,6 +18,8 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
+         // 1. Map Exception -> HTTP Status Code
+         var statusCode = exception switch
+         {
++            MediaRequestException media => media.StatusCode,
++
+             InvalidCredentialsException =>
+                 StatusCodes.Status401Unauthorized,
+ 
+@@ -66,6 +68,10 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
+             Title = statusCode switch
+             {
+                 401 => "Unauthorized",
++                403 => "Forbidden",
++                413 => "Payload Too Large",
++                415 => "Unsupported Media Type",
++                429 => "Too Many Requests",
+                 404 => "Not Found",
+                 409 => "Conflict",
+                 422 => "Unprocessable Entity",
+@@ -82,6 +88,8 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
+         problemDetails.Extensions["error_code"] =
+             exception switch
+             {
++                MediaRequestException media => media.ErrorCode,
++
+                 ProfileValidationException =>
+                     "VALIDATION_FAILED",
+ 
+diff --git a/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs b/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
+index ef3a40f..50de8c9 100644
+--- a/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
++++ b/src/Tindy.Api/Extensions/ServiceCollectionExtensions.cs
+@@ -292,6 +292,27 @@ public static class ServiceCollectionExtensions
+                     QueueLimit = 0, AutoReplenishment = true
+                 }));
+ 
++            // STEP 03: limits are per authenticated user. Single-instance in-memory limits;
++            // move to a distributed store when horizontal scaling is enabled.
++            static string MediaPartitionKey(HttpContext context) =>
++                context.User.FindFirst("sub")?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
++
++            options.AddPolicy("media-avatar", context => RateLimitPartition.GetFixedWindowLimiter(
++                MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
++                {
++                    PermitLimit = 10, Window = TimeSpan.FromHours(1), QueueLimit = 0, AutoReplenishment = true
++                }));
++            options.AddPolicy("media-cover", context => RateLimitPartition.GetFixedWindowLimiter(
++                MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
++                {
++                    PermitLimit = 6, Window = TimeSpan.FromHours(1), QueueLimit = 0, AutoReplenishment = true
++                }));
++            options.AddPolicy("media-read", context => RateLimitPartition.GetFixedWindowLimiter(
++                MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
++                {
++                    PermitLimit = 300, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true
++                }));
++
+             // ===================================
+             // 2. CUSTOM 429 ERROR RESPONSE
+             // ===================================
+@@ -303,12 +324,13 @@ public static class ServiceCollectionExtensions
+                 {
+                     Status = StatusCodes.Status429TooManyRequests,
+                     Title = "Too Many Requests",
+-                    Detail = "Too many login attempts. Please try again later.",
++                    Detail = "Too many requests. Please try again later.",
+                     Instance = httpContext.Request.Path.ToString()
+                 };
+ 
+                 problem.Extensions["error_code"] =
+-                    "AUTH_TOO_MANY_ATTEMPTS";
++                    httpContext.Request.Path.StartsWithSegments("/api/media") || httpContext.Request.Path.StartsWithSegments("/api/me/profile")
++                        ? "MEDIA_RATE_LIMITED" : "AUTH_TOO_MANY_ATTEMPTS";
+ 
+                 problem.Extensions["traceId"] =
+                     httpContext.TraceIdentifier;
+diff --git a/src/Tindy.Api/Extensions/WebApplicationExtensions.cs b/src/Tindy.Api/Extensions/WebApplicationExtensions.cs
+index 550aac2..7ae6444 100644
+--- a/src/Tindy.Api/Extensions/WebApplicationExtensions.cs
++++ b/src/Tindy.Api/Extensions/WebApplicationExtensions.cs
+@@ -38,14 +38,14 @@ public static class WebApplicationExtensions
+         app.UseCors("TindyFrontend");
+ 
+         // ===================================
+-        // 5. RATE LIMITING
++        // 5. AUTHENTICATION (must precede user-partitioned rate limits)
+         // ===================================
+-        app.UseRateLimiter();
++        app.UseAuthentication();
+ 
+         // ===================================
+-        // 6. AUTHENTICATION
++        // 6. RATE LIMITING
+         // ===================================
+-        app.UseAuthentication();
++        app.UseRateLimiter();
+ 
+         // ===================================
+         // 7. AUTHORIZATION
+diff --git a/src/Tindy.Application/DTOs/Profile/MemberProfileResponse.cs b/src/Tindy.Application/DTOs/Profile/MemberProfileResponse.cs
+index 54de3b9..195839c 100644
+--- a/src/Tindy.Application/DTOs/Profile/MemberProfileResponse.cs
++++ b/src/Tindy.Application/DTOs/Profile/MemberProfileResponse.cs
+@@ -25,4 +25,7 @@ public sealed record MemberProfileResponse(
+     string? CoverImageUrl,
+     IReadOnlyList<ProfileSkillSummary> Skills,
+     int ExperiencesCount,
+-    int CertificatesCount);
++    int CertificatesCount,
++    string? AvatarSource = null,
++    Guid? AvatarMediaAssetId = null,
++    Guid? CoverMediaAssetId = null);
+diff --git a/src/Tindy.Application/DTOs/Profile/MyProfileResponse.cs b/src/Tindy.Application/DTOs/Profile/MyProfileResponse.cs
+index d9a2b7d..1e6b245 100644
+--- a/src/Tindy.Application/DTOs/Profile/MyProfileResponse.cs
++++ b/src/Tindy.Application/DTOs/Profile/MyProfileResponse.cs
+@@ -30,4 +30,7 @@ public sealed record MyProfileResponse(
+     string? CoverImageUrl,
+     IReadOnlyList<ProfileSkillSummary> Skills,
+     int ExperiencesCount,
+-    int CertificatesCount);
++    int CertificatesCount,
++    string? AvatarSource = null,
++    Guid? AvatarMediaAssetId = null,
++    Guid? CoverMediaAssetId = null);
+diff --git a/src/Tindy.Application/Exceptions/MediaRequestException.cs b/src/Tindy.Application/Exceptions/MediaRequestException.cs
+new file mode 100644
+index 0000000..7d54548
+--- /dev/null
++++ b/src/Tindy.Application/Exceptions/MediaRequestException.cs
+@@ -0,0 +1,12 @@
++namespace Tindy.Application.Exceptions;
++
++public sealed class MediaRequestException : Exception
++{
++    public MediaRequestException(int statusCode, string errorCode, string message) : base(message)
++    {
++        StatusCode = statusCode;
++        ErrorCode = errorCode;
++    }
++    public int StatusCode { get; }
++    public string ErrorCode { get; }
++}
+diff --git a/src/Tindy.Application/Interfaces/Repositories/IExternalAuthRepository.cs b/src/Tindy.Application/Interfaces/Repositories/IExternalAuthRepository.cs
+index f4e101a..4a30aa9 100644
+--- a/src/Tindy.Application/Interfaces/Repositories/IExternalAuthRepository.cs
++++ b/src/Tindy.Application/Interfaces/Repositories/IExternalAuthRepository.cs
+@@ -20,7 +20,10 @@ public interface IExternalAuthRepository
+ 
+     Task AddExternalAccountAsync(ExternalAuthAccount account, CancellationToken cancellationToken = default);
+ 
+-    /// <summary>Atomically link the external identity and fill an unset profile avatar only.</summary>
++    Task UpdateProviderAvatarAsync(Guid externalAuthAccountId, string providerAvatarUrl,
++        CancellationToken cancellationToken = default);
++
++    /// <summary>Link external identity without changing Profile avatar; remember provider avatar URL only.</summary>
+     Task AddExternalAccountAndFillAvatarAsync(ExternalAuthAccount account, string? avatarUrl,
+         CancellationToken cancellationToken = default);
+ 
+diff --git a/src/Tindy.Application/Interfaces/Services/IProfileMediaService.cs b/src/Tindy.Application/Interfaces/Services/IProfileMediaService.cs
+new file mode 100644
+index 0000000..eaa0d46
+--- /dev/null
++++ b/src/Tindy.Application/Interfaces/Services/IProfileMediaService.cs
+@@ -0,0 +1,15 @@
++using Tindy.Application.Models.Storage;
++
++namespace Tindy.Application.Interfaces.Services;
++
++public interface IProfileMediaService
++{
++    Task<ProfileMediaState> UploadAsync(Guid userId, bool avatar, Stream content, string fileName, long length, CancellationToken ct);
++    Task RemoveAsync(Guid userId, bool avatar, CancellationToken ct);
++    Task<ProfileMediaState> ChooseAvatarAsync(Guid userId, string source, string? provider, CancellationToken ct);
++    Task<PrivateMediaRead> ReadAsync(Guid mediaAssetId, CancellationToken ct);
++}
++
++public sealed record ProfileMediaState(string? AvatarSource, Guid? AvatarMediaAssetId, Guid? CoverMediaAssetId);
++
++public sealed record PrivateMediaRead(string ContentType, StorageReadHandle Handle);
+diff --git a/src/Tindy.Application/Services/ExternalAuthService.cs b/src/Tindy.Application/Services/ExternalAuthService.cs
+index 2536ac8..e0e1792 100644
+--- a/src/Tindy.Application/Services/ExternalAuthService.cs
++++ b/src/Tindy.Application/Services/ExternalAuthService.cs
+@@ -29,6 +29,9 @@ public sealed class ExternalAuthService : IExternalAuthService
+ 
+         if (existing is not null)
+         {
++            // Refresh provider avatar metadata, never mutate the selected profile avatar.
++            if (data.AvatarUrl is not null && existing.ProviderAvatarUrl != data.AvatarUrl)
++                await _repository.UpdateProviderAvatarAsync(existing.ExternalAuthAccountId, data.AvatarUrl, cancellationToken);
+             return ResultFor(existing.User, isNewUser: false);
+         }
+ 
+@@ -63,7 +66,9 @@ public sealed class ExternalAuthService : IExternalAuthService
+                 DisplayName = data.DisplayName,
+                 University = null,
+                 Bio = null,
+-                AvatarUrl = data.AvatarUrl,
++                // OAuth avatar remains default until imported to Tindy private storage.
++                AvatarUrl = null,
++                AvatarSource = "default",
+                 CreatedAt = now
+             },
+             UserRoles = new List<UserRole>
+@@ -80,6 +85,7 @@ public sealed class ExternalAuthService : IExternalAuthService
+                     ProviderUserId = data.ProviderUserId,
+                     ProviderUsername = data.ProviderUsername,
+                     ProviderEmail = data.ProviderEmail,
++                    ProviderAvatarUrl = data.AvatarUrl,
+                     CreatedAt = now
+                 }
+             }
+diff --git a/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs b/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
+index e9cf75a..836562a 100644
+--- a/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
++++ b/src/Tindy.Infrastructure/Extensions/ServiceCollectionExtensions.cs
+@@ -84,6 +84,18 @@ public static class ServicesCollectionExtensions
+         // STEP 02: storage is resolved only when a media feature requests it.
+         services.AddMediaStorage(configuration);
+ 
++        // STEP 03 media; only accessed after authorization and onboarding.
++        services.AddScoped<IProfileMediaService, ProfileMediaService>();
++        services.AddHttpClient("tindy-provider-avatar", client =>
++        {
++            client.Timeout = TimeSpan.FromSeconds(10);
++            client.DefaultRequestHeaders.UserAgent.ParseAdd("TindyMedia/1.0");
++        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
++        {
++            AllowAutoRedirect = false,
++            UseCookies = false,
++            UseProxy = false
++        });
+         return services;
+     }
+ }
+diff --git a/src/Tindy.Infrastructure/Repositories/AccountConnectionsRepository.cs b/src/Tindy.Infrastructure/Repositories/AccountConnectionsRepository.cs
+index feeb576..7a30299 100644
+--- a/src/Tindy.Infrastructure/Repositories/AccountConnectionsRepository.cs
++++ b/src/Tindy.Infrastructure/Repositories/AccountConnectionsRepository.cs
+@@ -52,6 +52,31 @@ public sealed class AccountConnectionsRepository : IAccountConnectionsRepository
+             if (!hasLocal && externalCount <= 1)
+                 throw new ConflictException("Cannot unlink the final sign-in method.");
+ 
++            // Composite FK forbids unlinking the provider while its avatar is selected.
++            // Release the private avatar in the same transaction before unlinking.
++            var profile = await _db.UserProfiles.SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken);
++            if (profile?.AvatarSource == "oauth" && profile.AvatarOAuthProvider == provider)
++            {
++                var formerId = profile.AvatarAssetId;
++                profile.AvatarSource = "default";
++                profile.AvatarAssetId = null;
++                profile.AvatarOAuthProvider = null;
++                profile.AvatarUrl = null;
++                profile.UpdatedAt = DateTime.UtcNow;
++                if (formerId.HasValue)
++                {
++                    var old = await _db.MediaAssets.SingleOrDefaultAsync(x => x.MediaAssetId == formerId.Value && x.OwnerUserId == userId, cancellationToken);
++                    if (old is not null)
++                    {
++                        old.Status = "pending_delete";
++                        old.DeleteRequestedAt = DateTime.UtcNow;
++                        old.NextCleanupAt = DateTime.UtcNow;
++                        old.UpdatedAt = DateTime.UtcNow;
++                    }
++                }
++                await _db.SaveChangesAsync(cancellationToken);
++            }
++
+             var deleted = await _db.ExternalAuthAccounts.Where(x => x.UserId == userId &&
+                 x.Provider == provider).ExecuteDeleteAsync(cancellationToken);
+             if (deleted != 1)
+diff --git a/src/Tindy.Infrastructure/Repositories/ExternalAuthRepository.cs b/src/Tindy.Infrastructure/Repositories/ExternalAuthRepository.cs
+index be16484..33f7f7a 100644
+--- a/src/Tindy.Infrastructure/Repositories/ExternalAuthRepository.cs
++++ b/src/Tindy.Infrastructure/Repositories/ExternalAuthRepository.cs
+@@ -59,24 +59,18 @@ public sealed class ExternalAuthRepository : IExternalAuthRepository
+         await _context.ExternalAuthAccounts.AddAsync(account, cancellationToken);
+     }
+ 
++    public Task UpdateProviderAvatarAsync(Guid externalAuthAccountId, string providerAvatarUrl,
++        CancellationToken cancellationToken = default) =>
++        _context.ExternalAuthAccounts.Where(x => x.ExternalAuthAccountId == externalAuthAccountId)
++            .ExecuteUpdateAsync(update => update.SetProperty(x => x.ProviderAvatarUrl, providerAvatarUrl), cancellationToken);
++
+     public async Task AddExternalAccountAndFillAvatarAsync(ExternalAuthAccount account, string? avatarUrl,
+         CancellationToken cancellationToken = default)
+     {
+-        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
++        // Link must never mutate the currently selected profile avatar.
++        account.ProviderAvatarUrl = avatarUrl;
+         await AddExternalAccountAsync(account, cancellationToken);
+         await SaveChangesAsync(cancellationToken);
+-
+-        if (avatarUrl is not null)
+-        {
+-            DateTime? now = DateTime.UtcNow;
+-            await _context.UserProfiles
+-                .Where(x => x.UserId == account.UserId && x.AvatarUrl == null)
+-                .ExecuteUpdateAsync(setters => setters
+-                    .SetProperty(x => x.AvatarUrl, avatarUrl)
+-                    .SetProperty(x => x.UpdatedAt, now), cancellationToken);
+-        }
+-
+-        await transaction.CommitAsync(cancellationToken);
+     }
+ 
+     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
+diff --git a/src/Tindy.Infrastructure/Repositories/ProfileRepository.cs b/src/Tindy.Infrastructure/Repositories/ProfileRepository.cs
+index c41cee3..031bcb4 100644
+--- a/src/Tindy.Infrastructure/Repositories/ProfileRepository.cs
++++ b/src/Tindy.Infrastructure/Repositories/ProfileRepository.cs
+@@ -54,7 +54,8 @@ public sealed class ProfileRepository : IProfileRepository
+                     .Select(link => new ProfileSkillSummary(link.SkillId, link.Skill.Name))
+                     .ToList(),
+                 _context.ProfileExperiences.Count(experience => experience.UserId == user.UserId),
+-                _context.UserCertificates.Count(certificate => certificate.UserId == user.UserId)))
++                _context.UserCertificates.Count(certificate => certificate.UserId == user.UserId),
++                user.Profile.AvatarSource, user.Profile.AvatarAssetId, user.Profile.CoverAssetId))
+             .SingleOrDefaultAsync(cancellationToken);
+     }
+ 
+@@ -99,7 +100,8 @@ public sealed class ProfileRepository : IProfileRepository
+                     .Select(link => new ProfileSkillSummary(link.SkillId, link.Skill.Name))
+                     .ToList(),
+                 _context.ProfileExperiences.Count(experience => experience.UserId == user.UserId),
+-                _context.UserCertificates.Count(certificate => certificate.UserId == user.UserId)))
++                _context.UserCertificates.Count(certificate => certificate.UserId == user.UserId),
++                user.Profile.AvatarSource, user.Profile.AvatarAssetId, user.Profile.CoverAssetId))
+             .SingleOrDefaultAsync(cancellationToken);
+     }
+ 
+diff --git a/src/Tindy.Infrastructure/Services/ProfileMediaService.cs b/src/Tindy.Infrastructure/Services/ProfileMediaService.cs
+new file mode 100644
+index 0000000..476eaf4
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Services/ProfileMediaService.cs
+@@ -0,0 +1,217 @@
++using System.Collections.Concurrent;
++using System.Net;
++using Microsoft.EntityFrameworkCore;
++using Tindy.Application.Entities;
++using Tindy.Application.Exceptions;
++using Tindy.Application.Interfaces.Services;
++using Tindy.Application.Models.Storage;
++using Tindy.Infrastructure.Persistence;
++using Tindy.Infrastructure.Storage;
++
++namespace Tindy.Infrastructure.Services;
++
++public sealed class ProfileMediaService : IProfileMediaService
++{
++    private const long MaxAvatarBytes = 5_000_000;
++    private const long MaxCoverBytes = 10_000_000;
++    private readonly TindyDbContext _db;
++    private readonly IFileStorageService _storage;
++    private readonly IHttpClientFactory _httpClientFactory;
++    // An instance-scoped throttle for a single backend instance. Distributed upload
++    // concurrency limits must be added before multi-instance production deployment.
++    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> Slots = new();
++
++    public ProfileMediaService(TindyDbContext db, IFileStorageService storage, IHttpClientFactory httpClientFactory)
++    {
++        _db = db;
++        _storage = storage;
++        _httpClientFactory = httpClientFactory;
++    }
++
++    public async Task<ProfileMediaState> UploadAsync(Guid userId, bool avatar, Stream content,
++        string fileName, long length, CancellationToken ct)
++    {
++        if (length <= 0) throw new MediaRequestException(400, "MEDIA_EMPTY", "Image cannot be empty.");
++        var max = avatar ? MaxAvatarBytes : MaxCoverBytes;
++        if (length > max) throw new MediaRequestException(413, "MEDIA_FILE_TOO_LARGE", "Image exceeds the allowed upload size.");
++        return await WithUploadSlot(userId, async () =>
++        {
++            var prepared = await ProfileImageProcessor.ProcessAsync(content, avatar, max, ct);
++            return await StoreAndSelectAsync(userId, avatar, prepared, fileName, null, ct);
++        }, ct);
++    }
++
++    public async Task<ProfileMediaState> ChooseAvatarAsync(Guid userId, string source,
++        string? provider, CancellationToken ct)
++    {
++        if (source == "default" && provider is null)
++        {
++            await RemoveAsync(userId, true, ct);
++            var cover = await _db.UserProfiles.AsNoTracking().Where(x => x.UserId == userId)
++                .Select(x => x.CoverAssetId).SingleAsync(ct);
++            return new ProfileMediaState("default", null, cover);
++        }
++        if (source != "oauth" || provider is not ("google" or "github"))
++            throw new MediaRequestException(400, "MEDIA_INVALID_SOURCE", "Use source 'default' or 'oauth' with provider 'google'/'github'.");
++
++        var providerName = provider == "google" ? "Google" : "GitHub";
++        return await WithUploadSlot(userId, async () =>
++        {
++            var url = await _db.ExternalAuthAccounts.AsNoTracking()
++                .Where(x => x.UserId == userId && x.Provider == providerName)
++                .Select(x => x.ProviderAvatarUrl).SingleOrDefaultAsync(ct);
++            if (url is null) throw new MediaRequestException(409, "MEDIA_OAUTH_AVATAR_UNAVAILABLE", "Linked provider avatar is unavailable.");
++            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || !IsTrustedAvatarHost(uri, providerName))
++                throw new MediaRequestException(409, "MEDIA_OAUTH_AVATAR_UNAVAILABLE", "Provider avatar URL is not trusted.");
++
++            var client = _httpClientFactory.CreateClient("tindy-provider-avatar");
++            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
++            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
++            if (response.StatusCode != HttpStatusCode.OK || response.Content.Headers.ContentLength > MaxAvatarBytes)
++                throw new MediaRequestException(409, "MEDIA_OAUTH_AVATAR_UNAVAILABLE", "Provider avatar cannot be retrieved.");
++            await using var stream = await response.Content.ReadAsStreamAsync(ct);
++            var prepared = await ProfileImageProcessor.ProcessAsync(stream, true, MaxAvatarBytes, ct);
++            return await StoreAndSelectAsync(userId, true, prepared, "provider-avatar.webp", providerName, ct);
++        }, ct);
++    }
++
++    private static bool IsTrustedAvatarHost(Uri uri, string provider) =>
++        uri.Scheme == Uri.UriSchemeHttps && uri.IsDefaultPort && string.IsNullOrEmpty(uri.UserInfo) &&
++        string.IsNullOrEmpty(uri.Fragment) &&
++        (provider == "GitHub" ? uri.Host.Equals("avatars.githubusercontent.com", StringComparison.OrdinalIgnoreCase)
++            : uri.Host.Equals("lh3.googleusercontent.com", StringComparison.OrdinalIgnoreCase));
++
++    private static async Task<T> WithUploadSlot<T>(Guid ownerId, Func<Task<T>> operation, CancellationToken ct)
++    {
++        var gate = Slots.GetOrAdd(ownerId, _ => new SemaphoreSlim(2, 2));
++        if (!await gate.WaitAsync(0, ct)) throw new MediaRequestException(429, "MEDIA_CONCURRENT_LIMIT", "Maximum two concurrent uploads per user.");
++        try { return await operation(); }
++        finally { gate.Release(); }
++    }
++
++    private async Task<ProfileMediaState> StoreAndSelectAsync(Guid userId, bool avatar,
++        ProfileImageProcessor.Result image, string fileName, string? provider, CancellationToken ct)
++    {
++        var limit = avatar ? MaxAvatarBytes : MaxCoverBytes;
++        if (image.Bytes.Length == 0 || image.Bytes.Length > limit)
++            throw new MediaRequestException(413, "MEDIA_FILE_TOO_LARGE", "Processed image exceeds the storage limit.");
++        await using var input = new MemoryStream(image.Bytes, writable: false);
++        var stored = await _storage.SaveAsync(new StorageSaveRequest(userId,
++            avatar ? MediaStorageKind.Avatar : MediaStorageKind.Cover, input), ct);
++        var committed = false;
++        try
++        {
++            await using var tx = await _db.Database.BeginTransactionAsync(ct);
++            // Serialize replaces, deletes and OAuth avatar-source changes for this owner.
++            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM users WHERE user_id = {userId} FOR UPDATE", ct);
++            var profile = await _db.UserProfiles.SingleOrDefaultAsync(x => x.UserId == userId, ct)
++                ?? throw new MediaRequestException(404, "MEDIA_PROFILE_NOT_FOUND", "Profile not found.");
++            if (!await _db.Users.AnyAsync(x => x.UserId == userId && x.DeletedAt == null &&
++                x.Status == "active" && x.IsOnboardingCompleted, ct))
++                throw new MediaRequestException(403, "MEDIA_ACCESS_DENIED", "Profile is not available.");
++            if (provider is not null && !await _db.ExternalAuthAccounts.AnyAsync(x => x.UserId == userId && x.Provider == provider, ct))
++                throw new MediaRequestException(409, "MEDIA_OAUTH_UNLINKED", "The selected provider is no longer linked.");
++
++            var now = DateTime.UtcNow;
++            var asset = new MediaAsset
++            {
++                MediaAssetId = Guid.NewGuid(), OwnerUserId = userId, Purpose = avatar ? "avatar" : "cover",
++                StorageProvider = stored.StorageProvider, StorageContainer = stored.StorageContainer,
++                StorageKey = stored.StorageKey, ObjectEtag = stored.ObjectETag, ObjectVersionId = stored.ObjectVersionId,
++                OriginalFileName = null, // Do not persist untrusted client-supplied filenames in Profile media.
++                FileSizeBytes = stored.FileSizeBytes, ContentType = stored.ContentType,
++                Width = image.Width, Height = image.Height, ReservedBytes = 0,
++                Status = "active", ScanStatus = "not_required", CreatedAt = now, ActivatedAt = now
++            };
++            _db.MediaAssets.Add(asset);
++            var oldId = avatar ? profile.AvatarAssetId : profile.CoverAssetId;
++            if (avatar)
++            {
++                profile.AvatarAssetId = asset.MediaAssetId;
++                profile.AvatarSource = provider is null ? "uploaded" : "oauth";
++                profile.AvatarOAuthProvider = provider;
++                profile.AvatarUrl = null;
++            }
++            else
++            {
++                profile.CoverAssetId = asset.MediaAssetId;
++                profile.CoverImageUrl = null;
++            }
++            profile.UpdatedAt = now;
++            if (oldId.HasValue) await MarkOldAsync(userId, oldId.Value, now, ct);
++            await _db.SaveChangesAsync(ct);
++            await tx.CommitAsync(ct);
++            committed = true;
++            return new ProfileMediaState(profile.AvatarSource, profile.AvatarAssetId, profile.CoverAssetId);
++        }
++        catch
++        {
++            // Never delete after a successfully committed reference swap.
++            // Step 05 adds durable orphan reconciliation for deletion failures.
++            if (!committed)
++            {
++                try
++                {
++                    using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(10));
++                    await _storage.DeleteAsync(stored.StorageKey, stored.ObjectVersionId, cleanup.Token);
++                }
++                catch { /* Preserve original exception; STEP 05 reconciles storage orphans. */ }
++            }
++            throw;
++        }
++    }
++
++    public async Task RemoveAsync(Guid userId, bool avatar, CancellationToken ct)
++    {
++        await using var tx = await _db.Database.BeginTransactionAsync(ct);
++        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM users WHERE user_id = {userId} FOR UPDATE", ct);
++        var profile = await _db.UserProfiles.SingleOrDefaultAsync(x => x.UserId == userId, ct)
++            ?? throw new MediaRequestException(404, "MEDIA_PROFILE_NOT_FOUND", "Profile not found.");
++        var oldId = avatar ? profile.AvatarAssetId : profile.CoverAssetId;
++        if (avatar)
++        {
++            profile.AvatarSource = "default";
++            profile.AvatarAssetId = null;
++            profile.AvatarOAuthProvider = null;
++            profile.AvatarUrl = null;
++        }
++        else
++        {
++            profile.CoverAssetId = null;
++            profile.CoverImageUrl = null;
++        }
++        profile.UpdatedAt = DateTime.UtcNow;
++        if (oldId.HasValue) await MarkOldAsync(userId, oldId.Value, DateTime.UtcNow, ct);
++        await _db.SaveChangesAsync(ct);
++        await tx.CommitAsync(ct);
++    }
++
++    private async Task MarkOldAsync(Guid ownerId, Guid mediaId, DateTime now, CancellationToken ct)
++    {
++        var old = await _db.MediaAssets.SingleOrDefaultAsync(x => x.MediaAssetId == mediaId && x.OwnerUserId == ownerId, ct);
++        if (old is null) return;
++        old.Status = "pending_delete";
++        old.DeleteRequestedAt = now;
++        old.NextCleanupAt = now;
++        old.UpdatedAt = now;
++    }
++
++    public async Task<PrivateMediaRead> ReadAsync(Guid mediaAssetId, CancellationToken ct)
++    {
++        // Never serve by asset ID alone: it must be an active, currently referenced
++        // avatar or cover of an active, onboarded user. Certificate permissions are STEP 04.
++        var asset = await _db.MediaAssets.AsNoTracking()
++            .Where(a => a.MediaAssetId == mediaAssetId && a.Status == "active" &&
++                (a.Purpose == "avatar" || a.Purpose == "cover") &&
++                _db.Users.Any(u => u.UserId == a.OwnerUserId && u.Status == "active" &&
++                    u.DeletedAt == null && u.IsOnboardingCompleted &&
++                    u.Profile != null && (a.Purpose == "avatar" ?
++                        u.Profile.AvatarAssetId == a.MediaAssetId : u.Profile.CoverAssetId == a.MediaAssetId)))
++            .Select(a => new { a.StorageKey, a.ObjectVersionId, a.ContentType })
++            .SingleOrDefaultAsync(ct);
++        if (asset is null || asset.ContentType != "image/webp")
++            throw new MediaRequestException(404, "MEDIA_NOT_FOUND", "Media not found.");
++        try { return new PrivateMediaRead("image/webp", await _storage.OpenReadAsync(asset.StorageKey, asset.ObjectVersionId, ct)); }
++        catch (FileNotFoundException) { throw new MediaRequestException(404, "MEDIA_NOT_FOUND", "Media not found."); }
++    }
++}
+diff --git a/src/Tindy.Infrastructure/Storage/ProfileImageProcessor.cs b/src/Tindy.Infrastructure/Storage/ProfileImageProcessor.cs
+new file mode 100644
+index 0000000..bca9da7
+--- /dev/null
++++ b/src/Tindy.Infrastructure/Storage/ProfileImageProcessor.cs
+@@ -0,0 +1,81 @@
++using SkiaSharp;
++using Tindy.Application.Exceptions;
++
++namespace Tindy.Infrastructure.Storage;
++
++/// <summary>Only JPEG/PNG/WebP; decode with pixel guard, crop and re-encode without source metadata.</summary>
++public static class ProfileImageProcessor
++{
++    public sealed record Result(byte[] Bytes, int Width, int Height);
++    private const int MaxPixels = 20_000_000;
++
++    public static async Task<Result> ProcessAsync(Stream input, bool avatar, long maximumInputBytes, CancellationToken ct)
++    {
++        using var received = new MemoryStream();
++        var buffer = new byte[64 * 1024];
++        while (true)
++        {
++            var read = await input.ReadAsync(buffer, ct);
++            if (read == 0) break;
++            if (received.Length > maximumInputBytes - read)
++                throw new MediaRequestException(413, "MEDIA_FILE_TOO_LARGE", "Image exceeds the allowed upload size.");
++            await received.WriteAsync(buffer.AsMemory(0, read), ct);
++        }
++        var bytes = received.ToArray();
++        if (bytes.Length == 0) throw new MediaRequestException(400, "MEDIA_EMPTY", "Image cannot be empty.");
++
++        // The client-provided Content-Type and extension are not trusted.
++        var jpeg = bytes.Length >= 3 && bytes[0] == 0xff && bytes[1] == 0xd8 && bytes[2] == 0xff;
++        var png = bytes.Length >= 8 && bytes.AsSpan(0, 8).SequenceEqual(new byte[] { 137,80,78,71,13,10,26,10 });
++        var webp = bytes.Length >= 12 && bytes.AsSpan(0, 4).SequenceEqual("RIFF"u8) && bytes.AsSpan(8, 4).SequenceEqual("WEBP"u8);
++        if (!jpeg && !png && !webp)
++            throw new MediaRequestException(415, "MEDIA_UNSUPPORTED_TYPE", "Only JPEG, PNG and WebP images are supported.");
++
++        try
++        {
++            using var data = SKData.CreateCopy(bytes);
++            using var codec = SKCodec.Create(data);
++            if (codec is null) throw new InvalidDataException("Invalid image data.");
++            if (codec.EncodedFormat is not (SKEncodedImageFormat.Jpeg or SKEncodedImageFormat.Png or SKEncodedImageFormat.Webp))
++                throw new MediaRequestException(415, "MEDIA_UNSUPPORTED_TYPE", "Unsupported image codec.");
++            var info = codec.Info;
++            if (info.Width <= 0 || info.Height <= 0 || (long)info.Width * info.Height > MaxPixels)
++                throw new MediaRequestException(400, "MEDIA_DIMENSIONS_INVALID", "Image dimensions are not allowed.");
++
++            using var source = SKBitmap.Decode(codec);
++            if (source is null) throw new InvalidDataException("Unable to decode image.");
++            int width = avatar ? 512 : 1500;
++            int height = avatar ? 512 : 500;
++            using var surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));
++            if (surface is null) throw new InvalidOperationException("Unable to create image surface.");
++            surface.Canvas.Clear(SKColors.Transparent);
++            // Center crop: frontend may present a crop UI before upload.
++            var sourceAspect = (float)source.Width / source.Height;
++            var targetAspect = (float)width / height;
++            SKRect crop;
++            if (sourceAspect > targetAspect)
++            {
++                var croppedWidth = source.Height * targetAspect;
++                crop = new SKRect((source.Width - croppedWidth) / 2, 0, (source.Width + croppedWidth) / 2, source.Height);
++            }
++            else
++            {
++                var croppedHeight = source.Width / targetAspect;
++                crop = new SKRect(0, (source.Height - croppedHeight) / 2, source.Width, (source.Height + croppedHeight) / 2);
++            }
++            using var paint = new SKPaint { IsAntialias = true };
++            surface.Canvas.DrawBitmap(source, crop, new SKRect(0, 0, width, height),
++                new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None), paint);
++            surface.Canvas.Flush();
++            using var snapshot = surface.Snapshot();
++            using var encoded = snapshot.Encode(SKEncodedImageFormat.Webp, 85);
++            if (encoded is null || encoded.Size == 0) throw new InvalidOperationException("WebP encoding failed.");
++            return new Result(encoded.ToArray(), width, height);
++        }
++        catch (MediaRequestException) { throw; }
++        catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
++        {
++            throw new MediaRequestException(400, "MEDIA_IMAGE_INVALID", "Image is corrupted or cannot be decoded.");
++        }
++    }
++}
+diff --git a/src/Tindy.Infrastructure/Tindy.Infrastructure.csproj b/src/Tindy.Infrastructure/Tindy.Infrastructure.csproj
+index 7d5257c..56f4e78 100644
+--- a/src/Tindy.Infrastructure/Tindy.Infrastructure.csproj
++++ b/src/Tindy.Infrastructure/Tindy.Infrastructure.csproj
+@@ -12,6 +12,9 @@
+ 
+   <ItemGroup>
+     <PackageReference Include="AWSSDK.S3" Version="4.0.104.5" />
++    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.8" />
++    <PackageReference Include="SkiaSharp" Version="3.119.2" />
++    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.2" />
+     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.8" />
+     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />
+     <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
+diff --git a/tests/Tindy.Tests/Integration/ProfileMediaServiceIntegrationTests.cs b/tests/Tindy.Tests/Integration/ProfileMediaServiceIntegrationTests.cs
+new file mode 100644
+index 0000000..b95c0b3
+--- /dev/null
++++ b/tests/Tindy.Tests/Integration/ProfileMediaServiceIntegrationTests.cs
+@@ -0,0 +1,85 @@
++using Microsoft.EntityFrameworkCore;
++using Testcontainers.PostgreSql;
++using Tindy.Application.Exceptions;
++using Tindy.Infrastructure.Persistence;
++using Tindy.Infrastructure.Services;
++using Tindy.Infrastructure.Storage;
++using SkiaSharp;
++using Xunit;
++
++namespace Tindy.Tests.Integration;
++
++public sealed class ProfileMediaServiceIntegrationTests
++{
++    private sealed class TestHttpClientFactory : IHttpClientFactory
++    {
++        public HttpClient CreateClient(string name) => new();
++    }
++
++    [Fact]
++    public async Task Upload_Replace_Delete_ArePrivateAndLeaveOldAssetForCleanup()
++    {
++        await using var postgres = new PostgreSqlBuilder()
++            .WithImage("postgres:16-alpine")
++            .WithDatabase("tindy_profile_media_test")
++            .WithUsername("postgres")
++            .WithPassword("postgres_test_only")
++            .Build();
++        await postgres.StartAsync();
++        var options = new DbContextOptionsBuilder<TindyDbContext>()
++            .UseNpgsql(postgres.GetConnectionString()).Options;
++        await using var db = new TindyDbContext(options);
++        await db.Database.MigrateAsync();
++
++        var owner = Guid.NewGuid();
++        var now = DateTime.UtcNow;
++        await db.Database.ExecuteSqlInterpolatedAsync(
++            $"INSERT INTO users (user_id, status, is_onboarding_completed, created_at) VALUES ({owner}, {"active"}, {true}, {now})");
++        await db.Database.ExecuteSqlInterpolatedAsync(
++            $"INSERT INTO user_profiles (user_id, display_name, created_at) VALUES ({owner}, {"Test Owner"}, {now})");
++
++        var root = Path.Combine(Path.GetTempPath(), "tindy-step03-" + Guid.NewGuid().ToString("N"));
++        try
++        {
++            var storage = new LocalFileStorageService(root, Directory.GetCurrentDirectory());
++            var service = new ProfileMediaService(db, storage, new TestHttpClientFactory());
++            using var bitmap = new SKBitmap(640, 480);
++            bitmap.Erase(SKColors.CornflowerBlue);
++            using var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 95);
++            var bytes = encoded.ToArray();
++
++            async Task<Guid> Upload()
++            {
++                await using var input = new MemoryStream(bytes);
++                return (await service.UploadAsync(owner, true, input, "avatar.png", bytes.Length, CancellationToken.None))
++                    .AvatarMediaAssetId!.Value;
++            }
++
++            var first = await Upload();
++            await using (var current = (await service.ReadAsync(first, CancellationToken.None)).Handle)
++            {
++                Assert.True(current.Content.CanRead);
++                Assert.True(current.Content.Length > 0);
++            }
++            var second = await Upload();
++            Assert.NotEqual(first, second);
++            Assert.Equal("pending_delete", (await db.MediaAssets.AsNoTracking()
++                .SingleAsync(a => a.MediaAssetId == first)).Status);
++            var firstNotFound = await Assert.ThrowsAsync<MediaRequestException>(() =>
++                service.ReadAsync(first, CancellationToken.None));
++            Assert.Equal(404, firstNotFound.StatusCode);
++
++            await service.RemoveAsync(owner, true, CancellationToken.None);
++            Assert.Equal("pending_delete", (await db.MediaAssets.AsNoTracking()
++                .SingleAsync(a => a.MediaAssetId == second)).Status);
++            var profile = await db.UserProfiles.AsNoTracking().SingleAsync(x => x.UserId == owner);
++            Assert.Null(profile.AvatarAssetId);
++            Assert.Equal("default", profile.AvatarSource);
++            Assert.Null(profile.AvatarUrl);
++        }
++        finally
++        {
++            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
++        }
++    }
++}
+diff --git a/tests/Tindy.Tests/Media/ProfileImageProcessorTests.cs b/tests/Tindy.Tests/Media/ProfileImageProcessorTests.cs
+new file mode 100644
+index 0000000..a57d6da
+--- /dev/null
++++ b/tests/Tindy.Tests/Media/ProfileImageProcessorTests.cs
+@@ -0,0 +1,61 @@
++using SkiaSharp;
++using Tindy.Application.Exceptions;
++using Tindy.Infrastructure.Storage;
++using Xunit;
++
++namespace Tindy.Tests.Media;
++
++public sealed class ProfileImageProcessorTests
++{
++    private static byte[] SampleImage(SKEncodedImageFormat format)
++    {
++        using var bitmap = new SKBitmap(640, 400);
++        bitmap.Erase(SKColors.CornflowerBlue);
++        using var data = bitmap.Encode(format, 90);
++        return data.ToArray();
++    }
++
++    [Theory]
++    [InlineData(SKEncodedImageFormat.Jpeg)]
++    [InlineData(SKEncodedImageFormat.Png)]
++    [InlineData(SKEncodedImageFormat.Webp)]
++    public async Task Avatar_JpegPngWebp_BecomesSafeWebp(SKEncodedImageFormat format)
++    {
++        await using var input = new MemoryStream(SampleImage(format));
++        var result = await ProfileImageProcessor.ProcessAsync(input, true, 5_000_000, CancellationToken.None);
++        Assert.Equal(512, result.Width);
++        Assert.Equal(512, result.Height);
++        Assert.Equal("RIFF", System.Text.Encoding.ASCII.GetString(result.Bytes, 0, 4));
++        Assert.Equal("WEBP", System.Text.Encoding.ASCII.GetString(result.Bytes, 8, 4));
++        using var decoded = SKBitmap.Decode(result.Bytes);
++        Assert.Equal(512, decoded.Width);
++        Assert.Equal(512, decoded.Height);
++    }
++
++    [Fact]
++    public async Task Cover_NormalizesToThreeToOne()
++    {
++        await using var input = new MemoryStream(SampleImage(SKEncodedImageFormat.Png));
++        var result = await ProfileImageProcessor.ProcessAsync(input, false, 10_000_000, CancellationToken.None);
++        Assert.Equal(1500, result.Width);
++        Assert.Equal(500, result.Height);
++    }
++
++    [Fact]
++    public async Task FakeImage_IsRejected()
++    {
++        await using var input = new MemoryStream("Not really an image"u8.ToArray());
++        var error = await Assert.ThrowsAsync<MediaRequestException>(() =>
++            ProfileImageProcessor.ProcessAsync(input, true, 5_000_000, CancellationToken.None));
++        Assert.Equal(415, error.StatusCode);
++    }
++
++    [Fact]
++    public async Task HugeInput_IsRejectedBeforeDecoding()
++    {
++        await using var input = new MemoryStream(new byte[5_000_001]);
++        var error = await Assert.ThrowsAsync<MediaRequestException>(() =>
++            ProfileImageProcessor.ProcessAsync(input, true, 5_000_000, CancellationToken.None));
++        Assert.Equal(413, error.StatusCode);
++    }
++}
+diff --git a/tests/Tindy.Tests/Security/ExternalAuthServiceTests.cs b/tests/Tindy.Tests/Security/ExternalAuthServiceTests.cs
+index 34b80a3..c72fd31 100644
+--- a/tests/Tindy.Tests/Security/ExternalAuthServiceTests.cs
++++ b/tests/Tindy.Tests/Security/ExternalAuthServiceTests.cs
+@@ -276,7 +276,9 @@ public sealed class ExternalAuthServiceTests
+         var repo = new InMemoryExternalAuthRepository();
+         await new ExternalAuthService(repo).ResolveSignInAsync(
+             Identity(provider) with { AvatarUrl = avatar });
+-        Assert.Equal(avatar, Assert.Single(repo.Users).Profile!.AvatarUrl);
++        Assert.Null(Assert.Single(repo.Users).Profile!.AvatarUrl);
++        Assert.Equal("default", Assert.Single(repo.Users).Profile!.AvatarSource);
++        Assert.Equal(avatar, Assert.Single(repo.Users).ExternalAuthAccounts.Single().ProviderAvatarUrl);
+     }
+ 
+     [Theory]
+@@ -294,7 +296,7 @@ public sealed class ExternalAuthServiceTests
+     [Theory]
+     [InlineData("Google")]
+     [InlineData("GitHub")]
+-    public async Task LinkingProvider_FillsOnlyEmptyAvatar(string provider)
++    public async Task LinkingProvider_DoesNotAlterAvatar(string provider)
+     {
+         var repo = new InMemoryExternalAuthRepository();
+         var existingProvider = provider == "Google" ? "GitHub" : "Google";
+@@ -304,7 +306,8 @@ public sealed class ExternalAuthServiceTests
+         var service = new ExternalAuthService(repo);
+         Assert.True(await service.LinkAsync(user.UserId, Identity(provider, provider + "-new",
+             email: null, verified: false) with { AvatarUrl = "https://avatars.githubusercontent.com/u/12" }));
+-        Assert.Equal("https://avatars.githubusercontent.com/u/12", profile.AvatarUrl);
++        Assert.Null(profile.AvatarUrl);
++        Assert.Equal("https://avatars.githubusercontent.com/u/12", repo.Users[0].ExternalAuthAccounts.Single(x => x.Provider == provider).ProviderAvatarUrl);
+         Assert.Equal(2, repo.SaveCount);
+     }
+ 
+@@ -323,7 +326,7 @@ public sealed class ExternalAuthServiceTests
+         {
+             AvatarUrl = "https://example.com/github.png"
+         });
+-        Assert.Equal("https://example.com/original.png", Assert.Single(repo.Users).Profile!.AvatarUrl);
++        Assert.Null(Assert.Single(repo.Users).Profile!.AvatarUrl);
+     }
+ 
+     [Fact]
+@@ -391,13 +394,20 @@ public sealed class ExternalAuthServiceTests
+             return Task.CompletedTask;
+         }
+ 
++        public Task UpdateProviderAvatarAsync(Guid externalAuthAccountId, string providerAvatarUrl,
++            CancellationToken cancellationToken = default)
++        {
++            var account = Users.SelectMany(x => x.ExternalAuthAccounts)
++                .Single(x => x.ExternalAuthAccountId == externalAuthAccountId);
++            account.ProviderAvatarUrl = providerAvatarUrl;
++            return Task.CompletedTask;
++        }
++
+         public async Task AddExternalAccountAndFillAvatarAsync(ExternalAuthAccount account,
+             string? avatarUrl, CancellationToken cancellationToken = default)
+         {
+             await AddExternalAccountAsync(account, cancellationToken);
+-            var profile = Users.Single(x => x.UserId == account.UserId).Profile!;
+-            if (profile.AvatarUrl is null && avatarUrl is not null)
+-                profile.AvatarUrl = avatarUrl;
++            account.ProviderAvatarUrl = avatarUrl;
+             await SaveChangesAsync(cancellationToken);
+         }
+ 
+diff --git a/tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs b/tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs
+index c036bf1..a4848a1 100644
+--- a/tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs
++++ b/tests/Tindy.Tests/Security/OAuthLoginFlowServiceTests.cs
+@@ -238,6 +238,8 @@ public sealed class OAuthLoginFlowServiceTests
+             throw new NotImplementedException();
+         public Task AddExternalAccountAsync(ExternalAuthAccount account,
+             CancellationToken ct = default) => throw new NotImplementedException();
++        public Task UpdateProviderAvatarAsync(Guid externalAuthAccountId, string providerAvatarUrl,
++            CancellationToken ct = default) => throw new NotImplementedException();
+         public Task AddExternalAccountAndFillAvatarAsync(ExternalAuthAccount account,
+             string? avatarUrl, CancellationToken ct = default) => throw new NotImplementedException();
+         public Task SaveChangesAsync(CancellationToken ct = default) =>

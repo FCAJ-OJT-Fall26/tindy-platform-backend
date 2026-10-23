@@ -38,14 +38,14 @@ public static class WebApplicationExtensions
         app.UseCors("TindyFrontend");
 
         // ===================================
-        // 5. RATE LIMITING
-        // ===================================
-        app.UseRateLimiter();
-
-        // ===================================
-        // 6. AUTHENTICATION
+        // 5. AUTHENTICATION (must precede user-partitioned rate limits)
         // ===================================
         app.UseAuthentication();
+
+        // ===================================
+        // 6. RATE LIMITING
+        // ===================================
+        app.UseRateLimiter();
 
         // ===================================
         // 7. AUTHORIZATION

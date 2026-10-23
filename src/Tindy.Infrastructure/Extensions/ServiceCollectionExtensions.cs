@@ -84,6 +84,18 @@ public static class ServicesCollectionExtensions
         // STEP 02: storage is resolved only when a media feature requests it.
         services.AddMediaStorage(configuration);
 
+        // STEP 03 media; only accessed after authorization and onboarding.
+        services.AddScoped<IProfileMediaService, ProfileMediaService>();
+        services.AddHttpClient("tindy-provider-avatar", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("TindyMedia/1.0");
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AllowAutoRedirect = false,
+            UseCookies = false,
+            UseProxy = false
+        });
         return services;
     }
 }

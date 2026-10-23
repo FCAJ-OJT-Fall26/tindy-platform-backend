@@ -238,6 +238,8 @@ public sealed class OAuthLoginFlowServiceTests
             throw new NotImplementedException();
         public Task AddExternalAccountAsync(ExternalAuthAccount account,
             CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateProviderAvatarAsync(Guid externalAuthAccountId, string providerAvatarUrl,
+            CancellationToken ct = default) => throw new NotImplementedException();
         public Task AddExternalAccountAndFillAvatarAsync(ExternalAuthAccount account,
             string? avatarUrl, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SaveChangesAsync(CancellationToken ct = default) =>
