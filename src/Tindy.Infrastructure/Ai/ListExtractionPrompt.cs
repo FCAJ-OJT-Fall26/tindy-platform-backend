@@ -70,7 +70,7 @@ internal static class ListExtractionPrompt
         {
             ["employer_name"] = Text(255, "Exact employer/organization name visible for this entry, otherwise null."),
             ["project_name"] = Text(150, "Null for ordinary employment. Only an explicitly named PROJECT, never the employer name."),
-            ["role_title"] = Text(150), ["description"] = Text(1200),
+            ["role_title"] = Text(150, "Copy the role title EXACTLY as printed, preserving its language and words; do not translate, shorten or expand it."), ["description"] = Text(1200),
             ["repo_url"] = Text(1000),
             ["start_date_source"] = SourceDate("Exact visible start date, e.g. 01/2021. Do not normalize."),
             ["end_date_source"] = SourceDate("Exact visible end date or ongoing label, e.g. 12/2020 or Nay. Do not normalize."),

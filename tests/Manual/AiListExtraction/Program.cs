@@ -86,6 +86,8 @@ for (var run = 1; run <= runs; run++)
             run, passed = failures.Count == 0, skill_count = result.Profile.SkillIds.Count,
             skill_names = result.Profile.SkillIds.Select(id => catalog[id]).ToArray(),
             experience_count = result.Experiences.Count, certificate_count = result.Certificates.Count,
+            experience_review = result.Experiences.Select(item => new { item.RoleTitle, item.StartDate, item.EndDate, item.IsOngoing,
+                has_project_name = item.ProjectName is not null, skill_names = item.SkillIds.Select(id => catalog[id]).ToArray() }).ToArray(),
             warnings = result.Warnings.Select(warning => new { warning.Field, warning.Code }).ToArray(),
             diagnostics = result.Diagnostics, failures
         };

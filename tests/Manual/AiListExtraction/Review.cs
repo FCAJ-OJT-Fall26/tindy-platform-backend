@@ -27,7 +27,7 @@ internal static class Review
             if (matches.Length != 1) { failures.Add("Missing or duplicate employment entry: " + item.Employer); continue; }
             var value = matches[0];
             if (!Equal(value.RoleTitle, item.Role) || value.StartDate != item.StartDate || value.EndDate != item.EndDate || value.IsOngoing != item.IsOngoing)
-                failures.Add("Employment role/date mismatch: " + item.Employer);
+                failures.Add($"Employment role/date mismatch: {item.Employer}; role='{value.RoleTitle}', start='{value.StartDate}', end='{value.EndDate}', ongoing={value.IsOngoing}; expected role='{item.Role}', start='{item.StartDate}', end='{item.EndDate}', ongoing={item.IsOngoing}");
             if (value.ProjectName is not null) failures.Add("Invented project name for employment entry: " + item.Employer);
         }
         if (draft.Certificates.Count != expected.Certificates.Length) failures.Add("Certificate count mismatch.");
