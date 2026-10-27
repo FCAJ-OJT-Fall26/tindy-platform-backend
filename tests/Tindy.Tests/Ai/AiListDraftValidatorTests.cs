@@ -8,16 +8,17 @@ namespace Tindy.Tests.Ai;
 public sealed class AiListDraftValidatorTests
 {
     private static readonly Guid Id = Guid.Parse("11111111-1111-4111-8111-111111111111");
+    private static readonly AiRoleReferenceMap Roles = new([new(Guid.NewGuid(), "AI Engineer")]);
     private static readonly AiSkillReferenceMap Map = new([new(Id, "Python")]);
 
     [Fact]
     public void MapsProfileAndExperienceSkillsAndPreservesPublicShape()
     {
         var output = AiListDraftValidator.Parse("""
-        {"skill_ids":{"s1":"Python"},"experiences":[{"role_title":"AI Engineer","description":"Used Python","start_date_source":"01/2021","end_date_source":"Nay","skill_ids":{"s1":"Python"}}],
+        {"skill_ids":{"s1":"Python"},"experiences":[{"role_key":"r1","role_title_source":"AI Engineer","description":"Used Python","start_date_source":"01/2021","end_date_source":"Nay","skill_ids":{"s1":"Python"}}],
         "certificates":[{"title":"ML Certificate","issued_at_source":null}],
         "warnings":[{"field":"skill_ids","code":"UNMATCHED_CATALOG","message":"SQL has no exact match."}]}
-        """, Map);
+        """, Map, Roles);
         Assert.Equal(Id, Assert.Single(output.Profile.SkillIds));
         Assert.Equal(Id, Assert.Single(Assert.Single(output.Experiences).SkillIds));
         Assert.Null(output.Profile.DisplayName);
@@ -39,7 +40,7 @@ public sealed class AiListDraftValidatorTests
     [InlineData("{\"skill_ids\":[]")]
     public void RejectsInvalidListsAndKeepsOriginalRawOutput(string json)
     {
-        var error = Assert.Throws<AiException>(() => AiListDraftValidator.Parse(json, Map));
+        var error = Assert.Throws<AiException>(() => AiListDraftValidator.Parse(json, Map, Roles));
         Assert.Equal(AiFailure.InvalidOutput, error.Failure);
         Assert.Equal(json, error.RawOutput);
     }
@@ -49,7 +50,7 @@ public sealed class AiListDraftValidatorTests
     {
         var map = new AiSkillReferenceMap(Enumerable.Range(0, 31).Select(i => new AiCatalogItem(Guid.NewGuid(), $"Skill {i}")));
         var json = JsonSerializer.Serialize(new { skill_ids = map.References.ToDictionary(x => x.Key, x => x.Name), experiences = Array.Empty<object>(), certificates = Array.Empty<object>(), warnings = Array.Empty<object>() });
-        Assert.Throws<AiException>(() => AiListDraftValidator.Parse(json, map));
+        Assert.Throws<AiException>(() => AiListDraftValidator.Parse(json, map, Roles));
     }
 
     [Fact]
@@ -58,7 +59,7 @@ public sealed class AiListDraftValidatorTests
         var sql = new AiCatalogItem(Guid.Parse("11111111-1111-4111-8111-111111111111"), "SQL");
         var postgres = new AiCatalogItem(Guid.Parse("22222222-2222-4222-8222-222222222222"), "PostgreSQL");
         var map = new AiSkillReferenceMap([postgres, sql]);
-        var draft = AiListDraftValidator.Parse("""{"skill_ids":{"s1":"SQL"},"experiences":[],"certificates":[],"warnings":[]}""", map);
+        var draft = AiListDraftValidator.Parse("""{"skill_ids":{"s1":"SQL"},"experiences":[],"certificates":[],"warnings":[]}""", map, Roles);
         Assert.Equal(sql.Id, Assert.Single(draft.Profile.SkillIds));
         Assert.DoesNotContain(postgres.Id, draft.Profile.SkillIds);
     }
@@ -66,8 +67,33 @@ public sealed class AiListDraftValidatorTests
     [Fact]
     public void EmptyEvidenceProducesAnInsufficientEvidenceWarning()
     {
-        var draft = AiListDraftValidator.Parse("""{"skill_ids":{},"experiences":[],"certificates":[],"warnings":[]}""", Map);
+        var draft = AiListDraftValidator.Parse("""{"skill_ids":{},"experiences":[],"certificates":[],"warnings":[]}""", Map, Roles);
         Assert.Empty(draft.Profile.SkillIds);
         Assert.Contains(draft.Warnings, warning => warning.Code == "INSUFFICIENT_EVIDENCE");
+    }
+
+    [Theory]
+    [InlineData("{\"role_title\":\"Invented free-text role\",\"skill_ids\":{}}")]
+    [InlineData("{\"role_key\":\"r999\",\"role_title_source\":\"AI Engineer\",\"skill_ids\":{}}")]
+    [InlineData("{\"role_key\":\"11111111-1111-4111-8111-111111111111\",\"role_title_source\":\"AI Engineer\",\"skill_ids\":{}}")]
+    public void RejectsFreeTextTitlesAndUnknownRoleReferences(string experience)
+    {
+        var json = "{\"skill_ids\":{},\"experiences\":[" + experience + "],\"certificates\":[],\"warnings\":[]}";
+        var error = Assert.Throws<AiException>(() => AiListDraftValidator.Parse(json, Map, Roles));
+        Assert.Equal(AiFailure.InvalidOutput, error.Failure);
+        Assert.Equal(json, error.RawOutput);
+    }
+
+    [Fact]
+    public void CanonicalRoleAndSourceTitleAreKeptWithoutChangingSkillIdsOrPublicFields()
+    {
+        var json = """{"skill_ids":{"s1":"Python"},"experiences":[{"role_key":"r1","role_title_source":"Thực tập sinh AI","description":"Built models.","skill_ids":{"s1":"Python"}}],"certificates":[],"warnings":[]}""";
+        var draft = AiListDraftValidator.Parse(json, Map, Roles);
+        var experience = Assert.Single(draft.Experiences);
+        Assert.Equal("AI Engineer", experience.RoleTitle);
+        Assert.Contains("Thực tập sinh AI", experience.Description);
+        Assert.Equal(Id, Assert.Single(experience.SkillIds));
+        Assert.Equal(Id, Assert.Single(draft.Profile.SkillIds));
+        Assert.Empty(draft.Warnings);
     }
 }

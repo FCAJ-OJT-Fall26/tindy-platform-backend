@@ -13,7 +13,7 @@ internal static class AiListSourceNormalizer
         for (var index = 0; index < experiences.Count; index++)
         {
             var item = experiences[index] as JsonObject ?? throw Invalid();
-            AllowOnly(item, ["employer_name", "project_name", "role_title", "description", "repo_url", "start_date_source", "end_date_source", "skill_ids"]);
+            AllowOnly(item, ["employer_name", "project_name", "role_key", "role_title_source", "description", "repo_url", "start_date_source", "end_date_source", "skill_ids"]);
             var employer = Read(item, "employer_name", 255);
             if (employer is not null)
             {

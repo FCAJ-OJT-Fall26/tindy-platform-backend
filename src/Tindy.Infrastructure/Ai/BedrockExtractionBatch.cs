@@ -58,13 +58,13 @@ public sealed partial class BedrockProfileExtractionProvider
             return new(result.RawJson, result.Diagnostics);
         }
 
-        public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills)
+        public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles)
         {
             lock (_sync)
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 if (_lists is not null) throw new InvalidOperationException("The list stage has already started.");
-                var task = owner.SendAsync(input, () => owner.CreateListRequest(input, skills), ReadListOutput,
+                var task = owner.SendAsync(input, () => owner.CreateListRequest(input, skills, roles), ReadListOutput,
                     _cancellation.Token, reserved: true);
                 _lists = task;
                 return task;

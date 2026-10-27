@@ -15,10 +15,12 @@ public sealed class AiListExtractionService(ICatalogRepository catalog, IAiListE
         var active = (await catalog.GetActiveSkillsAsync(null, null, cancellationToken))
             .Where(item => item.IsActive).Select(item => new AiCatalogItem(item.SkillId, item.Name));
         var references = new AiSkillReferenceMap(active);
-        var output = await provider.ExtractListsAsync(input, references.References, cancellationToken);
+        var roles = new AiRoleReferenceMap((await catalog.GetActiveProfessionalRolesAsync(null, cancellationToken))
+            .Where(item => item.IsActive).Select(item => new AiCatalogItem(item.ProfessionalRoleId, item.Name)));
+        var output = await provider.ExtractListsAsync(input, references.References, roles.References, cancellationToken);
         try
         {
-            var draft = AiListDraftValidator.Parse(output.RawJson, references);
+            var draft = AiListDraftValidator.Parse(output.RawJson, references, roles);
             return draft with { Diagnostics = output.Diagnostics };
         }
         catch (AiException exception) when (exception.Failure == AiFailure.InvalidOutput)

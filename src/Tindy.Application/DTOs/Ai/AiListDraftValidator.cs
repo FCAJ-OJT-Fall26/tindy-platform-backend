@@ -8,7 +8,7 @@ namespace Tindy.Application.DTOs.Ai;
 // Internal tool shape is list-only. The public shape remains ProfileDraftResponse.
 public static class AiListDraftValidator
 {
-    public static ProfileDraftResponse Parse(string json, AiSkillReferenceMap references)
+    public static ProfileDraftResponse Parse(string json, AiSkillReferenceMap references, AiRoleReferenceMap roles)
     {
         try
         {
@@ -31,7 +31,9 @@ public static class AiListDraftValidator
                     .Replace(".end_date_source", ".end_date", StringComparison.Ordinal)
                     .Replace(".issued_at_source", ".issued_at", StringComparison.Ordinal)
                     .Replace(".expires_at_source", ".expires_at", StringComparison.Ordinal)
-                    .Replace(".employer_name", ".description", StringComparison.Ordinal);
+                    .Replace(".employer_name", ".description", StringComparison.Ordinal)
+                    .Replace(".role_title_source", ".role_title", StringComparison.Ordinal)
+                    .Replace(".role_key", ".role_title", StringComparison.Ordinal);
                 warning["field"] = field;
                 if (field == "skill_ids" || field.StartsWith("skill_ids[", StringComparison.Ordinal))
                     warning["field"] = "profile." + field;
@@ -46,6 +48,8 @@ public static class AiListDraftValidator
                 node!["skill_ids"] = Resolve(node["skill_ids"], references, 20, warnings, $"experiences[{index}].skill_ids");
             }
             AiListSourceNormalizer.Normalize(experiences, (JsonArray)root["certificates"]!, warnings);
+            for (var index = 0; index < experiences.Count; index++)
+                AiExperienceRoleResolver.Normalize((JsonObject)experiences[index]!, roles, warnings, index);
             var normalized = new JsonObject
             {
                 ["profile"] = new JsonObject { ["skill_ids"] = ids },

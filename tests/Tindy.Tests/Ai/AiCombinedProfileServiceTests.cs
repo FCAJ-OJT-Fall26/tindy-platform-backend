@@ -138,11 +138,11 @@ public sealed class AiCombinedProfileServiceTests
             if (ManyWarnings) node["warnings"] = Warnings("profile", 30);
             return new(await Run("profile", input, node.ToJsonString()), new("tool_use", 100, 50, 4096, 5));
         }
-        public async Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills)
+        public async Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles)
         {
             var node = JsonNode.Parse(EmptyLists
                 ? """{"skill_ids":{},"experiences":[],"certificates":[],"warnings":[]}"""
-                : """{"skill_ids":{"s1":"SQL"},"experiences":[{"role_title":"SQL Developer","skill_ids":{"s1":"SQL"}}],"certificates":[{"title":"SQL certificate"}],"warnings":[]}""")!;
+                : """{"skill_ids":{"s1":"SQL"},"experiences":[{"role_key":"r1","role_title_source":"SQL Developer","skill_ids":{"s1":"SQL"}}],"certificates":[{"title":"SQL certificate"}],"warnings":[]}""")!;
             if (ManyWarnings) node["warnings"] = Warnings("skill_ids", 30);
             return new(await Run("lists", input, node.ToJsonString()), new("tool_use", 100, 50, 4096, 5));
         }

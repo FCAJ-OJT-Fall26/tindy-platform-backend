@@ -31,7 +31,7 @@ public sealed class AiProfileServiceTests
         Assert.Equal(input, provider.Input);
         Assert.Equal("s1", Assert.Single(provider.Skills!).Key);
         Assert.Equal("C#", Assert.Single(provider.Skills!).Name);
-        Assert.Equal(1, catalog.Reads);
+        Assert.Equal(2, catalog.Reads);
         Assert.Contains(result.Warnings, x => x.Code == "INSUFFICIENT_EVIDENCE");
     }
 
@@ -241,7 +241,7 @@ public sealed class AiProfileServiceTests
         public AiProfileInput? Input { get; private set; }
         public IReadOnlyList<AiSkillReference>? Skills { get; private set; }
         public CancellationToken Token { get; private set; }
-        public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills,
+        public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles,
             CancellationToken cancellationToken = default)
         {
             Calls++;

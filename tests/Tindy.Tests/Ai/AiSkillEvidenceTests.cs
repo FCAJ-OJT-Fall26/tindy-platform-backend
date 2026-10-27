@@ -29,7 +29,7 @@ public sealed class AiSkillEvidenceTests
     public void DuplicateJsonKeysAreRejectedBeforeDeserialization()
     {
         const string json = """{"skill_ids":{"s1":"SQL","s1":"Structured Query Language"},"experiences":[],"certificates":[],"warnings":[]}""";
-        var error = Assert.Throws<AiException>(() => AiListDraftValidator.Parse(json, Catalog));
+        var error = Assert.Throws<AiException>(() => AiListDraftValidator.Parse(json, Catalog, new([])));
         Assert.Equal(AiFailure.InvalidOutput, error.Failure);
         Assert.Equal(json, error.RawOutput);
     }
@@ -41,5 +41,5 @@ public sealed class AiSkillEvidenceTests
     private static ProfileDraftResponse Parse(Dictionary<string, string> matches) => AiListDraftValidator.Parse(JsonSerializer.Serialize(new
     {
         skill_ids = matches, experiences = Array.Empty<object>(), certificates = Array.Empty<object>(), warnings = Array.Empty<object>()
-    }), Catalog);
+    }), Catalog, new([]));
 }

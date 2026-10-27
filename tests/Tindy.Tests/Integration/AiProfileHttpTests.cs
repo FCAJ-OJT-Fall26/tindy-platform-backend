@@ -298,6 +298,11 @@ public sealed class AiProfileHttpTests
         Assert.Equal(app.Catalog.SkillId, profile.GetProperty("skill_ids")[0].GetGuid());
         Assert.Equal(JsonValueKind.Null, profile.GetProperty("preferred_role_id").ValueKind);
         Assert.Equal(4, body.RootElement.GetProperty("data").EnumerateObject().Count());
+        var experience = body.RootElement.GetProperty("data").GetProperty("experiences")[0];
+        Assert.Equal("Backend Developer", experience.GetProperty("role_title").GetString());
+        Assert.Contains("Lập trình viên backend", experience.GetProperty("description").GetString());
+        Assert.False(experience.TryGetProperty("role_key", out _));
+        Assert.False(experience.TryGetProperty("role_title_source", out _));
         foreach (var field in profile.EnumerateObject().Where(field => field.Name is not "skill_ids" and not "display_name"))
             Assert.Equal(JsonValueKind.Null, field.Value.ValueKind);
     }
@@ -398,7 +403,7 @@ public sealed class AiProfileHttpTests
         public IReadOnlyList<AiSkillReference>? Skills { get; private set; }
         public bool InvalidOutput { get; set; }
         public int Calls { get; private set; }
-        public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills)
+        public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles)
         {
             Calls++;
             LastInput = input;
@@ -406,7 +411,7 @@ public sealed class AiProfileHttpTests
             var output = InvalidOutput ? "{invalid}" : JsonSerializer.Serialize(new
             {
                 skill_ids = new Dictionary<string, string> { [skills.Single().Key] = skills.Single().Name },
-                experiences = new[] { new { role_title = "Developer", description = "Built APIs", skill_ids = new Dictionary<string, string> { [skills.Single().Key] = skills.Single().Name } } },
+                experiences = new[] { new { role_key = roles.Single().Key, role_title_source = "Lập trình viên backend", description = "Built APIs", skill_ids = new Dictionary<string, string> { [skills.Single().Key] = skills.Single().Name } } },
                 certificates = new[] { new { title = "Certificate" } },
                 warnings = Array.Empty<object>()
             });

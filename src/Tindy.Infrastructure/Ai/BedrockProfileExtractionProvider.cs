@@ -28,8 +28,8 @@ public sealed partial class BedrockProfileExtractionProvider(
         (await SendAsync(input, () => CreateRequest(input, skills, roles), ReadOutput, cancellationToken)).RawJson;
 
     public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input,
-        IReadOnlyList<AiSkillReference> skills, CancellationToken cancellationToken = default) =>
-        SendAsync(input, () => CreateListRequest(input, skills), ReadListOutput, cancellationToken);
+        IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles, CancellationToken cancellationToken = default) =>
+        SendAsync(input, () => CreateListRequest(input, skills, roles), ReadListOutput, cancellationToken);
 
     public async Task<AiScalarProfileModelOutput> ExtractProfileScalarsAsync(AiProfileInput input,
         IReadOnlyList<AiRoleReference> roles, CancellationToken cancellationToken = default)
@@ -125,12 +125,12 @@ public sealed partial class BedrockProfileExtractionProvider(
             "malformed_tool_use" or "model_context_window_exceeded" ? reason : "unknown";
     }
 
-    private HttpRequestMessage CreateListRequest(AiProfileInput input, IReadOnlyList<AiSkillReference> skills)
+    private HttpRequestMessage CreateListRequest(AiProfileInput input, IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles)
     {
         var content = new List<object>();
         if (input.Pdf is not null)
             content.Add(new { document = new { format = "pdf", name = "CV", source = new { bytes = Convert.ToBase64String(input.Pdf) } } });
-        content.Add(new { text = ListExtractionPrompt.User(input, skills) });
+        content.Add(new { text = ListExtractionPrompt.User(input, skills, roles) });
         var request = new HttpRequestMessage(HttpMethod.Post,
             $"https://bedrock-runtime.{_options.Region}.amazonaws.com/model/{Uri.EscapeDataString(_options.ModelId)}/converse");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
@@ -144,7 +144,7 @@ public sealed partial class BedrockProfileExtractionProvider(
             {
                 tools = new[] { new { toolSpec = new { name = ListExtractionPrompt.ToolName,
                     description = "Extract only evidenced skills, experiences and certificates; unknown values are null.",
-                    inputSchema = new { json = ListExtractionPrompt.Schema(skills) } } } },
+                    inputSchema = new { json = ListExtractionPrompt.Schema(skills, roles) } } } },
                 toolChoice = new { tool = new { name = ListExtractionPrompt.ToolName } }
             }
         });

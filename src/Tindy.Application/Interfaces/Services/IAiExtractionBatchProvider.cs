@@ -12,5 +12,5 @@ public interface IAiExtractionBatchProvider
 public interface IAiExtractionBatchSession : IAsyncDisposable
 {
     Task<AiScalarProfileModelOutput> ExtractProfileScalarsAsync(AiProfileInput input, IReadOnlyList<AiRoleReference> roles);
-    Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills);
+    Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles);
 }

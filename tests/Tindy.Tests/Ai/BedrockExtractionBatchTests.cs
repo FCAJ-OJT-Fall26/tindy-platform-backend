@@ -18,12 +18,12 @@ public sealed class BedrockExtractionBatchTests
         await using (var batch = provider.BeginBatch())
         {
             Assert.Equal(AiFailure.Busy, Assert.Throws<AiException>(() => provider.BeginBatch()).Failure);
-            Assert.Equal(AiFailure.Busy, (await Assert.ThrowsAsync<AiException>(() => provider.ExtractListsAsync(new("x", null), []))).Failure);
+            Assert.Equal(AiFailure.Busy, (await Assert.ThrowsAsync<AiException>(() => provider.ExtractListsAsync(new("x", null), [], []))).Failure);
             Assert.Equal(0, handler.Calls);
             var profile = batch.ExtractProfileScalarsAsync(new("x", null), []);
-            var lists = batch.ExtractListsAsync(new("x", null), []);
+            var lists = batch.ExtractListsAsync(new("x", null), [], []);
             await handler.BothStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-            Assert.Throws<InvalidOperationException>(() => { _ = batch.ExtractListsAsync(new("x", null), []); });
+            Assert.Throws<InvalidOperationException>(() => { _ = batch.ExtractListsAsync(new("x", null), [], []); });
             await batch.DisposeAsync();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => profile);
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lists);
@@ -38,10 +38,10 @@ public sealed class BedrockExtractionBatchTests
         using var handler = new BlockingHandler();
         using var provider = Create(handler);
         using var cancellation = new CancellationTokenSource();
-        var single = provider.ExtractListsAsync(new("x", null), [], cancellation.Token);
+        var single = provider.ExtractListsAsync(new("x", null), [], [], cancellation.Token);
         Assert.Equal(AiFailure.Busy, Assert.Throws<AiException>(() => provider.BeginBatch()).Failure);
         Assert.Equal(1, handler.Calls);
-        var second = provider.ExtractListsAsync(new("x", null), [], cancellation.Token);
+        var second = provider.ExtractListsAsync(new("x", null), [], [], cancellation.Token);
         await handler.BothStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => single);

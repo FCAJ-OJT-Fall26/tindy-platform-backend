@@ -31,10 +31,10 @@ public sealed class AiListSourceNormalizationTests
         var json = JsonSerializer.Serialize(new
         {
             skill_ids = new Dictionary<string, string>(),
-            experiences = new[] { new { employer_name = "Example Company", role_title = "AI Engineer", description = "Built models.\nUsed Python.", start_date_source = "01/2021", end_date_source = "Nay", skill_ids = new Dictionary<string, string>() } },
+            experiences = new[] { new { employer_name = "Example Company", role_key = "r1", role_title_source = "AI Engineer", description = "Built models.\nUsed Python.", start_date_source = "01/2021", end_date_source = "Nay", skill_ids = new Dictionary<string, string>() } },
             certificates = Array.Empty<object>(), warnings = Array.Empty<object>()
         });
-        var value = Assert.Single(AiListDraftValidator.Parse(json, new([])).Experiences);
+        var value = Assert.Single(AiListDraftValidator.Parse(json, new([]), new([new(Guid.NewGuid(), "AI Engineer")])).Experiences);
         Assert.Equal("Example Company: Built models.\nUsed Python.", value.Description);
         Assert.Equal("2021-01", value.StartDate);
         Assert.True(value.IsOngoing);
@@ -46,5 +46,5 @@ public sealed class AiListSourceNormalizationTests
     {
         skill_ids = new Dictionary<string, string>(), experiences = Array.Empty<object>(),
         certificates = new[] { new { title = "Certificate", issued_at_source = source } }, warnings = Array.Empty<object>()
-    }), new([]));
+    }), new([]), new([]));
 }

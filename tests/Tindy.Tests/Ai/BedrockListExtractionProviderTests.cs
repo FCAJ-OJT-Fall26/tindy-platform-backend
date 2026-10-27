@@ -15,7 +15,7 @@ public sealed class BedrockListExtractionProviderTests
     private const string Lists = "{\"skill_ids\":{\"s1\":\"Python\"},\"experiences\":[],\"certificates\":[],\"warnings\":[]}";
 
     [Fact]
-    public async Task UsesOneForcedToolAndPutsPdfBeforeTextWithNoUuidsOrRoles()
+    public async Task UsesOneForcedToolWithSkillAndRoleReferencesAndPdfBeforeText()
     {
         using var handler = new Stub(async (request, token) =>
         {
@@ -31,17 +31,22 @@ public sealed class BedrockListExtractionProviderTests
             Assert.Equal(30, keys.GetProperty("maxProperties").GetInt32());
             Assert.Equal("s1", keys.GetProperty("propertyNames").GetProperty("enum")[0].GetString());
             Assert.Equal("string", keys.GetProperty("additionalProperties").GetProperty("type").GetString());
+            var experience = schema.GetProperty("properties").GetProperty("experiences").GetProperty("items").GetProperty("properties");
+            Assert.False(experience.TryGetProperty("role_title", out _));
+            Assert.True(experience.TryGetProperty("role_title_source", out _));
+            Assert.Equal(new string?[] { null, "r1" }, experience.GetProperty("role_key").GetProperty("enum").EnumerateArray().Select(x => x.GetString()));
             Assert.Equal(4096, root.GetProperty("inferenceConfig").GetProperty("maxTokens").GetInt32());
             var content = root.GetProperty("messages")[0].GetProperty("content");
             Assert.True(content[0].TryGetProperty("document", out _));
             using var source = JsonDocument.Parse(content[1].GetProperty("text").GetString()!);
             Assert.Equal("s1", source.RootElement.GetProperty("active_skills")[0].GetProperty("key").GetString());
             Assert.Equal("Python", source.RootElement.GetProperty("active_skills")[0].GetProperty("name").GetString());
-            Assert.False(source.RootElement.TryGetProperty("active_professional_roles", out _));
+            Assert.Equal("r1", source.RootElement.GetProperty("active_roles")[0].GetProperty("key").GetString());
+            Assert.Equal("AI Engineer", source.RootElement.GetProperty("active_roles")[0].GetProperty("name").GetString());
             return Success();
         });
         using var provider = Create(handler);
-        var result = await provider.ExtractListsAsync(new("I used Python", "%PDF-fixture"u8.ToArray()), [new("s1", "Python")]);
+        var result = await provider.ExtractListsAsync(new("I used Python", "%PDF-fixture"u8.ToArray()), [new("s1", "Python")], [new("r1", "AI Engineer")]);
         Assert.Equal(Lists, result.RawJson);
         Assert.Equal("tool_use", result.Diagnostics.StopReason);
         Assert.Equal(100, result.Diagnostics.InputTokens);
@@ -59,10 +64,13 @@ public sealed class BedrockListExtractionProviderTests
                 .GetProperty("inputSchema").GetProperty("json").GetProperty("properties").GetProperty("skill_ids");
             Assert.Equal(0, schema.GetProperty("maxProperties").GetInt32());
             Assert.False(schema.TryGetProperty("propertyNames", out _));
+            var experience = json.RootElement.GetProperty("toolConfig").GetProperty("tools")[0].GetProperty("toolSpec")
+                .GetProperty("inputSchema").GetProperty("json").GetProperty("properties").GetProperty("experiences").GetProperty("items").GetProperty("properties");
+            Assert.Equal(JsonValueKind.Null, Assert.Single(experience.GetProperty("role_key").GetProperty("enum").EnumerateArray()).ValueKind);
             return Success();
         });
         using var provider = Create(handler);
-        await provider.ExtractListsAsync(new("source", null), []);
+        await provider.ExtractListsAsync(new("source", null), [], []);
     }
 
     [Theory]
@@ -74,7 +82,7 @@ public sealed class BedrockListExtractionProviderTests
     {
         using var handler = new Stub((_, _) => Task.FromResult(Success(stop, name, count)));
         using var provider = Create(handler);
-        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractListsAsync(new("source", null), []));
+        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractListsAsync(new("source", null), [], []));
         Assert.Equal(AiFailure.InvalidOutput, error.Failure);
         Assert.NotNull(error.RawOutput);
         Assert.Equal(stop, error.Diagnostics!.StopReason);
@@ -90,7 +98,7 @@ public sealed class BedrockListExtractionProviderTests
     {
         using var handler = new Stub((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) }));
         using var provider = Create(handler);
-        Assert.Equal(AiFailure.InvalidOutput, (await Assert.ThrowsAsync<AiException>(() => provider.ExtractListsAsync(new("source", null), []))).Failure);
+        Assert.Equal(AiFailure.InvalidOutput, (await Assert.ThrowsAsync<AiException>(() => provider.ExtractListsAsync(new("source", null), [], []))).Failure);
     }
 
     [Fact]
@@ -106,9 +114,9 @@ public sealed class BedrockListExtractionProviderTests
         using var provider = Create(handler);
         using var cancellation = new CancellationTokenSource();
         var profile = provider.ExtractAsync(new("source", null), [], [], cancellation.Token);
-        var lists = provider.ExtractListsAsync(new("source", null), [], cancellation.Token);
+        var lists = provider.ExtractListsAsync(new("source", null), [], [], cancellation.Token);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractListsAsync(new("third", null), []));
+        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractListsAsync(new("third", null), [], []));
         Assert.Equal(AiFailure.Busy, error.Failure);
         Assert.Equal(2, handler.Calls);
         await cancellation.CancelAsync();

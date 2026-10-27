@@ -68,9 +68,9 @@ public sealed class AiProfileService(ICatalogRepository catalog, IAiExtractionBa
         }, json => AiScalarProfileDraftValidator.Parse(json, roleMap));
         var listsTask = Stage("lists", async () =>
         {
-            var output = await batch.ExtractListsAsync(input, skillMap.References);
+            var output = await batch.ExtractListsAsync(input, skillMap.References, roleMap.References);
             return (output.RawJson, output.Diagnostics);
-        }, json => AiListDraftValidator.Parse(json, skillMap));
+        }, json => AiListDraftValidator.Parse(json, skillMap, roleMap));
 
         try { await Task.WhenAll(profileTask, listsTask); }
         catch
