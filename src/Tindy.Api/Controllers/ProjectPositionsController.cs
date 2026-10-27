@@ -7,7 +7,7 @@ using Tindy.Application.Interfaces.Services;
 namespace Tindy.Api.Controllers;
 
 [ApiController]
-[Route("api/projects/{project_id:guid}/positions")]
+[Route("api/projects/{project_id}/positions")]
 public sealed class ProjectPositionsController : ControllerBase
 {
     private readonly IProjectPositionService _positionService;
@@ -27,14 +27,21 @@ public sealed class ProjectPositionsController : ControllerBase
         }
     }
 
+    private static Guid ParseProjectId(string projectIdStr)
+    {
+        if (!Guid.TryParse(projectIdStr, out var id))
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", $"Project '{projectIdStr}' not found.");
+        return id;
+    }
+
     // 1. GET /api/projects/{project_id}/positions — Lấy danh sách vị trí tuyển dụng của dự án
     [HttpGet]
     [AllowAnonymous]
     public async Task<IActionResult> GetPositions(
-        [FromRoute(Name = "project_id")] Guid projectId,
+        [FromRoute(Name = "project_id")] string projectId,
         CancellationToken cancellationToken)
     {
-        var data = await _positionService.GetPositionsAsync(projectId, cancellationToken);
+        var data = await _positionService.GetPositionsAsync(ParseProjectId(projectId), cancellationToken);
         return Ok(new { success = true, message = "Positions retrieved successfully.", data });
     }
 
@@ -42,11 +49,11 @@ public sealed class ProjectPositionsController : ControllerBase
     [HttpPost]
     [Authorize]
     public async Task<IActionResult> CreatePosition(
-        [FromRoute(Name = "project_id")] Guid projectId,
+        [FromRoute(Name = "project_id")] string projectId,
         [FromBody] CreatePositionRequest request,
         CancellationToken cancellationToken)
     {
-        var data = await _positionService.CreatePositionAsync(CurrentUserId, projectId, request, cancellationToken);
+        var data = await _positionService.CreatePositionAsync(CurrentUserId, ParseProjectId(projectId), request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created,
             new { success = true, message = "Position added to project successfully.", data });
     }
@@ -55,12 +62,12 @@ public sealed class ProjectPositionsController : ControllerBase
     [HttpPut("{position_id:guid}")]
     [Authorize]
     public async Task<IActionResult> UpdatePosition(
-        [FromRoute(Name = "project_id")] Guid projectId,
+        [FromRoute(Name = "project_id")] string projectId,
         [FromRoute(Name = "position_id")] Guid positionId,
         [FromBody] UpdatePositionRequest request,
         CancellationToken cancellationToken)
     {
-        var data = await _positionService.UpdatePositionAsync(CurrentUserId, projectId, positionId, request, cancellationToken);
+        var data = await _positionService.UpdatePositionAsync(CurrentUserId, ParseProjectId(projectId), positionId, request, cancellationToken);
         return Ok(new { success = true, message = "Position updated successfully.", data });
     }
 
@@ -68,11 +75,11 @@ public sealed class ProjectPositionsController : ControllerBase
     [HttpDelete("{position_id:guid}")]
     [Authorize]
     public async Task<IActionResult> DeletePosition(
-        [FromRoute(Name = "project_id")] Guid projectId,
+        [FromRoute(Name = "project_id")] string projectId,
         [FromRoute(Name = "position_id")] Guid positionId,
         CancellationToken cancellationToken)
     {
-        await _positionService.DeletePositionAsync(CurrentUserId, projectId, positionId, cancellationToken);
+        await _positionService.DeletePositionAsync(CurrentUserId, ParseProjectId(projectId), positionId, cancellationToken);
         return Ok(new { success = true, message = "Position deleted successfully." });
     }
 
@@ -80,12 +87,12 @@ public sealed class ProjectPositionsController : ControllerBase
     [HttpPost("{position_id:guid}/skills")]
     [Authorize]
     public async Task<IActionResult> AddPositionSkill(
-        [FromRoute(Name = "project_id")] Guid projectId,
+        [FromRoute(Name = "project_id")] string projectId,
         [FromRoute(Name = "position_id")] Guid positionId,
         [FromBody] AddPositionSkillRequest request,
         CancellationToken cancellationToken)
     {
-        var data = await _positionService.AddPositionSkillAsync(CurrentUserId, projectId, positionId, request, cancellationToken);
+        var data = await _positionService.AddPositionSkillAsync(CurrentUserId, ParseProjectId(projectId), positionId, request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created,
             new { success = true, message = "Skill linked to position successfully.", data });
     }
@@ -94,12 +101,12 @@ public sealed class ProjectPositionsController : ControllerBase
     [HttpDelete("{position_id:guid}/skills/{skill_id:guid}")]
     [Authorize]
     public async Task<IActionResult> RemovePositionSkill(
-        [FromRoute(Name = "project_id")] Guid projectId,
+        [FromRoute(Name = "project_id")] string projectId,
         [FromRoute(Name = "position_id")] Guid positionId,
         [FromRoute(Name = "skill_id")] Guid skillId,
         CancellationToken cancellationToken)
     {
-        await _positionService.RemovePositionSkillAsync(CurrentUserId, projectId, positionId, skillId, cancellationToken);
+        await _positionService.RemovePositionSkillAsync(CurrentUserId, ParseProjectId(projectId), positionId, skillId, cancellationToken);
         return Ok(new { success = true, message = "Skill removed from position successfully." });
     }
 }

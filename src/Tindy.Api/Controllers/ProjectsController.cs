@@ -51,35 +51,50 @@ public sealed class ProjectsController : ControllerBase
     }
 
     // GET /api/projects/{project_id} - Chi tiết dự án
-    [HttpGet("{project_id:guid}")]
+    [HttpGet("{project_id}")]
     [AllowAnonymous]
     public async Task<IActionResult> GetProjectById(
-        [FromRoute(Name = "project_id")] Guid projectId,
+        [FromRoute(Name = "project_id")] string projectIdStr,
         CancellationToken cancellationToken)
     {
+        if (!Guid.TryParse(projectIdStr, out var projectId))
+        {
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", $"Project '{projectIdStr}' not found.");
+        }
+
         var data = await _projectService.GetProjectByIdAsync(projectId, cancellationToken);
         return Ok(new { success = true, message = "Project details retrieved successfully.", data });
     }
 
     // PUT /api/projects/{project_id} - Cập nhật dự án (Chỉ Leader)
-    [HttpPut("{project_id:guid}")]
+    [HttpPut("{project_id}")]
     [Authorize]
     public async Task<IActionResult> UpdateProject(
-        [FromRoute(Name = "project_id")] Guid projectId,
+        [FromRoute(Name = "project_id")] string projectIdStr,
         [FromBody] UpdateProjectRequest request,
         CancellationToken cancellationToken)
     {
+        if (!Guid.TryParse(projectIdStr, out var projectId))
+        {
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", $"Project '{projectIdStr}' not found.");
+        }
+
         var data = await _projectService.UpdateProjectAsync(CurrentUserId, projectId, request, cancellationToken);
         return Ok(new { success = true, message = "Project updated successfully.", data });
     }
 
     // DELETE /api/projects/{project_id} - Lưu trữ / đóng dự án (Soft delete, Chỉ Leader)
-    [HttpDelete("{project_id:guid}")]
+    [HttpDelete("{project_id}")]
     [Authorize]
     public async Task<IActionResult> DeleteProject(
-        [FromRoute(Name = "project_id")] Guid projectId,
+        [FromRoute(Name = "project_id")] string projectIdStr,
         CancellationToken cancellationToken)
     {
+        if (!Guid.TryParse(projectIdStr, out var projectId))
+        {
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", $"Project '{projectIdStr}' not found.");
+        }
+
         await _projectService.DeleteProjectAsync(CurrentUserId, projectId, cancellationToken);
         return Ok(new
         {
