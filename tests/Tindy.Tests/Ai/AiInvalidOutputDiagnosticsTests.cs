@@ -21,7 +21,7 @@ public sealed class AiInvalidOutputDiagnosticsTests
     {
         const string raw = "```json\n{invalid: '<script>debug</script>'}\n```";
         var exception = new AiException(AiFailure.InvalidOutput, raw)
-        { Diagnostics = new("max_tokens", 120, 4096, 4096, 1000, "output_token_limit") };
+        { Diagnostics = new("max_tokens", 120, 4096, 4096, 1000, "output_token_limit", "profile") };
         var context = new DefaultHttpContext();
         context.Request.Path = "/api/ai/extract-profile";
         context.Response.Body = new MemoryStream();
@@ -41,6 +41,7 @@ public sealed class AiInvalidOutputDiagnosticsTests
             Assert.False(json.RootElement.GetProperty("raw_output_truncated").GetBoolean());
             Assert.Equal("no-store", context.Response.Headers.CacheControl);
             Assert.Equal("max_tokens", json.RootElement.GetProperty("ai_diagnostics").GetProperty("stop_reason").GetString());
+            Assert.Equal("profile", json.RootElement.GetProperty("ai_diagnostics").GetProperty("stage").GetString());
         }
         else
         {

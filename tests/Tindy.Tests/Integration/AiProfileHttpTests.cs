@@ -260,6 +260,9 @@ public sealed class AiProfileHttpTests
         Assert.Equal(new[] { "skills", "roles" }, app.Catalog.Reads);
         Assert.Equal(2, app.Provider.Calls);
         Assert.True(response.Headers.Contains("X-AI-Diagnostics"));
+        using var diagnostics = JsonDocument.Parse(response.Headers.GetValues("X-AI-Diagnostics").Single());
+        Assert.Equal(8192, diagnostics.RootElement.GetProperty("max_output_tokens").GetInt32());
+        Assert.Equal(2, diagnostics.RootElement.GetProperty("stages").EnumerateObject().Count());
     }
 
     [Fact]
@@ -272,6 +275,7 @@ public sealed class AiProfileHttpTests
         await AssertProblem(response, HttpStatusCode.BadGateway, "AI_INVALID_OUTPUT");
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("{invalid}", json.RootElement.GetProperty("raw_model_output").GetString());
+        Assert.Equal("lists", json.RootElement.GetProperty("ai_diagnostics").GetProperty("stage").GetString());
         Assert.DoesNotContain(app.Base.Logs.Entries, entry => entry.Contains("{invalid}"));
     }
 

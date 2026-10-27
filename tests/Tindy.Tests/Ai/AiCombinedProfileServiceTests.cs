@@ -77,6 +77,7 @@ public sealed class AiCombinedProfileServiceTests
         Assert.Equal(50, draft.Warnings.Count);
         Assert.Equal("LIMIT_EXCEEDED", draft.Warnings[^1].Code);
         Assert.Equal(50, draft.Warnings.Distinct().Count());
+        Assert.Single(draft.Warnings, warning => warning.Message == "Shared warning");
 
         batch = new Batch(catalog) { EmptyLists = true };
         draft = await new AiProfileService(catalog, batch).ExtractAsync(new("source", null));
@@ -146,7 +147,8 @@ public sealed class AiCombinedProfileServiceTests
             return new(await Run("lists", input, node.ToJsonString()), new("tool_use", 100, 50, 4096, 5));
         }
         private static JsonArray Warnings(string field, int count) => new(Enumerable.Range(0, count)
-            .Select(i => (JsonNode)new JsonObject { ["field"] = field, ["code"] = "MISSING_INFORMATION", ["message"] = "Missing " + i }).ToArray());
+            .Select(i => (JsonNode)new JsonObject { ["field"] = field, ["code"] = "MISSING_INFORMATION", ["message"] = "Missing " + i })
+            .Prepend(new JsonObject { ["field"] = "$", ["code"] = "MISSING_INFORMATION", ["message"] = "Shared warning" }).ToArray());
     }
 
     private sealed class Catalog : ICatalogRepository

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using Tindy.Application.DTOs.Ai;
 
 namespace Tindy.Manual.AiListExtraction;
@@ -7,10 +8,29 @@ namespace Tindy.Manual.AiListExtraction;
 internal sealed record ExpectedExperience(string Employer, string Role, string StartDate, string? EndDate, bool IsOngoing);
 internal sealed record ExpectedCertificate(string Title);
 internal sealed record Expectations(string[] RequiredSkills, string[] ForbiddenSkills,
-    ExpectedExperience[] Experiences, ExpectedCertificate[] Certificates);
+    ExpectedExperience[] Experiences, ExpectedCertificate[] Certificates,
+    Dictionary<string, JsonElement>? Profile = null, Dictionary<string, string[]>? ProfileContains = null);
 
 internal static class Review
 {
+    public static IReadOnlyList<string> CheckScalars(ProfileDraft profile, Expectations expected)
+    {
+        var failures = new List<string>();
+        var json = JsonSerializer.SerializeToElement(profile, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower });
+        if (expected.Profile is not { Count: > 0 }) return ["Full-profile verification requires scalar expectations."];
+        foreach (var (field, wanted) in expected.Profile)
+        {
+            if (!json.TryGetProperty(field, out var actual) || actual.ValueKind != wanted.ValueKind ||
+                (wanted.ValueKind == JsonValueKind.String && !Equal(actual.GetString(), wanted.GetString()!)) ||
+                (wanted.ValueKind == JsonValueKind.Number && actual.GetRawText() != wanted.GetRawText()))
+                failures.Add("Scalar profile mismatch: " + field);
+        }
+        foreach (var (field, words) in expected.ProfileContains ?? [])
+            if (!json.TryGetProperty(field, out var actual) || actual.ValueKind != JsonValueKind.String ||
+                words.Any(word => !Contains(actual.GetString(), word))) failures.Add("Missing scalar evidence keywords: " + field);
+        return failures;
+    }
+
     public static IReadOnlyList<string> Check(ProfileDraftResponse draft, IReadOnlyDictionary<Guid, string> catalog, Expectations expected)
     {
         var failures = new List<string>();
