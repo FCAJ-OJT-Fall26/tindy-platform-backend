@@ -53,6 +53,17 @@ public sealed class AiListDraftValidatorTests
     }
 
     [Fact]
+    public void ExactSqlCatalogEntryIsKeptWithoutConvertingItToADatabaseProduct()
+    {
+        var sql = new AiCatalogItem(Guid.Parse("11111111-1111-4111-8111-111111111111"), "SQL");
+        var postgres = new AiCatalogItem(Guid.Parse("22222222-2222-4222-8222-222222222222"), "PostgreSQL");
+        var map = new AiSkillReferenceMap([postgres, sql]);
+        var draft = AiListDraftValidator.Parse("""{"skill_ids":["s1"],"experiences":[],"certificates":[],"warnings":[]}""", map);
+        Assert.Equal(sql.Id, Assert.Single(draft.Profile.SkillIds));
+        Assert.DoesNotContain(postgres.Id, draft.Profile.SkillIds);
+    }
+
+    [Fact]
     public void EmptyEvidenceProducesAnInsufficientEvidenceWarning()
     {
         var draft = AiListDraftValidator.Parse("""{"skill_ids":[],"experiences":[],"certificates":[],"warnings":[]}""", Map);

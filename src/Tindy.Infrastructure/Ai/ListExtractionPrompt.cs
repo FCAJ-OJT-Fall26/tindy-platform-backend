@@ -16,7 +16,8 @@ internal static class ListExtractionPrompt
         invent a key, emit UUIDs, or repeat a key to fill space. Stop when supported items are exhausted.
         Skill evidence must be actual use/knowledge: not negation, future learning, job requirements,
         or a README technology list without personal contribution. Generic SQL does NOT establish
-        PostgreSQL, MySQL or SQL Server. Do not infer tools from a role, cloud provider or related skill.
+        PostgreSQL, MySQL or SQL Server. If the active catalog contains SQL itself, select that exact
+        SQL key for explicit SQL evidence; omit SQL only when no equivalent SQL entry exists. Do not infer tools from a role, cloud provider or related skill.
         Include all employment entries with explicitly stated duties as experiences. project_name is null
         unless a project name is explicit; an employer name is NOT a project name. Preserve the employer
         in employer_name, copied exactly from the source. Keep descriptions concise, factual and under
