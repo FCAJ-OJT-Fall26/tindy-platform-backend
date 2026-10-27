@@ -1,6 +1,6 @@
 # AI Profile Extraction API
 
-API độc lập để trích xuất dữ kiện từ CV PDF, README được dán hoặc mô tả tự do thành bản nháp hồ sơ. Không yêu cầu gọi từ onboarding hay chỉnh sửa profile; không sinh bio và không tự lưu dữ liệu.
+API độc lập để trích xuất danh sách kỹ năng, kinh nghiệm và chứng chỉ từ CV PDF, README được dán hoặc mô tả tự do. Giai đoạn hiện tại chỉ chạy lượt danh sách; lượt trích các trường đơn của profile được dành cho giai đoạn sau. Endpoint và schema response vẫn giữ nguyên; không sinh bio và không tự lưu dữ liệu.
 
 ## Endpoint và quyền truy cập
 
@@ -42,9 +42,15 @@ HTTP 200 dùng envelope `{ "success": true, "message": "Profile extracted. Revie
 | `certificates[]` | `title`, `issuer`, `credential_id`, `credential_url`, `issued_at`, `expires_at` |
 | `warnings[]` | `field`, `code`, `message` |
 
-Scalar không có bằng chứng trả `null`; collection trả `[]`. `is_ongoing` cũng nullable, không đoán `false` khi không rõ. Không có `bio`, `resume_url`, ID của bản ghi, trường bảo mật, timestamp hoặc trạng thái xác minh. `preferred_role_id` và `skill_ids` chỉ chứa UUID thuộc Catalog active; không tạo skill/role mới.
+Trong giai đoạn danh sách, `profile.skill_ids` chứa UUID kỹ năng thật; **mọi trường đơn khác trong `profile` đều trả `null`**, kể cả thông tin có trong CV. Đây là hành vi theo giai đoạn, không phải model bỏ sót. `experiences` và `certificates` được trích xuất trong cùng một Bedrock call; không có lượt trích profile thứ hai.
+
+Scalar không có bằng chứng trả `null`; collection trả `[]`. `is_ongoing` cũng nullable, không đoán `false` khi không rõ. Không có `bio`, `resume_url`, ID của bản ghi, trường bảo mật, timestamp hoặc trạng thái xác minh. `skill_ids` chỉ chứa UUID thuộc catalog active; `preferred_role_id` hiện luôn null. Không tạo skill/role mới.
 
 Ngày experience dùng `YYYY-MM`; ngày certificate dùng `YYYY-MM-DD`. Thiếu thành phần ngày không được tự thêm. Tối đa 20 experiences, 20 certificates, 50 warnings; profile có tối đa 30 skill IDs, mỗi experience tối đa 20. Các giới hạn độ dài scalar, URL/email và ngày tương thích với API profile hiện có, nhưng trường bắt buộc khi lưu vẫn có thể `null` trong draft.
+
+Model nhận catalog với mã ngắn theo request (`s1`, `s2`, …), không phải UUID. Backend kiểm tra mã, trùng lặp, số lượng rồi ánh xạ về đúng UUID trong snapshot catalog đã gửi. Không fuzzy-match mã sai. Tool input dùng map `{mã: bằng chứng}` để mỗi skill chỉ có một khóa; JSON có khóa trùng vẫn bị từ chối trước khi deserialize. Mỗi mã kỹ năng phải có trích đoạn bằng chứng ngắn chứa tên kỹ năng hoặc tên tương đương rõ ràng. Mã hợp lệ nhưng bằng chứng không khớp bị bỏ kèm `INSUFFICIENT_EVIDENCE`; mã lạ/trùng/vượt giới hạn vẫn là lỗi. Đây là kiểm tra nhất quán tên–bằng chứng, không phải OCR độc lập để chứng minh model đã chép đúng từng chữ từ PDF hoặc gắn đúng kỹ năng vào từng công việc. Các gợi ý gắn với experience vẫn cần người dùng đối chiếu với nguồn trước khi sử dụng. CV ghi SQL và catalog có SQL thì SQL vẫn được trả; không được tự thay SQL bằng PostgreSQL/MySQL/SQL Server khi nguồn không nêu các sản phẩm đó. Nếu catalog chưa có SQL tương đương, bỏ mục chưa khớp và trả `UNMATCHED_CATALOG`.
+
+Với kinh nghiệm làm việc, tên công ty được giữ trong `description`; `project_name` không được tự lấy từ tên công ty. Model sao chép ngày nguyên gốc vào tool input nội bộ; backend chuẩn hóa tháng/năm cho experience và ngày/tháng/năm cho certificate. Ngày thiếu thành phần hoặc mơ hồ giữ null kèm `INCOMPLETE_DATE`, không tự thêm ngày 01/01.
 
 Warning dùng các code `CONFLICT`, `INSUFFICIENT_EVIDENCE`, `INCOMPLETE_DATE`, `UNMATCHED_CATALOG`, `MISSING_INFORMATION`, `LIMIT_EXCEEDED`. `field` là đường dẫn hợp lệ trong draft, như `profile.display_name`, `experiences[0].start_date`, tên collection khi bỏ một mục, hoặc `$` cho toàn nguồn. Backend từ chối mục experience/certificate hoàn toàn rỗng, đường dẫn/code lạ và cảnh báo `CONFLICT` đi kèm scalar vẫn có giá trị. Việc xác định dữ kiện có đúng với nguồn hay không vẫn phụ thuộc model và bước duyệt của người dùng.
 
@@ -61,7 +67,9 @@ Quota 5 request/phút/người dùng, tối đa 2 Bedrock call đồng thời m�
 
 Lỗi dùng `application/problem+json` với `error_code` và `traceId`; không bọc `{success:false}`.
 
-Riêng môi trường `Development`, lỗi `AI_INVALID_OUTPUT` có thể kèm `raw_model_output`, `raw_output_kind` (`model_text` hoặc `provider_response`) và `raw_output_truncated` để xem nội dung bị từ chối. Nội dung tối đa 128 KiB UTF-8, chỉ nằm trong response `no-store`; không được ghi log hoặc lưu lâu dài. Production/Staging không trả các trường chẩn đoán này. Raw output vẫn là dữ liệu không hợp lệ, không phải draft được chấp nhận.
+Riêng môi trường `Development`, lỗi `AI_INVALID_OUTPUT` có thể kèm `raw_model_output`, `raw_output_kind` (`tool_input`, `model_text` hoặc `provider_response`) và `raw_output_truncated` để xem nội dung bị từ chối. Nội dung tối đa 128 KiB UTF-8, chỉ nằm trong response `no-store`; không được ghi log hoặc lưu lâu dài. Production/Staging không trả các trường chẩn đoán này. Raw output vẫn là dữ liệu không hợp lệ, không phải draft được chấp nhận.
+
+Ở Development, lỗi AI có thể kèm `ai_diagnostics` (`stop_reason`, `input_tokens`, `output_tokens`, `max_output_tokens`, `elapsed_ms`, `failure_reason`) và `validation_reason`. `max_tokens`/`output_token_limit` phân biệt hết token với HTTP 504 `AI_TIMEOUT`; mã lạ/trùng/vượt giới hạn được phân biệt bằng validation reason. Response thành công có header `X-AI-Diagnostics` ở Development, không thêm nhóm mới vào `data`. Production không trả metadata chẩn đoán này hoặc raw output.
 
 | HTTP | `error_code` | Tình huống |
 | --- | --- | --- |

@@ -44,3 +44,7 @@ DOTNET_SYSTEM_NET_DISABLEIPV6=1 dotnet run --project tests/Manual/AiListExtracti
 - IPv4 environment setting is needed on the development machine where .NET IPv6 connections to external APIs time out; it is not a production code change.
 
 Output includes skill names, counts, structured experience role/date checks, warning field/code, metadata, and detailed review failures. It excludes API keys, raw PDFs, descriptions and raw model responses. Reports belong outside Git. Exit code 0 means all requested runs passed the declared review rules; it does not establish accuracy on every document. Inspect and extend expectations for different reference documents instead of weakening checks until a model response passes.
+
+## What the reference checks establish
+
+The current reference rules check the exact overall skill set, active/unique UUIDs, forbidden database-product inferences in all skill lists, company association, role/month ranges, certificate coverage/date precision, null scalar profile fields, and a complete tool stop. The experience skill-name list is included for manual review. A passing report does not prove every skill belongs to the particular employment entry: the name/evidence check cannot independently re-read the PDF or verify quote provenance. Never treat model suggestions as automatically verified or save them without review.
