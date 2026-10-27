@@ -17,7 +17,7 @@ namespace Tindy.Infrastructure.Ai;
 public sealed class BedrockProfileExtractionProvider(
     HttpClient httpClient,
     IOptions<BedrockOptions> options,
-    ILogger<BedrockProfileExtractionProvider> logger) : IProfileExtractionProvider, IAiListExtractionProvider, IDisposable
+    ILogger<BedrockProfileExtractionProvider> logger) : IProfileExtractionProvider, IAiListExtractionProvider, IAiScalarProfileProvider, IDisposable
 {
     private const int MaxEnvelopeBytes = 1024 * 1024;
     private readonly SemaphoreSlim _slots = new(2, 2);
@@ -30,6 +30,14 @@ public sealed class BedrockProfileExtractionProvider(
     public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input,
         IReadOnlyList<AiSkillReference> skills, CancellationToken cancellationToken = default) =>
         SendAsync(input, () => CreateListRequest(input, skills), ReadListOutput, cancellationToken);
+
+    public async Task<AiScalarProfileModelOutput> ExtractProfileScalarsAsync(AiProfileInput input,
+        IReadOnlyList<AiRoleReference> roles, CancellationToken cancellationToken = default)
+    {
+        var output = await SendAsync(input, () => CreateScalarRequest(input, roles),
+            root => ReadToolOutput(root, ScalarProfileExtractionPrompt.ToolName), cancellationToken);
+        return new(output.RawJson, output.Diagnostics);
+    }
 
     private async Task<AiListModelOutput> SendAsync(AiProfileInput input, Func<HttpRequestMessage> createRequest,
         Func<JsonElement, string> readOutput, CancellationToken cancellationToken)
@@ -144,7 +152,35 @@ public sealed class BedrockProfileExtractionProvider(
         return request;
     }
 
-    private static string ReadListOutput(JsonElement root)
+    private HttpRequestMessage CreateScalarRequest(AiProfileInput input, IReadOnlyList<AiRoleReference> roles)
+    {
+        var content = new List<object>();
+        if (input.Pdf is not null)
+            content.Add(new { document = new { format = "pdf", name = "CV", source = new { bytes = Convert.ToBase64String(input.Pdf) } } });
+        content.Add(new { text = ScalarProfileExtractionPrompt.User(input, roles) });
+        var request = new HttpRequestMessage(HttpMethod.Post,
+            $"https://bedrock-runtime.{_options.Region}.amazonaws.com/model/{Uri.EscapeDataString(_options.ModelId)}/converse");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
+        request.Content = JsonContent.Create(new
+        {
+            system = new[] { new { text = ScalarProfileExtractionPrompt.System } },
+            messages = new[] { new { role = "user", content } },
+            inferenceConfig = new { maxTokens = 4096, temperature = 0.1 },
+            additionalModelRequestFields = new { reasoningConfig = new { type = "disabled" } },
+            toolConfig = new
+            {
+                tools = new[] { new { toolSpec = new { name = ScalarProfileExtractionPrompt.ToolName,
+                    description = "Extract only explicitly supported scalar profile facts, not lists.",
+                    inputSchema = new { json = ScalarProfileExtractionPrompt.Schema(roles) } } } },
+                toolChoice = new { tool = new { name = ScalarProfileExtractionPrompt.ToolName } }
+            }
+        });
+        return request;
+    }
+
+    private static string ReadListOutput(JsonElement root) => ReadToolOutput(root, ListExtractionPrompt.ToolName);
+
+    private static string ReadToolOutput(JsonElement root, string toolName)
     {
         if (ReadStopReason(root) != "tool_use" ||
             !root.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Object ||
@@ -155,7 +191,7 @@ public sealed class BedrockProfileExtractionProvider(
         var block = content[0];
         if (block.ValueKind != JsonValueKind.Object || block.EnumerateObject().Count() != 1 ||
             !block.TryGetProperty("toolUse", out var tool) || tool.ValueKind != JsonValueKind.Object ||
-            !tool.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String || name.GetString() != ListExtractionPrompt.ToolName ||
+            !tool.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String || name.GetString() != toolName ||
             !tool.TryGetProperty("toolUseId", out var id) || id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString()) ||
             !tool.TryGetProperty("input", out var input) || input.ValueKind != JsonValueKind.Object)
             throw new AiException(AiFailure.InvalidOutput);

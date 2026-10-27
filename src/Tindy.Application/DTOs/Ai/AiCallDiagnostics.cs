@@ -11,3 +11,5 @@ public sealed record AiCallDiagnostics(
     [property: JsonPropertyName("failure_reason")] string? FailureReason = null);
 
 public sealed record AiListModelOutput(string RawJson, AiCallDiagnostics Diagnostics);
+
+public sealed record AiScalarProfileModelOutput(string RawJson, AiCallDiagnostics Diagnostics);
