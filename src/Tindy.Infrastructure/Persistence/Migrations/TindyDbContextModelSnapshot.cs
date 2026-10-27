@@ -419,6 +419,274 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.ToTable("profile_experience_skills", (string)null);
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.Project", b =>
+                {
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("project_id");
+
+                    b.Property<DateTime?>("ArchivedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("archived_at");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("category");
+
+                    b.Property<string>("ColorTheme")
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("indigo")
+                        .HasColumnName("color_theme");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<string>("DifficultyLevel")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("intermediate")
+                        .HasColumnName("difficulty_level");
+
+                    b.Property<string>("Duration")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("3 months")
+                        .HasColumnName("duration");
+
+                    b.Property<int>("ExpectedCommitmentHours")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(10)
+                        .HasColumnName("expected_commitment_hours");
+
+                    b.PrimitiveCollection<string>("Goals")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("goals");
+
+                    b.Property<int>("InitialTeamSize")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1)
+                        .HasColumnName("initial_team_size");
+
+                    b.Property<Guid>("LeaderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("leader_id");
+
+                    b.Property<int>("MaxTeamCapacity")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(5)
+                        .HasColumnName("max_team_capacity");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("RecruitmentClosingDays")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(14)
+                        .HasColumnName("recruitment_closing_days");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("recruiting")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Tagline")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("tagline");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("ProjectId");
+
+                    b.HasIndex("Category")
+                        .HasDatabaseName("ix_projects_category");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("ix_projects_created_at");
+
+                    b.HasIndex("LeaderId")
+                        .HasDatabaseName("ix_projects_leader_id");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("ix_projects_status");
+
+                    b.ToTable("projects", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_projects_hours_range", "expected_commitment_hours >= 1 AND expected_commitment_hours <= 40");
+
+                            t.HasCheckConstraint("ck_projects_team_capacity", "max_team_capacity >= initial_team_size");
+                        });
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.ProjectMember", b =>
+                {
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("project_id");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<bool>("IsLeader")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_leader");
+
+                    b.Property<DateTime>("JoinedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("joined_at");
+
+                    b.Property<string>("RoleTitle")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("role_title");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("active")
+                        .HasColumnName("status");
+
+                    b.HasKey("ProjectId", "UserId");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_project_members_user_id");
+
+                    b.ToTable("project_members", (string)null);
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.ProjectPosition", b =>
+                {
+                    b.Property<Guid>("PositionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("position_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<string>("ExperienceLevel")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("intermediate")
+                        .HasColumnName("experience_level");
+
+                    b.Property<int>("FilledCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("filled_count");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("project_id");
+
+                    b.Property<int>("RequiredCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1)
+                        .HasColumnName("required_count");
+
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("role_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("open")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("title");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("PositionId");
+
+                    b.HasIndex("ProjectId")
+                        .HasDatabaseName("ix_project_positions_project_id");
+
+                    b.HasIndex("RoleId")
+                        .HasDatabaseName("ix_project_positions_role_id");
+
+                    b.ToTable("project_positions", (string)null);
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.ProjectPositionSkill", b =>
+                {
+                    b.Property<Guid>("PositionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("position_id");
+
+                    b.Property<Guid>("SkillId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("skill_id");
+
+                    b.Property<bool>("IsRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_required");
+
+                    b.Property<string>("MinimumExperienceLevel")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("minimum_experience_level");
+
+                    b.HasKey("PositionId", "SkillId");
+
+                    b.HasIndex("SkillId")
+                        .HasDatabaseName("ix_position_skills_skill_id");
+
+                    b.ToTable("position_skills", (string)null);
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.Role", b =>
                 {
                     b.Property<Guid>("RoleId")
@@ -1178,6 +1446,74 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("Skill");
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.Project", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.User", "Leader")
+                        .WithMany("LedProjects")
+                        .HasForeignKey("LeaderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Leader");
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.ProjectMember", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.Project", "Project")
+                        .WithMany("Members")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Tindy.Application.Entities.User", "User")
+                        .WithMany("ProjectMemberships")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.ProjectPosition", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.Project", "Project")
+                        .WithMany("Positions")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Tindy.Application.Entities.ProfessionalRole", "Role")
+                        .WithMany("ProjectPositions")
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+
+                    b.Navigation("Role");
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.ProjectPositionSkill", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.ProjectPosition", "Position")
+                        .WithMany("PositionSkills")
+                        .HasForeignKey("PositionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Tindy.Application.Entities.Skill", "Skill")
+                        .WithMany("PositionSkills")
+                        .HasForeignKey("SkillId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Position");
+
+                    b.Navigation("Skill");
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.RolePermission", b =>
                 {
                     b.HasOne("Tindy.Application.Entities.Permission", "Permission")
@@ -1375,12 +1711,26 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Tindy.Application.Entities.ProfessionalRole", b =>
                 {
+                    b.Navigation("ProjectPositions");
+
                     b.Navigation("UserProfiles");
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.ProfileExperience", b =>
                 {
                     b.Navigation("ExperienceSkills");
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.Project", b =>
+                {
+                    b.Navigation("Members");
+
+                    b.Navigation("Positions");
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.ProjectPosition", b =>
+                {
+                    b.Navigation("PositionSkills");
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.Role", b =>
@@ -1392,6 +1742,8 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Tindy.Application.Entities.Skill", b =>
                 {
+                    b.Navigation("PositionSkills");
+
                     b.Navigation("ProfileExperienceSkills");
 
                     b.Navigation("SkillCategorySkills");
@@ -1412,6 +1764,8 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
                     b.Navigation("ExternalAuthAccounts");
 
+                    b.Navigation("LedProjects");
+
                     b.Navigation("MediaAssets");
 
                     b.Navigation("OnboardingSteps");
@@ -1419,6 +1773,8 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("Profile");
 
                     b.Navigation("ProfileExperiences");
+
+                    b.Navigation("ProjectMemberships");
 
                     b.Navigation("UserRoles");
                 });

@@ -16,4 +16,7 @@ public class ProfessionalRole
 
     public ICollection<UserProfile> UserProfiles { get; set; }
         = new List<UserProfile>();
+
+    public ICollection<ProjectPosition> ProjectPositions { get; set; }
+        = new List<ProjectPosition>();
 }

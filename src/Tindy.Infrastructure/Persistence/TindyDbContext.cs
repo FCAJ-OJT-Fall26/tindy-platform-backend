@@ -26,6 +26,14 @@ public class TindyDbContext : DbContext
 
     public DbSet<UserCertificateAttachment> UserCertificateAttachments => Set<UserCertificateAttachment>();
 
+    public DbSet<Project> Projects => Set<Project>();
+
+    public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
+
+    public DbSet<ProjectPosition> ProjectPositions => Set<ProjectPosition>();
+
+    public DbSet<ProjectPositionSkill> PositionSkills => Set<ProjectPositionSkill>();
+
     public DbSet<Role> Roles
         => Set<Role>();
 

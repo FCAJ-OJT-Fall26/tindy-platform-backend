@@ -27,4 +27,6 @@ public class User
     = new List<ExternalAuthAccount>();   
     public ICollection<UserOnboardingStep> OnboardingSteps
     { get; set; } = new List<UserOnboardingStep>();
+    public ICollection<Project> LedProjects { get; set; } = new List<Project>();
+    public ICollection<ProjectMember> ProjectMemberships { get; set; } = new List<ProjectMember>();
 }
