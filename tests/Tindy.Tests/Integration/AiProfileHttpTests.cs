@@ -395,8 +395,8 @@ public sealed class AiProfileHttpTests
             Skills = skills;
             var output = InvalidOutput ? "{invalid}" : JsonSerializer.Serialize(new
             {
-                skill_ids = new[] { skills.Single().Key },
-                experiences = new[] { new { role_title = "Developer", description = "Built APIs", skill_ids = new[] { skills.Single().Key } } },
+                skill_ids = new[] { new { key = skills.Single().Key, evidence = skills.Single().Name } },
+                experiences = new[] { new { role_title = "Developer", description = "Built APIs", skill_ids = new[] { new { key = skills.Single().Key, evidence = skills.Single().Name } } } },
                 certificates = new[] { new { title = "Certificate" } },
                 warnings = Array.Empty<object>()
             });

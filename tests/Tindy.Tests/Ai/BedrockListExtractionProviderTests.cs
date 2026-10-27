@@ -12,7 +12,7 @@ namespace Tindy.Tests.Ai;
 
 public sealed class BedrockListExtractionProviderTests
 {
-    private const string Lists = "{\"skill_ids\":[\"s1\"],\"experiences\":[],\"certificates\":[],\"warnings\":[]}";
+    private const string Lists = "{\"skill_ids\":[{\"key\":\"s1\",\"evidence\":\"Python\"}],\"experiences\":[],\"certificates\":[],\"warnings\":[]}";
 
     [Fact]
     public async Task UsesOneForcedToolAndPutsPdfBeforeTextWithNoUuidsOrRoles()
@@ -30,7 +30,7 @@ public sealed class BedrockListExtractionProviderTests
             var keys = schema.GetProperty("properties").GetProperty("skill_ids");
             Assert.Equal(30, keys.GetProperty("maxItems").GetInt32());
             Assert.True(keys.GetProperty("uniqueItems").GetBoolean());
-            Assert.Equal("s1", keys.GetProperty("items").GetProperty("enum")[0].GetString());
+            Assert.Equal("s1", keys.GetProperty("items").GetProperty("properties").GetProperty("key").GetProperty("enum")[0].GetString());
             Assert.Equal(4096, root.GetProperty("inferenceConfig").GetProperty("maxTokens").GetInt32());
             var content = root.GetProperty("messages")[0].GetProperty("content");
             Assert.True(content[0].TryGetProperty("document", out _));
