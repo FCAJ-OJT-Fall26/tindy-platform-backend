@@ -32,6 +32,15 @@ public sealed class BedrockScalarProfileProviderTests
             Assert.False(fields.TryGetProperty("skill_ids", out _));
             Assert.False(fields.TryGetProperty("bio", out _));
             Assert.False(fields.TryGetProperty("preferred_role_id", out _));
+            var paths = properties.GetProperty("warnings").GetProperty("items").GetProperty("properties")
+                .GetProperty("field").GetProperty("enum").EnumerateArray().Select(value => value.GetString()).ToArray();
+            Assert.Contains("profile.university", paths);
+            Assert.Contains("profile.learning_goals", paths);
+            Assert.Contains("profile.preferred_role_id", paths);
+            Assert.DoesNotContain("university", paths);
+            Assert.DoesNotContain("profile.preferred_role_key", paths);
+            Assert.Contains("introduction", fields.GetProperty("learning_goals").GetProperty("description").GetString());
+            Assert.Contains("contributions", fields.GetProperty("previous_projects_and_contribution").GetProperty("description").GetString());
             Assert.Equal(4096, root.GetProperty("inferenceConfig").GetProperty("maxTokens").GetInt32());
             return Success();
         });

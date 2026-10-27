@@ -28,6 +28,7 @@ public sealed class AiScalarProfileDraftValidatorTests
     [InlineData("Tôi mong muốn làm AI Engineer.", true)]
     [InlineData("AI Engineer", false)]
     [InlineData("I am an AI Engineer. I want to work in a technical environment.", false)]
+    [InlineData("Tôi mong muốn được làm việc trong môi trường kỹ thuật cao, đề cao tư duy logic, học hỏi liên tục và tinh thần hợp tác để đóng góp lâu dài vào chiến lược AI của doanh nghiệp.", false)]
     [InlineData("I do not want to be an AI Engineer.", false)]
     [InlineData(null, false)]
     public void RequiresAnAffirmativePreferenceRatherThanCurrentRole(string? statement, bool accepted)
@@ -65,5 +66,30 @@ public sealed class AiScalarProfileDraftValidatorTests
         Assert.Null(draft.Profile.DisplayName);
         Assert.Null(draft.Profile.PreferredRoleId);
         Assert.Contains(draft.Warnings, warning => warning.Code == "INSUFFICIENT_EVIDENCE");
+    }
+
+    [Theory]
+    [InlineData("university", false)]
+    [InlineData("learning_goals", false)]
+    [InlineData("profile.university", true)]
+    [InlineData("profile.learning_goals", true)]
+    public void WarningPathsRemainStrictAndCannotBypassRoleEvidence(string path, bool valid)
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            profile = new { display_name = "Lan", current_role = "AI Engineer", preferred_role_key = "r1",
+                preferred_role_statement = "Tôi mong muốn được làm việc trong môi trường kỹ thuật cao." },
+            warnings = new[] { new { field = path, code = "MISSING_INFORMATION", message = "Not stated." } }
+        });
+        if (!valid)
+        {
+            var error = Assert.Throws<AiException>(() => AiScalarProfileDraftValidator.Parse(json, Roles));
+            Assert.Equal(AiFailure.InvalidOutput, error.Failure);
+            Assert.Equal(json, error.RawOutput);
+            return;
+        }
+        var result = AiScalarProfileDraftValidator.Parse(json, Roles);
+        Assert.Null(result.Profile.PreferredRoleId);
+        Assert.Contains(result.Warnings, warning => warning.Field == "profile.preferred_role_id" && warning.Code == "INSUFFICIENT_EVIDENCE");
     }
 }

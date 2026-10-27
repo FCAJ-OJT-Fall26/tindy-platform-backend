@@ -20,14 +20,31 @@ internal static class ScalarProfileExtractionPrompt
         preferred_role_key is ONLY an explicit desired role, never the current title or an inferred career path.
         Select only a supplied r-key and quote the explicit preference in preferred_role_statement, otherwise
         both are null. A current AI Engineer title plus a wish for a technical workplace is NOT a desired role.
+        The preference quote itself must name the desired role. If it only describes a workplace, teamwork,
+        learning or contributing to a company's strategy, return BOTH role fields null, even if the title
+        elsewhere matches the catalog. Never substitute the current title for words missing from that quote.
         If an explicit preferred role has no catalog match, key=null and warn UNMATCHED_CATALOG.
         available_hours_per_week is a stated integer 1..40; do not calculate it from employment dates.
-        Interests, learning goals, personal contributions and technologies to learn require explicit personal
-        statements. Summarize concisely without adding technologies, achievements or project ownership.
+        Read the introduction/career objective as well as the employment bullets, not just labeled fields.
+        A dedicated section or a first-person pronoun is NOT required when the CV clearly describes this person.
+        professional_interests: explicitly stated fields of professional interest or work focus, not every skill.
+        learning_goals: stated wishes to learn, deepen knowledge or expand expertise. For example, a Vietnamese
+        sentence 'Mục tiêu của tôi là tiếp tục mở rộng hiểu biết chuyên sâu về X và Y' explicitly supplies a
+        learning goal; it must not be marked missing just because there is no 'Learning goals' heading.
+        technologies_to_learn: only technologies/topics explicitly targeted by those learning statements.
+        The same statement can support both learning_goals (the goal) and technologies_to_learn (named topics).
+        previous_projects_and_contribution: concise factual summary of the person's stated contributions in
+        employment/project bullets; do not require a separately named project, and do not claim sole ownership.
+        Summarize in the source language without adding technologies, achievements or ownership.
+        Before setting these four fields null or warning MISSING_INFORMATION, reread the introduction and
+        relevant bullets. Do not infer missing interests or future goals merely from a list of current skills.
         Future learning targets are not current skills; this tool does not select any skill IDs.
         Text and PDF have equal authority. Conflicting fields stay null and get CONFLICT warnings.
         Return warnings with existing codes only: CONFLICT, INSUFFICIENT_EVIDENCE, INCOMPLETE_DATE,
         UNMATCHED_CATALOG, MISSING_INFORMATION, LIMIT_EXCEEDED. Paths are profile.<public_field> or $.
+        Always use the complete warning path, e.g. profile.university, never university. Role warnings use
+        profile.preferred_role_id, never preferred_role_key or preferred_role_statement. Unknown nullable
+        fields may simply stay null; do not generate a separate warning for every absent optional field.
         Keep every response within 4096 tokens. No preamble or extra tool calls. No automatic publication.
         """;
 
@@ -50,15 +67,22 @@ internal static class ScalarProfileExtractionPrompt
         };
         var fields = new JsonObject();
         foreach (var (name, maximum) in limits) fields[name] = Text(maximum);
+        fields["professional_interests"]!["description"] = "Explicit professional interests/work focus in the introduction or objectives. Do not infer from skills alone.";
+        fields["learning_goals"]!["description"] = "Explicit learning/deeper-knowledge objectives anywhere in the CV, including the introduction. Summarize stated targets; no dedicated heading required.";
+        fields["technologies_to_learn"]!["description"] = "Topics/technologies explicitly named as future learning targets. May use the same evidence as learning_goals. Current skills alone are insufficient.";
+        fields["previous_projects_and_contribution"]!["description"] = "Summarize this person's explicitly described employment/project contributions. Named project and first-person wording are not required. Do not invent ownership.";
         fields["available_hours_per_week"] = new JsonObject { ["type"] = new JsonArray("integer", "null"), ["minimum"] = 1, ["maximum"] = 40 };
         var keys = new JsonArray { null };
         foreach (var role in roles) keys.Add(role.Key);
         fields["preferred_role_key"] = new JsonObject { ["type"] = new JsonArray("string", "null"), ["enum"] = keys,
-            ["description"] = "Null unless the person explicitly wants this role. Never infer from their current title." };
+            ["description"] = "Null unless the preference quote itself names this desired role. Workplace preferences/current title/learning goals do not qualify. Return both role fields null in those cases." };
         fields["preferred_role_statement"] = Text(500);
+        fields["preferred_role_statement"]!["description"] = "Verbatim explicit desired-role statement naming the role, otherwise null. A wish for a technical workplace does not name a desired role.";
+        var warningPaths = new JsonArray("$", "profile", "profile.preferred_role_id");
+        foreach (var name in AiScalarProfileDraftValidator.ScalarFields.Order(StringComparer.Ordinal)) warningPaths.Add("profile." + name);
         var warnings = Object(new JsonObject
         {
-            ["field"] = new JsonObject { ["type"] = "string", ["minLength"] = 1, ["maxLength"] = 200 },
+            ["field"] = new JsonObject { ["type"] = "string", ["enum"] = warningPaths },
             ["code"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("CONFLICT", "INSUFFICIENT_EVIDENCE", "INCOMPLETE_DATE", "UNMATCHED_CATALOG", "MISSING_INFORMATION", "LIMIT_EXCEEDED") },
             ["message"] = new JsonObject { ["type"] = "string", ["minLength"] = 1, ["maxLength"] = 500 }
         });
