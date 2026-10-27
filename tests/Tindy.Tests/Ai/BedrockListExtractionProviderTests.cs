@@ -125,7 +125,7 @@ public sealed class BedrockListExtractionProviderTests
     }
 
     private static BedrockProfileExtractionProvider Create(HttpMessageHandler handler) =>
-        new(new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan }, Options.Create(new BedrockOptions { Enabled = true, ApiKey = "test-key" }),
+        new(new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan }, Options.Create(new BedrockOptions { Enabled = true, ApiKey = "test-key", ModelId = BedrockOptions.NovaModel, Region = "ap-southeast-1" }),
             NullLogger<BedrockProfileExtractionProvider>.Instance);
 
     private static HttpResponseMessage Success(string stop = "tool_use", string name = "extract_lists", int count = 1) => new(HttpStatusCode.OK)

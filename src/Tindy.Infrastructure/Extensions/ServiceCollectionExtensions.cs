@@ -84,6 +84,7 @@ public static class ServicesCollectionExtensions
         services.AddScoped<IJwtTokenService, JwtTokenService>();
 
         services.Configure<BedrockOptions>(configuration.GetSection("Bedrock"));
+        services.AddSingleton<IPdfPageRenderer, PopplerPdfPageRenderer>();
         services.AddSingleton<BedrockProfileExtractionProvider>(provider =>
             new BedrockProfileExtractionProvider(
                 new HttpClient(new SocketsHttpHandler
@@ -93,7 +94,8 @@ public static class ServicesCollectionExtensions
                 })
                 { Timeout = Timeout.InfiniteTimeSpan },
                 provider.GetRequiredService<IOptions<BedrockOptions>>(),
-                provider.GetRequiredService<ILogger<BedrockProfileExtractionProvider>>()));
+                provider.GetRequiredService<ILogger<BedrockProfileExtractionProvider>>(),
+                provider.GetRequiredService<IPdfPageRenderer>()));
 
         services.AddSingleton<IProfileExtractionProvider>(provider => provider.GetRequiredService<BedrockProfileExtractionProvider>());
         services.AddSingleton<IAiScalarProfileProvider>(provider => provider.GetRequiredService<BedrockProfileExtractionProvider>());
