@@ -172,3 +172,29 @@ public sealed record GetProjectsQuery(
     int Page = 1,
     int PageSize = 10,
     string? SortBy = "newest");
+
+public sealed record CreatePositionRequest(
+    Guid RoleId,
+    string Title,
+    int RequiredCount = 1,
+    string? ExperienceLevel = "intermediate",
+    string? Description = null);
+
+public sealed record UpdatePositionRequest(
+    string? Title,
+    int? RequiredCount,
+    string? ExperienceLevel,
+    string? Status,
+    string? Description);
+
+public sealed record AddPositionSkillRequest(
+    Guid SkillId,
+    bool IsRequired = true,
+    string? MinimumExperienceLevel = null);
+
+public sealed record AddPositionSkillResponse(
+    Guid PositionId,
+    Guid SkillId,
+    string SkillName,
+    bool IsRequired);
+

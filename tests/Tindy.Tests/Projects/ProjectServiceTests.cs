@@ -304,5 +304,86 @@ public sealed class ProjectServiceTests
             var valid = skillIds.Where(id => ValidSkillIds.Contains(id)).ToList();
             return Task.FromResult<IReadOnlyList<Guid>>(valid);
         }
+
+        public Task<IReadOnlyList<ProjectPosition>> GetPositionsByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default)
+        {
+            var project = Projects.FirstOrDefault(p => p.ProjectId == projectId);
+            var positions = project?.Positions?.ToList() ?? new List<ProjectPosition>();
+            return Task.FromResult<IReadOnlyList<ProjectPosition>>(positions);
+        }
+
+        public Task<ProjectPosition?> GetPositionWithDetailsAsync(Guid projectId, Guid positionId, CancellationToken cancellationToken = default)
+        {
+            var project = Projects.FirstOrDefault(p => p.ProjectId == projectId);
+            var pos = project?.Positions?.FirstOrDefault(p => p.PositionId == positionId);
+            return Task.FromResult(pos);
+        }
+
+        public Task<ProjectPosition> AddPositionAsync(ProjectPosition position, CancellationToken cancellationToken = default)
+        {
+            var project = Projects.FirstOrDefault(p => p.ProjectId == position.ProjectId);
+            project?.Positions.Add(position);
+            return Task.FromResult(position);
+        }
+
+        public Task UpdatePositionAsync(ProjectPosition position, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task DeletePositionAsync(ProjectPosition position, CancellationToken cancellationToken = default)
+        {
+            var project = Projects.FirstOrDefault(p => p.ProjectId == position.ProjectId);
+            project?.Positions.Remove(position);
+            return Task.CompletedTask;
+        }
+
+        public Task<Skill?> GetSkillByIdAsync(Guid skillId, CancellationToken cancellationToken = default)
+        {
+            if (ValidSkillIds.Contains(skillId))
+            {
+                return Task.FromResult<Skill?>(new Skill { SkillId = skillId, Name = "Skill " + skillId.ToString()[..4], IsActive = true });
+            }
+            return Task.FromResult<Skill?>(null);
+        }
+
+        public Task<ProjectPositionSkill?> GetPositionSkillAsync(Guid positionId, Guid skillId, CancellationToken cancellationToken = default)
+        {
+            foreach (var prj in Projects)
+            {
+                var pos = prj.Positions?.FirstOrDefault(p => p.PositionId == positionId);
+                var link = pos?.PositionSkills?.FirstOrDefault(s => s.SkillId == skillId);
+                if (link != null) return Task.FromResult<ProjectPositionSkill?>(link);
+            }
+            return Task.FromResult<ProjectPositionSkill?>(null);
+        }
+
+        public Task AddPositionSkillAsync(ProjectPositionSkill positionSkill, CancellationToken cancellationToken = default)
+        {
+            foreach (var prj in Projects)
+            {
+                var pos = prj.Positions?.FirstOrDefault(p => p.PositionId == positionSkill.PositionId);
+                if (pos != null)
+                {
+                    pos.PositionSkills.Add(positionSkill);
+                    break;
+                }
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task DeletePositionSkillAsync(ProjectPositionSkill positionSkill, CancellationToken cancellationToken = default)
+        {
+            foreach (var prj in Projects)
+            {
+                var pos = prj.Positions?.FirstOrDefault(p => p.PositionId == positionSkill.PositionId);
+                if (pos != null)
+                {
+                    pos.PositionSkills.Remove(positionSkill);
+                    break;
+                }
+            }
+            return Task.CompletedTask;
+        }
     }
 }

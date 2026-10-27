@@ -168,4 +168,70 @@ public sealed class ProjectRepository : IProjectRepository
             .Select(s => s.SkillId)
             .ToListAsync(cancellationToken);
     }
+
+    public async Task<IReadOnlyList<ProjectPosition>> GetPositionsByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        return await _context.ProjectPositions
+            .Include(p => p.Role)
+            .Include(p => p.PositionSkills)
+                .ThenInclude(ps => ps.Skill)
+            .Where(p => p.ProjectId == projectId)
+            .OrderBy(p => p.CreatedAt)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<ProjectPosition?> GetPositionWithDetailsAsync(Guid projectId, Guid positionId, CancellationToken cancellationToken = default)
+    {
+        return await _context.ProjectPositions
+            .Include(p => p.Role)
+            .Include(p => p.Project)
+            .Include(p => p.PositionSkills)
+                .ThenInclude(ps => ps.Skill)
+            .SingleOrDefaultAsync(p => p.ProjectId == projectId && p.PositionId == positionId, cancellationToken);
+    }
+
+    public async Task<ProjectPosition> AddPositionAsync(ProjectPosition position, CancellationToken cancellationToken = default)
+    {
+        _context.ProjectPositions.Add(position);
+        await _context.SaveChangesAsync(cancellationToken);
+        return position;
+    }
+
+    public async Task UpdatePositionAsync(ProjectPosition position, CancellationToken cancellationToken = default)
+    {
+        position.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeletePositionAsync(ProjectPosition position, CancellationToken cancellationToken = default)
+    {
+        _context.ProjectPositions.Remove(position);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<Skill?> GetSkillByIdAsync(Guid skillId, CancellationToken cancellationToken = default)
+    {
+        return await _context.Skills
+            .SingleOrDefaultAsync(s => s.SkillId == skillId && s.IsActive, cancellationToken);
+    }
+
+    public async Task<ProjectPositionSkill?> GetPositionSkillAsync(Guid positionId, Guid skillId, CancellationToken cancellationToken = default)
+    {
+        return await _context.PositionSkills
+            .Include(ps => ps.Skill)
+            .SingleOrDefaultAsync(ps => ps.PositionId == positionId && ps.SkillId == skillId, cancellationToken);
+    }
+
+    public async Task AddPositionSkillAsync(ProjectPositionSkill positionSkill, CancellationToken cancellationToken = default)
+    {
+        _context.PositionSkills.Add(positionSkill);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeletePositionSkillAsync(ProjectPositionSkill positionSkill, CancellationToken cancellationToken = default)
+    {
+        _context.PositionSkills.Remove(positionSkill);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
 }
+
