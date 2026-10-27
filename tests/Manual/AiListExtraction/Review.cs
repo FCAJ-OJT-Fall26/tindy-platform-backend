@@ -5,7 +5,7 @@ using Tindy.Application.DTOs.Ai;
 
 namespace Tindy.Manual.AiListExtraction;
 
-internal sealed record ExpectedExperience(string Employer, string Role, string StartDate, string? EndDate, bool IsOngoing);
+internal sealed record ExpectedExperience(string Employer, string? Role, string StartDate, string? EndDate, bool IsOngoing, string? SourceRole = null);
 internal sealed record ExpectedCertificate(string Title);
 internal sealed record Expectations(string[] RequiredSkills, string[] ForbiddenSkills,
     ExpectedExperience[] Experiences, ExpectedCertificate[] Certificates,
@@ -31,7 +31,8 @@ internal static class Review
         return failures;
     }
 
-    public static IReadOnlyList<string> Check(ProfileDraftResponse draft, IReadOnlyDictionary<Guid, string> catalog, Expectations expected)
+    public static IReadOnlyList<string> Check(ProfileDraftResponse draft, IReadOnlyDictionary<Guid, string> catalog, Expectations expected,
+        IReadOnlySet<string>? activeRoleNames = null)
     {
         var failures = new List<string>();
         var skills = draft.Profile.SkillIds.Select(id => catalog.GetValueOrDefault(id, "UNKNOWN_ID")).ToArray();
@@ -49,6 +50,8 @@ internal static class Review
             if (!Equal(value.RoleTitle, item.Role) || value.StartDate != item.StartDate || value.EndDate != item.EndDate || value.IsOngoing != item.IsOngoing)
                 failures.Add($"Employment role/date mismatch: {item.Employer}; role='{value.RoleTitle}', start='{value.StartDate}', end='{value.EndDate}', ongoing={value.IsOngoing}; expected role='{item.Role}', start='{item.StartDate}', end='{item.EndDate}', ongoing={item.IsOngoing}");
             if (value.ProjectName is not null) failures.Add("Invented project name for employment entry: " + item.Employer);
+            if (item.SourceRole is not null && !Contains(value.Description, item.SourceRole))
+                failures.Add("Original source role/level was not preserved: " + item.Employer);
         }
         if (draft.Certificates.Count != expected.Certificates.Length) failures.Add("Certificate count mismatch.");
         foreach (var item in expected.Certificates)
@@ -64,10 +67,12 @@ internal static class Review
             failures.Add("Unsupported inferred skill in an experience.");
         if (draft.Experiences.Any(item => item.SkillIds.Distinct().Count() != item.SkillIds.Count || item.SkillIds.Any(id => !catalog.ContainsKey(id))))
             failures.Add("Invalid or duplicate experience skill UUIDs.");
+        if (activeRoleNames is not null && draft.Experiences.Any(item => item.RoleTitle is not null && !activeRoleNames.Contains(item.RoleTitle)))
+            failures.Add("Experience role title is outside the active database catalog.");
         return failures;
     }
 
-    private static bool Equal(string? first, string second) => Normalize(first) == Normalize(second);
+    private static bool Equal(string? first, string? second) => Normalize(first) == Normalize(second);
     private static bool Contains(string? first, string second) => Normalize(first).Contains(Normalize(second), StringComparison.Ordinal);
     private static string Normalize(string? value) => string.Concat((value ?? "").Normalize(NormalizationForm.FormD)
         .Where(character => CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark && char.IsLetterOrDigit(character))).ToUpperInvariant();

@@ -10,9 +10,9 @@ Backend gọi Amazon Bedrock Converse trực tiếp bằng `HttpClient` và Bear
 
 ## Profile và danh sách chạy song song
 
-`POST /api/ai/extract-profile` chạy song song `extract_profile_scalars` và `extract_lists`. Lượt profile nhận role catalog mã `r1`, `r2`, …; lượt danh sách nhận skill catalog mã `s1`, `s2`, …. Schema công khai giữ nguyên: trường đơn có bằng chứng được điền, trường chưa rõ giữ null; danh sách cung cấp skills/experiences/certificates. Không tự ghi database, không sửa frontend. Current role không tự trở thành preferred role; role mong muốn cần câu nêu rõ nguyện vọng và khớp catalog.
+`POST /api/ai/extract-profile` chạy song song `extract_profile_scalars` và `extract_lists`. Lượt profile nhận role catalog mã `r1`, `r2`, …; lượt danh sách nhận skill catalog mã `s1`, `s2`, … cùng role catalog cho kinh nghiệm. Schema công khai giữ nguyên: trường đơn có bằng chứng được điền, trường chưa rõ giữ null; danh sách cung cấp skills/experiences/certificates. Không tự ghi database, không sửa frontend. Current role không tự trở thành preferred role; role mong muốn cần câu nêu rõ nguyện vọng và khớp catalog.
 
-Mỗi lượt sử dụng một forced tool tương ứng, catalog mã ngắn theo request và PDF trước hướng dẫn text. Mỗi skill cần một trích đoạn bằng chứng khớp tên hoặc tên tương đương; gợi ý thiếu bằng chứng phù hợp bị bỏ và có warning, không tự chấp nhận chỉ vì UUID tồn tại. Backend đổi mã về UUID active, giữ tên công ty trong mô tả và chuẩn hóa chuỗi ngày nguồn theo độ chính xác thật. `SQL` được giữ nếu catalog có mục SQL; không suy diễn PostgreSQL/MySQL/SQL Server từ SQL chung.
+Mỗi lượt sử dụng một forced tool tương ứng, catalog mã ngắn theo request và PDF trước hướng dẫn text. Mỗi skill cần một trích đoạn bằng chứng khớp tên hoặc tên tương đương; gợi ý thiếu bằng chứng phù hợp bị bỏ và có warning, không tự chấp nhận chỉ vì UUID tồn tại. Backend đổi skill key về UUID active và experience role key về đúng tên role trong DB. Role title tiếng Việt/cấp bậc được giữ trong mô tả khi map sang tên nhóm nghề nghiệp chuẩn; không có tương đương thì để null kèm UNMATCHED_CATALOG. Không tạo/sửa bản ghi role. Backend giữ tên công ty trong mô tả và chuẩn hóa chuỗi ngày nguồn theo độ chính xác thật. `SQL` được giữ nếu catalog có mục SQL; không suy diễn PostgreSQL/MySQL/SQL Server từ SQL chung.
 
 ## Cấu hình không nhạy cảm
 
@@ -90,3 +90,5 @@ Provider/model capabilities có thể thay đổi; kiểm tra lại nguồn chí
 Build solution đã qua, không warning/lỗi. Bộ regression không cần Docker: 530/530 test qua (máy local cần `DOTNET_USE_POLLING_FILE_WATCHER=1 DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false` để tránh giới hạn inotify khi tạo nhiều host test). Trong đó có 234 test AI/provider/HTTP. Manual reviewer self-test offline qua; frontend hiện có qua typecheck, build và 13/13 kiểm tra trình duyệt AI mà không sửa file frontend.
 
 Đây là bằng chứng offline/contract. Kiểm thử hai lượt thật với PDF đang chờ quyền gửi tài liệu cá nhân tới Amazon Bedrock; chưa có kết quả live cho giai đoạn profile. Kỳ vọng và tiến độ được giữ ngoài repository, không ghi báo cáo thành công khi chưa gọi model.
+
+Role-title follow-up: 252/252 test AI/provider/HTTP đã qua; manual reviewer self-test kiểm tra thêm membership của role title trong catalog active. Đây là kiểm thử offline, chưa xác minh việc model chọn đúng nhóm nghề nghiệp trên PDF thật.

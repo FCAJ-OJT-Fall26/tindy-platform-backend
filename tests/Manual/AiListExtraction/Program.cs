@@ -25,6 +25,9 @@ if (args is ["--self-test"])
         Review.Check(valid with { Certificates = [new() { Title = "Certificate", IssuedAt = "2021-01-01" }] }, catalog, expected).Count == 0 ||
         Review.Check(valid, new Dictionary<Guid, string> { [skillId] = "PostgreSQL" }, expected).Count == 0)
         throw new InvalidOperationException("Review self-test failed.");
+    if (Review.Check(valid, catalog, expected, new HashSet<string> { "Developer" }).Count != 0 ||
+        Review.Check(valid, catalog, expected, new HashSet<string> { "AI Engineer" }).Count == 0)
+        throw new InvalidOperationException("Catalog role review self-test failed.");
     var scalarRules = expected with { Profile = new()
     {
         ["display_name"] = JsonSerializer.SerializeToElement("Nguyễn An"),
@@ -87,10 +90,12 @@ for (var run = 1; run <= runs; run++)
     {
         var rows = await scope.ServiceProvider.GetRequiredService<ICatalogRepository>().GetActiveSkillsAsync(null, null, cancellation.Token);
         var catalog = rows.Where(item => item.IsActive).ToDictionary(item => item.SkillId, item => item.Name);
+        var roles = await scope.ServiceProvider.GetRequiredService<ICatalogRepository>().GetActiveProfessionalRolesAsync(null, cancellation.Token);
+        var roleNames = roles.Where(item => item.IsActive).Select(item => item.Name).ToHashSet(StringComparer.Ordinal);
         var result = fullProfile
             ? await scope.ServiceProvider.GetRequiredService<IAiProfileService>().ExtractAsync(new(null, pdf), cancellation.Token)
             : await scope.ServiceProvider.GetRequiredService<IAiListExtractionService>().ExtractAsync(new(null, pdf), cancellation.Token);
-        var failures = Review.Check(result, catalog, expectedRules);
+        var failures = Review.Check(result, catalog, expectedRules, roleNames);
         var profileJson = JsonSerializer.SerializeToElement(result.Profile, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower });
         if (fullProfile) failures = [.. failures, .. Review.CheckScalars(result.Profile, expectedRules)];
         else if (profileJson.EnumerateObject().Any(field => field.Name != "skill_ids" && field.Value.ValueKind != JsonValueKind.Null)) failures = [.. failures, "A scalar profile field was extracted during list-only phase."];
