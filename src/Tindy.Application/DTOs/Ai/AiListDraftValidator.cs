@@ -52,7 +52,8 @@ public static class AiListDraftValidator
         catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException ||
             error is AiException { Failure: AiFailure.InvalidOutput })
         {
-            throw new AiException(AiFailure.InvalidOutput, json);
+            throw new AiException(AiFailure.InvalidOutput, json, "tool_input")
+            { ValidationReason = (error as AiException)?.ValidationReason ?? "invalid_list_schema" };
         }
     }
 

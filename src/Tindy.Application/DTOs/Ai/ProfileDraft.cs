@@ -19,6 +19,7 @@ public sealed record AiCatalogItem(Guid Id, string Name);
 // They are never entities or commands to write a profile.
 public sealed record ProfileDraftResponse
 {
+    [JsonIgnore] public AiCallDiagnostics? Diagnostics { get; init; }
     [JsonRequired] public ProfileDraft Profile { get; init; } = new();
     [JsonRequired] public IReadOnlyList<ExperienceDraft> Experiences { get; init; } = [];
     [JsonRequired] public IReadOnlyList<CertificateDraft> Certificates { get; init; } = [];

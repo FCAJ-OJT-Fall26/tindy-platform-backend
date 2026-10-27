@@ -250,6 +250,7 @@ public static class ServiceCollectionExtensions
 
         // Certificate CRUD service (STEP 09).
         services.AddScoped<ICertificateService, CertificateService>();
+        services.AddScoped<IAiListExtractionService, AiListExtractionService>();
         services.AddScoped<IAiProfileService, AiProfileService>();
 
 

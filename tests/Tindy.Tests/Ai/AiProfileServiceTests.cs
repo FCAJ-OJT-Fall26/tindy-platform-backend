@@ -26,12 +26,12 @@ public sealed class AiProfileServiceTests
         var provider = new FakeProvider();
         var catalog = new FakeCatalog();
         var input = new AiProfileInput(text, pdf ? "%PDF-1.7 test"u8.ToArray() : null);
-        var result = await new AiProfileService(catalog, provider).ExtractAsync(input);
+        var result = await new AiProfileService(new AiListExtractionService(catalog, provider)).ExtractAsync(input);
         Assert.Equal(1, provider.Calls);
         Assert.Equal(input, provider.Input);
-        Assert.Equal(SkillId, Assert.Single(provider.Skills!).Id);
-        Assert.Equal(RoleId, Assert.Single(provider.Roles!).Id);
-        Assert.Equal(2, catalog.Reads);
+        Assert.Equal("s1", Assert.Single(provider.Skills!).Key);
+        Assert.Equal("C#", Assert.Single(provider.Skills!).Name);
+        Assert.Equal(1, catalog.Reads);
         Assert.Contains(result.Warnings, x => x.Code == "INSUFFICIENT_EVIDENCE");
     }
 
@@ -44,7 +44,7 @@ public sealed class AiProfileServiceTests
         var catalog = new FakeCatalog();
         var provider = new FakeProvider();
         await Assert.ThrowsAsync<ProfileValidationException>(() =>
-            new AiProfileService(catalog, provider).ExtractAsync(new(text, null)));
+            new AiProfileService(new AiListExtractionService(catalog, provider)).ExtractAsync(new(text, null)));
         Assert.Equal(0, catalog.Reads);
         Assert.Equal(0, provider.Calls);
     }
@@ -54,9 +54,9 @@ public sealed class AiProfileServiceTests
     {
         var provider = new FakeProvider();
         await Assert.ThrowsAsync<ProfileValidationException>(() =>
-            new AiProfileService(new FakeCatalog(), provider).ExtractAsync(new(new string(' ', 20_001), null)));
+            new AiProfileService(new AiListExtractionService(new FakeCatalog(), provider)).ExtractAsync(new(new string(' ', 20_001), null)));
         Assert.Equal(0, provider.Calls);
-        await new AiProfileService(new FakeCatalog(), provider).ExtractAsync(new(new string('a', 20_000), null));
+        await new AiProfileService(new AiListExtractionService(new FakeCatalog(), provider)).ExtractAsync(new(new string('a', 20_000), null));
         Assert.Equal(1, provider.Calls);
     }
 
@@ -65,7 +65,7 @@ public sealed class AiProfileServiceTests
     {
         var provider = new FakeProvider();
         using var cancellation = new CancellationTokenSource();
-        await new AiProfileService(new FakeCatalog(), provider).ExtractAsync(new("  My README\n", null), cancellation.Token);
+        await new AiProfileService(new AiListExtractionService(new FakeCatalog(), provider)).ExtractAsync(new("  My README\n", null), cancellation.Token);
         Assert.Equal("My README", provider.Input!.Text);
         Assert.Equal(cancellation.Token, provider.Token);
     }
@@ -77,7 +77,7 @@ public sealed class AiProfileServiceTests
     public async Task RejectsInvalidPdfMagicEvenWithValidText(string pdf)
     {
         var provider = new FakeProvider();
-        var error = await Assert.ThrowsAsync<AiException>(() => new AiProfileService(new FakeCatalog(), provider)
+        var error = await Assert.ThrowsAsync<AiException>(() => new AiProfileService(new AiListExtractionService(new FakeCatalog(), provider))
             .ExtractAsync(new("I know C#", Encoding.UTF8.GetBytes(pdf))));
         Assert.Equal(AiFailure.DocumentRejected, error.Failure);
         Assert.Equal(0, provider.Calls);
@@ -89,7 +89,7 @@ public sealed class AiProfileServiceTests
         var pdf = new byte[AiProfileLimits.MaxPdfBytes];
         "%PDF-"u8.CopyTo(pdf);
         var provider = new FakeProvider();
-        var service = new AiProfileService(new FakeCatalog(), provider);
+        var service = new AiProfileService(new AiListExtractionService(new FakeCatalog(), provider));
         await service.ExtractAsync(new(null, pdf));
         Assert.Equal(1, provider.Calls);
         var error = await Assert.ThrowsAsync<AiException>(() => service.ExtractAsync(new(null, new byte[pdf.Length + 1])));
@@ -102,7 +102,7 @@ public sealed class AiProfileServiceTests
     {
         var provider = new FakeProvider { Output = new string('a', AiProfileLimits.MaxOutputBytes + 1) };
         var error = await Assert.ThrowsAsync<AiException>(() =>
-            new AiProfileService(new FakeCatalog(), provider).ExtractAsync(new("A", null)));
+            new AiProfileService(new AiListExtractionService(new FakeCatalog(), provider)).ExtractAsync(new("A", null)));
         Assert.Equal(AiFailure.InvalidOutput, error.Failure);
         Assert.True(error.RawOutputTruncated);
         Assert.Equal(AiProfileLimits.MaxOutputBytes, Encoding.UTF8.GetByteCount(error.RawOutput!));
@@ -116,7 +116,7 @@ public sealed class AiProfileServiceTests
     {
         var provider = new FakeProvider { Output = output };
         var error = await Assert.ThrowsAsync<AiException>(() =>
-            new AiProfileService(new FakeCatalog(), provider).ExtractAsync(new("A", null)));
+            new AiProfileService(new AiListExtractionService(new FakeCatalog(), provider)).ExtractAsync(new("A", null)));
         Assert.Equal(output, error.RawOutput);
         Assert.False(error.RawOutputTruncated);
         Assert.DoesNotContain(output, error.ToString());
@@ -234,23 +234,21 @@ public sealed class AiProfileServiceTests
     private static ProfileDraftResponse Parse(string json) => ProfileDraftValidator.Parse(json, new HashSet<Guid> { SkillId }, new HashSet<Guid> { RoleId });
     private static void AssertInvalid(string json) => Assert.Equal(AiFailure.InvalidOutput, Assert.Throws<AiException>(() => Parse(json)).Failure);
 
-    private sealed class FakeProvider : IProfileExtractionProvider
+    private sealed class FakeProvider : IAiListExtractionProvider
     {
-        public string Output { get; init; } = EmptyDraft;
+        public string Output { get; init; } = """{"skill_ids":[],"experiences":[],"certificates":[],"warnings":[]}""";
         public int Calls { get; private set; }
         public AiProfileInput? Input { get; private set; }
-        public IReadOnlyList<AiCatalogItem>? Skills { get; private set; }
-        public IReadOnlyList<AiCatalogItem>? Roles { get; private set; }
+        public IReadOnlyList<AiSkillReference>? Skills { get; private set; }
         public CancellationToken Token { get; private set; }
-        public Task<string> ExtractAsync(AiProfileInput input, IReadOnlyList<AiCatalogItem> skills,
-            IReadOnlyList<AiCatalogItem> roles, CancellationToken cancellationToken = default)
+        public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills,
+            CancellationToken cancellationToken = default)
         {
             Calls++;
             Input = input;
             Skills = skills;
-            Roles = roles;
             Token = cancellationToken;
-            return Task.FromResult(Output);
+            return Task.FromResult(new AiListModelOutput(Output, new("tool_use", 100, 50, 4096, 1)));
         }
     }
 

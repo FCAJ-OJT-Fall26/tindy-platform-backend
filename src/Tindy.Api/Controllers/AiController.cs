@@ -102,6 +102,11 @@ public sealed class AiController(IAiProfileService service) : ControllerBase
                 throw Invalid("request", "Provide text and/or a PDF file.");
 
             var draft = await service.ExtractAsync(new AiProfileInput(text.Length == 0 ? null : text, pdf), cancellationToken);
+            if (HttpContext.RequestServices.GetRequiredService<IHostEnvironment>().IsDevelopment() && draft.Diagnostics is not null)
+            {
+                Response.Headers["X-AI-Diagnostics"] = System.Text.Json.JsonSerializer.Serialize(draft.Diagnostics);
+                Response.Headers["Access-Control-Expose-Headers"] = "X-AI-Diagnostics";
+            }
             return Ok(new { success = true, message = "Profile extracted. Review the suggestions before saving.", data = draft });
         }
         finally

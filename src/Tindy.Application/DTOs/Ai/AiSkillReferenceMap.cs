@@ -31,9 +31,12 @@ public sealed class AiSkillReferenceMap
 
     public IReadOnlyList<Guid> Resolve(IReadOnlyList<string>? keys, int maximum)
     {
-        if (keys is null || keys.Count > maximum || keys.Distinct(StringComparer.Ordinal).Count() != keys.Count ||
-            keys.Any(key => key is null || !_ids.ContainsKey(key)))
-            throw new AiException(AiFailure.InvalidOutput);
+        if (keys is null) throw new AiException(AiFailure.InvalidOutput) { ValidationReason = "invalid_skill_array" };
+        if (keys.Count > maximum) throw new AiException(AiFailure.InvalidOutput) { ValidationReason = "list_limit_exceeded" };
+        if (keys.Distinct(StringComparer.Ordinal).Count() != keys.Count)
+            throw new AiException(AiFailure.InvalidOutput) { ValidationReason = "duplicate_skill_reference" };
+        if (keys.Any(key => key is null || !_ids.ContainsKey(key)))
+            throw new AiException(AiFailure.InvalidOutput) { ValidationReason = "unknown_skill_reference" };
         return keys.Select(key => _ids[key]).ToArray();
     }
 }

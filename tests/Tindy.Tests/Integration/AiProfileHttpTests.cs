@@ -256,9 +256,10 @@ public sealed class AiProfileHttpTests
         await AssertSuccessfulDraft(response, app);
         Assert.Equal("Tôi tên Lan và đã xây API bằng C#.", app.Provider.LastInput!.Text);
         Assert.NotNull(app.Provider.LastInput.Pdf);
-        Assert.Equal(app.Catalog.SkillId, Assert.Single(app.Provider.Skills!).Id);
-        Assert.Equal(app.Catalog.RoleId, Assert.Single(app.Provider.Roles!).Id);
-        Assert.Equal(new[] { "skills", "roles" }, app.Catalog.Reads);
+        Assert.Equal("s1", Assert.Single(app.Provider.Skills!).Key);
+        Assert.Equal(new[] { "skills" }, app.Catalog.Reads);
+        Assert.Equal(1, app.Provider.Calls);
+        Assert.True(response.Headers.Contains("X-AI-Diagnostics"));
     }
 
     [Fact]
@@ -289,9 +290,12 @@ public sealed class AiProfileHttpTests
         Assert.True(response.StatusCode == HttpStatusCode.OK, string.Join("\n", app.Base.Logs.Entries));
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var profile = body.RootElement.GetProperty("data").GetProperty("profile");
-        Assert.Equal("Lan", profile.GetProperty("display_name").GetString());
+        Assert.Equal(JsonValueKind.Null, profile.GetProperty("display_name").ValueKind);
         Assert.Equal(app.Catalog.SkillId, profile.GetProperty("skill_ids")[0].GetGuid());
-        Assert.Equal(app.Catalog.RoleId, profile.GetProperty("preferred_role_id").GetGuid());
+        Assert.Equal(JsonValueKind.Null, profile.GetProperty("preferred_role_id").ValueKind);
+        Assert.Equal(4, body.RootElement.GetProperty("data").EnumerateObject().Count());
+        foreach (var field in profile.EnumerateObject().Where(field => field.Name != "skill_ids"))
+            Assert.Equal(JsonValueKind.Null, field.Value.ValueKind);
     }
 
     private static MultipartFormDataContent Form(string? text = null)
@@ -340,8 +344,8 @@ public sealed class AiProfileHttpTests
                     services.PostConfigure<BedrockOptions>(options => options.Enabled = false);
                 else
                 {
-                    services.RemoveAll<IProfileExtractionProvider>();
-                    services.AddSingleton<IProfileExtractionProvider>(Provider);
+                    services.RemoveAll<IAiListExtractionProvider>();
+                    services.AddSingleton<IAiListExtractionProvider>(Provider);
                 }
             }
         }));
@@ -377,28 +381,26 @@ public sealed class AiProfileHttpTests
         }
     }
 
-    private sealed class ExtractionProvider : IProfileExtractionProvider
+    private sealed class ExtractionProvider : IAiListExtractionProvider
     {
         public AiProfileInput? LastInput { get; private set; }
-        public IReadOnlyList<AiCatalogItem>? Skills { get; private set; }
-        public IReadOnlyList<AiCatalogItem>? Roles { get; private set; }
+        public IReadOnlyList<AiSkillReference>? Skills { get; private set; }
         public bool InvalidOutput { get; set; }
-        public Task<string> ExtractAsync(AiProfileInput input, IReadOnlyList<AiCatalogItem> skills,
-            IReadOnlyList<AiCatalogItem> roles, CancellationToken cancellationToken = default)
+        public int Calls { get; private set; }
+        public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills,
+            CancellationToken cancellationToken = default)
         {
+            Calls++;
             LastInput = input;
             Skills = skills;
-            Roles = roles;
-            if (InvalidOutput) return Task.FromResult("{invalid}");
-            return Task.FromResult(JsonSerializer.Serialize(new ProfileDraftResponse
+            var output = InvalidOutput ? "{invalid}" : JsonSerializer.Serialize(new
             {
-                Profile = new ProfileDraft
-                {
-                    DisplayName = "Lan",
-                    SkillIds = [skills.Single().Id],
-                    PreferredRoleId = roles.Single().Id
-                }
-            }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }));
+                skill_ids = new[] { skills.Single().Key },
+                experiences = new[] { new { role_title = "Developer", description = "Built APIs", skill_ids = new[] { skills.Single().Key } } },
+                certificates = new[] { new { title = "Certificate" } },
+                warnings = Array.Empty<object>()
+            });
+            return Task.FromResult(new AiListModelOutput(output, new("tool_use", 100, 50, 4096, 1)));
         }
     }
 
