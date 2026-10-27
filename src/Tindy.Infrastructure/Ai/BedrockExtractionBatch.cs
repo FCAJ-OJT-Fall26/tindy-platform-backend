@@ -37,8 +37,6 @@ public sealed partial class BedrockProfileExtractionProvider
         private Task? _profile;
         private Task? _lists;
         private Task? _dispose;
-        private AiProfileInput? _source;
-        private Task<AiProfileInput>? _prepared;
         private bool _disposed;
 
         public Task<AiScalarProfileModelOutput> ExtractProfileScalarsAsync(AiProfileInput input, IReadOnlyList<AiRoleReference> roles)
@@ -55,8 +53,7 @@ public sealed partial class BedrockProfileExtractionProvider
 
         private async Task<AiScalarProfileModelOutput> RunProfile(AiProfileInput input, IReadOnlyList<AiRoleReference> roles)
         {
-            input = await PrepareAsync(input);
-            var result = await owner.SendAsync(input, prepared => owner.CreateScalarRequest(prepared, roles),
+            var result = await owner.SendAsync(input, () => owner.CreateScalarRequest(input, roles),
                 root => ReadToolOutput(root, ScalarProfileExtractionPrompt.ToolName), _cancellation.Token, reserved: true);
             return new(result.RawJson, result.Diagnostics);
         }
@@ -67,26 +64,10 @@ public sealed partial class BedrockProfileExtractionProvider
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 if (_lists is not null) throw new InvalidOperationException("The list stage has already started.");
-                var task = RunLists(input, skills, roles);
+                var task = owner.SendAsync(input, () => owner.CreateListRequest(input, skills, roles), ReadListOutput,
+                    _cancellation.Token, reserved: true);
                 _lists = task;
                 return task;
-            }
-        }
-
-        private async Task<AiListModelOutput> RunLists(AiProfileInput input, IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles)
-        {
-            input = await PrepareAsync(input);
-            return await owner.SendAsync(input, prepared => owner.CreateListRequest(prepared, skills, roles), ReadListOutput,
-                _cancellation.Token, reserved: true);
-        }
-
-        private Task<AiProfileInput> PrepareAsync(AiProfileInput input)
-        {
-            lock (_sync)
-            {
-                if (_source is not null && _source != input) throw new InvalidOperationException("Both stages must use the same source input.");
-                _source = input;
-                return _prepared ??= owner.PrepareInputAsync(input, _cancellation.Token);
             }
         }
 

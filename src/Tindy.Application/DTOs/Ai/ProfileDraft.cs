@@ -12,12 +12,7 @@ public static class AiProfileLimits
     public const int MaxOutputBytes = 128 * 1024;
 }
 
-public sealed record AiProfileInput(string? Text, byte[]? Pdf)
-{
-    // Internal transport only: populated once for the two model stages, never an HTTP form field.
-    public IReadOnlyList<AiDocumentImage>? Images { get; init; }
-}
-public sealed record AiDocumentImage(string Format, byte[] Bytes);
+public sealed record AiProfileInput(string? Text, byte[]? Pdf);
 public sealed record AiCatalogItem(Guid Id, string Name);
 
 // Suggestions deliberately allow missing fields required by the existing save APIs.

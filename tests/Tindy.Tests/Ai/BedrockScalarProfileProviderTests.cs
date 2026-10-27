@@ -76,7 +76,7 @@ public sealed class BedrockScalarProfileProviderTests
         }))
     };
     private static BedrockProfileExtractionProvider Create(HttpMessageHandler handler) => new(new HttpClient(handler),
-        Options.Create(new BedrockOptions { Enabled = true, ApiKey = "test-key", ModelId = BedrockOptions.NovaModel, Region = "ap-southeast-1" }), NullLogger<BedrockProfileExtractionProvider>.Instance);
+        Options.Create(new BedrockOptions { Enabled = true, ApiKey = "test-key" }), NullLogger<BedrockProfileExtractionProvider>.Instance);
     private sealed class Stub(Func<HttpRequestMessage, Task<HttpResponseMessage>> callback) : HttpMessageHandler
     {
         public int Calls;

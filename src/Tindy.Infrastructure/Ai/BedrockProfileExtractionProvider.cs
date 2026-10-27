@@ -17,32 +17,29 @@ namespace Tindy.Infrastructure.Ai;
 public sealed partial class BedrockProfileExtractionProvider(
     HttpClient httpClient,
     IOptions<BedrockOptions> options,
-    ILogger<BedrockProfileExtractionProvider> logger,
-    IPdfPageRenderer? renderer = null) : IProfileExtractionProvider, IAiListExtractionProvider, IAiScalarProfileProvider, IAiExtractionBatchProvider, IDisposable
+    ILogger<BedrockProfileExtractionProvider> logger) : IProfileExtractionProvider, IAiListExtractionProvider, IAiScalarProfileProvider, IAiExtractionBatchProvider, IDisposable
 {
     private const int MaxEnvelopeBytes = 1024 * 1024;
     private readonly SemaphoreSlim _slots = new(2, 2);
     private readonly BedrockOptions _options = options.Value;
-    private readonly IPdfPageRenderer _renderer = renderer ?? new PopplerPdfPageRenderer();
-    private bool IsQwen => _options.ModelId == BedrockOptions.QwenModel;
 
     public async Task<string> ExtractAsync(AiProfileInput input, IReadOnlyList<AiCatalogItem> skills,
         IReadOnlyList<AiCatalogItem> roles, CancellationToken cancellationToken = default) =>
-        (await SendAsync(input, prepared => CreateRequest(prepared, skills, roles), ReadOutput, cancellationToken)).RawJson;
+        (await SendAsync(input, () => CreateRequest(input, skills, roles), ReadOutput, cancellationToken)).RawJson;
 
     public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input,
         IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles, CancellationToken cancellationToken = default) =>
-        SendAsync(input, prepared => CreateListRequest(prepared, skills, roles), ReadListOutput, cancellationToken);
+        SendAsync(input, () => CreateListRequest(input, skills, roles), ReadListOutput, cancellationToken);
 
     public async Task<AiScalarProfileModelOutput> ExtractProfileScalarsAsync(AiProfileInput input,
         IReadOnlyList<AiRoleReference> roles, CancellationToken cancellationToken = default)
     {
-        var output = await SendAsync(input, prepared => CreateScalarRequest(prepared, roles),
+        var output = await SendAsync(input, () => CreateScalarRequest(input, roles),
             root => ReadToolOutput(root, ScalarProfileExtractionPrompt.ToolName), cancellationToken);
         return new(output.RawJson, output.Diagnostics);
     }
 
-    private async Task<AiListModelOutput> SendAsync(AiProfileInput input, Func<AiProfileInput, HttpRequestMessage> createRequest,
+    private async Task<AiListModelOutput> SendAsync(AiProfileInput input, Func<HttpRequestMessage> createRequest,
         Func<JsonElement, string> readOutput, CancellationToken cancellationToken, bool reserved = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -56,8 +53,7 @@ public sealed partial class BedrockProfileExtractionProvider(
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
-            var prepared = await PrepareInputAsync(input, timeout.Token);
-            using var request = createRequest(prepared);
+            using var request = createRequest();
             using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             if (!response.IsSuccessStatusCode)
                 throw new AiException(MapFailure(response.StatusCode, input.Pdf is not null));
@@ -131,51 +127,53 @@ public sealed partial class BedrockProfileExtractionProvider(
 
     private HttpRequestMessage CreateListRequest(AiProfileInput input, IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles)
     {
-        var content = CreateDocumentContent(input);
+        var content = new List<object>();
+        if (input.Pdf is not null)
+            content.Add(new { document = new { format = "pdf", name = "CV", source = new { bytes = Convert.ToBase64String(input.Pdf) } } });
         content.Add(new { text = ListExtractionPrompt.User(input, skills, roles) });
         var request = new HttpRequestMessage(HttpMethod.Post,
             $"https://bedrock-runtime.{_options.Region}.amazonaws.com/model/{Uri.EscapeDataString(_options.ModelId)}/converse");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        var body = new Dictionary<string, object>
+        request.Content = JsonContent.Create(new
         {
-            ["system"] = new[] { new { text = ListExtractionPrompt.System } },
-            ["messages"] = new[] { new { role = "user", content } },
-            ["inferenceConfig"] = new { maxTokens = 4096, temperature = 0.1 },
-            ["toolConfig"] = new
+            system = new[] { new { text = ListExtractionPrompt.System } },
+            messages = new[] { new { role = "user", content } },
+            inferenceConfig = new { maxTokens = 4096, temperature = 0.1 },
+            additionalModelRequestFields = new { reasoningConfig = new { type = "disabled" } },
+            toolConfig = new
             {
                 tools = new[] { new { toolSpec = new { name = ListExtractionPrompt.ToolName,
                     description = "Extract only evidenced skills, experiences and certificates; unknown values are null.",
                     inputSchema = new { json = ListExtractionPrompt.Schema(skills, roles) } } } },
-                toolChoice = ToolChoice(ListExtractionPrompt.ToolName)
+                toolChoice = new { tool = new { name = ListExtractionPrompt.ToolName } }
             }
-        };
-        AddModelFields(body);
-        request.Content = JsonContent.Create(body);
+        });
         return request;
     }
 
     private HttpRequestMessage CreateScalarRequest(AiProfileInput input, IReadOnlyList<AiRoleReference> roles)
     {
-        var content = CreateDocumentContent(input);
+        var content = new List<object>();
+        if (input.Pdf is not null)
+            content.Add(new { document = new { format = "pdf", name = "CV", source = new { bytes = Convert.ToBase64String(input.Pdf) } } });
         content.Add(new { text = ScalarProfileExtractionPrompt.User(input, roles) });
         var request = new HttpRequestMessage(HttpMethod.Post,
             $"https://bedrock-runtime.{_options.Region}.amazonaws.com/model/{Uri.EscapeDataString(_options.ModelId)}/converse");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        var body = new Dictionary<string, object>
+        request.Content = JsonContent.Create(new
         {
-            ["system"] = new[] { new { text = ScalarProfileExtractionPrompt.System } },
-            ["messages"] = new[] { new { role = "user", content } },
-            ["inferenceConfig"] = new { maxTokens = 4096, temperature = 0.1 },
-            ["toolConfig"] = new
+            system = new[] { new { text = ScalarProfileExtractionPrompt.System } },
+            messages = new[] { new { role = "user", content } },
+            inferenceConfig = new { maxTokens = 4096, temperature = 0.1 },
+            additionalModelRequestFields = new { reasoningConfig = new { type = "disabled" } },
+            toolConfig = new
             {
                 tools = new[] { new { toolSpec = new { name = ScalarProfileExtractionPrompt.ToolName,
                     description = "Extract only explicitly supported scalar profile facts, not lists.",
                     inputSchema = new { json = ScalarProfileExtractionPrompt.Schema(roles) } } } },
-                toolChoice = ToolChoice(ScalarProfileExtractionPrompt.ToolName)
+                toolChoice = new { tool = new { name = ScalarProfileExtractionPrompt.ToolName } }
             }
-        };
-        AddModelFields(body);
-        request.Content = JsonContent.Create(body);
+        });
         return request;
     }
 
@@ -206,8 +204,7 @@ public sealed partial class BedrockProfileExtractionProvider(
         if (!_options.Enabled || string.IsNullOrWhiteSpace(_options.ApiKey)
             || _options.ApiKey.Any(character => character is <= ' ' or >= '\u007f')
             || _options.TimeoutSeconds is < 1 or > 120
-            || _options.ModelId is not (BedrockOptions.QwenModel or BedrockOptions.NovaModel)
-            || (IsQwen && !QwenRegions.Contains(_options.Region))
+            || _options.ModelId != "global.amazon.nova-2-lite-v1:0"
             || !Regex.IsMatch(_options.Region ?? string.Empty, @"\A[a-z]{2}-[a-z]+-\d\z", RegexOptions.CultureInvariant))
             throw new AiException(AiFailure.Unavailable);
     }
@@ -215,22 +212,20 @@ public sealed partial class BedrockProfileExtractionProvider(
     private HttpRequestMessage CreateRequest(AiProfileInput input, IReadOnlyList<AiCatalogItem> skills,
         IReadOnlyList<AiCatalogItem> roles)
     {
-        var content = IsQwen ? CreateDocumentContent(input) : new List<object>();
-        content.Add(new { text = ProfileExtractionPrompt.User(input, skills, roles) });
-        if (!IsQwen && input.Pdf is not null)
+        var content = new List<object> { new { text = ProfileExtractionPrompt.User(input, skills, roles) } };
+        if (input.Pdf is not null)
             content.Add(new { document = new { format = "pdf", name = "CV", source = new { bytes = Convert.ToBase64String(input.Pdf) } } });
 
         var request = new HttpRequestMessage(HttpMethod.Post,
             $"https://bedrock-runtime.{_options.Region}.amazonaws.com/model/{Uri.EscapeDataString(_options.ModelId)}/converse");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        var body = new Dictionary<string, object>
+        request.Content = JsonContent.Create(new
         {
-            ["system"] = new[] { new { text = ProfileExtractionPrompt.System } },
-            ["messages"] = new[] { new { role = "user", content } },
-            ["inferenceConfig"] = new { maxTokens = 4096, temperature = 0.1 }
-        };
-        AddModelFields(body);
-        request.Content = JsonContent.Create(body);
+            system = new[] { new { text = ProfileExtractionPrompt.System } },
+            messages = new[] { new { role = "user", content } },
+            inferenceConfig = new { maxTokens = 4096, temperature = 0.1 },
+            additionalModelRequestFields = new { reasoningConfig = new { type = "disabled" } }
+        });
         return request;
     }
 
