@@ -15,6 +15,8 @@ public sealed class PopplerPdfPageRendererTests
         Assert.Equal("png", page.Format);
         Assert.True(page.Bytes.AsSpan().StartsWith(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }));
         Assert.InRange(page.Bytes.Length, 1, PopplerPdfPageRenderer.MaxImageBytes);
+        Assert.InRange(System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(page.Bytes.AsSpan(16, 4)), 1, PopplerPdfPageRenderer.MaxImageEdge);
+        Assert.InRange(System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(page.Bytes.AsSpan(20, 4)), 1, PopplerPdfPageRenderer.MaxImageEdge);
     }
 
     [Fact]

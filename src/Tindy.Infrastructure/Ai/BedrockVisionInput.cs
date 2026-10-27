@@ -37,9 +37,10 @@ public sealed partial class BedrockProfileExtractionProvider
         return content;
     }
 
-    // There is exactly one declared tool. Qwen supports any, not Nova's named tool choice.
+    // Qwen's named choice is unsupported. Instructions select the one declared tool;
+    // the strict reader still rejects prose, wrong tools and incomplete outputs.
     private object ToolChoice(string name) => IsQwen
-        ? new { any = new { } }
+        ? new { auto = new { } }
         : (object)new { tool = new { name } };
 
     private void AddModelFields(Dictionary<string, object> body)

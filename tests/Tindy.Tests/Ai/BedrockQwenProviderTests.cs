@@ -26,7 +26,7 @@ public sealed class BedrockQwenProviderTests
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
             var root = json.RootElement;
             Assert.False(root.TryGetProperty("additionalModelRequestFields", out _));
-            Assert.True(root.GetProperty("toolConfig").GetProperty("toolChoice").TryGetProperty("any", out _));
+            Assert.True(root.GetProperty("toolConfig").GetProperty("toolChoice").TryGetProperty("auto", out _));
             Assert.Equal(4096, root.GetProperty("inferenceConfig").GetProperty("maxTokens").GetInt32());
             var content = root.GetProperty("messages")[0].GetProperty("content");
             Assert.Equal("png", content[0].GetProperty("image").GetProperty("format").GetString());

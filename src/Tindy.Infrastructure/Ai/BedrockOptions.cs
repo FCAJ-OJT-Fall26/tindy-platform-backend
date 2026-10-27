@@ -6,7 +6,7 @@ public sealed class BedrockOptions
     public const string NovaModel = "global.amazon.nova-2-lite-v1:0";
     public bool Enabled { get; set; }
     public string ApiKey { get; set; } = string.Empty;
-    public string Region { get; set; } = "us-east-1";
+    public string Region { get; set; } = "us-west-2";
     public string ModelId { get; set; } = QwenModel;
-    public int TimeoutSeconds { get; set; } = 90;
+    public int TimeoutSeconds { get; set; } = 110;
 }

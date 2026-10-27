@@ -13,6 +13,7 @@ public interface IPdfPageRenderer
 public sealed class PopplerPdfPageRenderer(string executable = "pdftoppm") : IPdfPageRenderer
 {
     public const int MaxPages = 20;
+    public const int MaxImageEdge = 1536;
     public const int MaxImageBytes = 3 * 1024 * 1024;
     public const int MaxTotalImageBytes = 20 * 1024 * 1024;
 
@@ -34,7 +35,7 @@ public sealed class PopplerPdfPageRenderer(string executable = "pdftoppm") : IPd
                 RedirectStandardOutput = true, RedirectStandardError = true
             };
             // Render one extra page to detect and reject over-limit documents, never silently truncate.
-            foreach (var argument in new[] { "-q", "-png", "-r", "160", "-scale-to", "2048", "-f", "1", "-l",
+            foreach (var argument in new[] { "-q", "-png", "-r", "160", "-scale-to", MaxImageEdge.ToString(System.Globalization.CultureInfo.InvariantCulture), "-f", "1", "-l",
                          (MaxPages + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), source, Path.Combine(directory.FullName, "page") })
                 start.ArgumentList.Add(argument);
             using var process = new Process { StartInfo = start };
