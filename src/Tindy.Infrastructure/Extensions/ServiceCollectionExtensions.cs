@@ -97,6 +97,7 @@ public static class ServicesCollectionExtensions
 
         services.AddSingleton<IProfileExtractionProvider>(provider => provider.GetRequiredService<BedrockProfileExtractionProvider>());
         services.AddSingleton<IAiScalarProfileProvider>(provider => provider.GetRequiredService<BedrockProfileExtractionProvider>());
+        services.AddSingleton<IAiExtractionBatchProvider>(provider => provider.GetRequiredService<BedrockProfileExtractionProvider>());
         services.AddSingleton<IAiListExtractionProvider>(provider => provider.GetRequiredService<BedrockProfileExtractionProvider>());
 
         return services;

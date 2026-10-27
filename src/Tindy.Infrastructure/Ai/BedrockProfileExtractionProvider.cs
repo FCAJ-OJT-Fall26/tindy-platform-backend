@@ -14,10 +14,10 @@ using Tindy.Application.Interfaces.Services;
 namespace Tindy.Infrastructure.Ai;
 
 // Singleton registration makes the limit process-wide. No queue, retry, or repair invocation.
-public sealed class BedrockProfileExtractionProvider(
+public sealed partial class BedrockProfileExtractionProvider(
     HttpClient httpClient,
     IOptions<BedrockOptions> options,
-    ILogger<BedrockProfileExtractionProvider> logger) : IProfileExtractionProvider, IAiListExtractionProvider, IAiScalarProfileProvider, IDisposable
+    ILogger<BedrockProfileExtractionProvider> logger) : IProfileExtractionProvider, IAiListExtractionProvider, IAiScalarProfileProvider, IAiExtractionBatchProvider, IDisposable
 {
     private const int MaxEnvelopeBytes = 1024 * 1024;
     private readonly SemaphoreSlim _slots = new(2, 2);
@@ -40,12 +40,11 @@ public sealed class BedrockProfileExtractionProvider(
     }
 
     private async Task<AiListModelOutput> SendAsync(AiProfileInput input, Func<HttpRequestMessage> createRequest,
-        Func<JsonElement, string> readOutput, CancellationToken cancellationToken)
+        Func<JsonElement, string> readOutput, CancellationToken cancellationToken, bool reserved = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ValidateConfiguration();
-        if (!await _slots.WaitAsync(0, cancellationToken))
-            throw new AiException(AiFailure.Busy);
+        if (!reserved) Reserve(1, cancellationToken);
 
         var timer = Stopwatch.StartNew();
         string? responseBody = null;
@@ -113,7 +112,7 @@ public sealed class BedrockProfileExtractionProvider(
         }
         finally
         {
-            _slots.Release();
+            if (!reserved) Release(1);
         }
     }
 

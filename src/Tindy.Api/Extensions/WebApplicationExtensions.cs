@@ -36,6 +36,7 @@ public static class WebApplicationExtensions
         // 4. CORS
         // ===================================
         app.UseCors("TindyFrontend");
+        app.UseMiddleware<Tindy.Api.Middleware.AiExtractionDeadlineMiddleware>();
 
         // ===================================
         // 5. AUTHENTICATION

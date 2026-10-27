@@ -8,7 +8,9 @@ public sealed record AiCallDiagnostics(
     [property: JsonPropertyName("output_tokens")] int? OutputTokens,
     [property: JsonPropertyName("max_output_tokens")] int MaxOutputTokens,
     [property: JsonPropertyName("elapsed_ms")] long ElapsedMs,
-    [property: JsonPropertyName("failure_reason")] string? FailureReason = null);
+    [property: JsonPropertyName("failure_reason")] string? FailureReason = null,
+    [property: JsonPropertyName("stage"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Stage = null,
+    [property: JsonPropertyName("stages"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, AiCallDiagnostics>? Stages = null);
 
 public sealed record AiListModelOutput(string RawJson, AiCallDiagnostics Diagnostics);
 
