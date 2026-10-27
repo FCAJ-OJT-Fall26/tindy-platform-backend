@@ -74,6 +74,9 @@ public static class ServicesCollectionExtensions
         // Certificate persistence (STEP 09).
         services.AddScoped<ICertificateRepository, CertificateRepository>();
 
+        // Projects persistence (Group B)
+        services.AddScoped<IProjectRepository, ProjectRepository>();
+
         // Lightweight read-only check for protected business APIs
         services.AddScoped<IOnboardingAccessReader, OnboardingAccessReader>();
 

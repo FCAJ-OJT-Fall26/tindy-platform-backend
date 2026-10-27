@@ -251,6 +251,9 @@ public static class ServiceCollectionExtensions
         // Certificate CRUD service (STEP 09).
         services.AddScoped<ICertificateService, CertificateService>();
 
+        // Project management service (Group B).
+        services.AddScoped<IProjectService, ProjectService>();
+
 
 
 
