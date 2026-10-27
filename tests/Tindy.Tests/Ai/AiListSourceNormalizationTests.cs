@@ -17,6 +17,17 @@ public sealed class AiListSourceNormalizationTests
         var draft = ParseCertificate(source);
         Assert.Null(Assert.Single(draft.Certificates).IssuedAt);
         Assert.Contains(draft.Warnings, warning => warning.Field == "certificates[0].issued_at" && warning.Code == "INCOMPLETE_DATE");
+        Assert.Contains(draft.Warnings, warning => warning.Field == "certificates[0].issued_at" && warning.Message.Contains(source, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void YearOnlyCertificatesKeepSourceYearsInWarningsWithoutInventingCompleteDates()
+    {
+        var json = """{"skill_ids":{},"experiences":[],"certificates":[{"title":"First certificate","issued_at_source":"2019"},{"title":"Second certificate","issued_at_source":"2021"}],"warnings":[{"field":"certificates[0].issued_at","code":"INCOMPLETE_DATE","message":"Missing month/day."}]}""";
+        var draft = AiListDraftValidator.Parse(json, new([]), new([]));
+        Assert.All(draft.Certificates, certificate => Assert.Null(certificate.IssuedAt));
+        Assert.Contains("2019", Assert.Single(draft.Warnings, warning => warning.Field == "certificates[0].issued_at").Message);
+        Assert.Contains("2021", Assert.Single(draft.Warnings, warning => warning.Field == "certificates[1].issued_at").Message);
     }
 
     [Theory]

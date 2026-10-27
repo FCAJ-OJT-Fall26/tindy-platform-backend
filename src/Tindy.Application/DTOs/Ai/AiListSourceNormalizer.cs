@@ -48,7 +48,7 @@ internal static class AiListSourceNormalizer
         if (match.Success && int.TryParse(match.Groups["year"].Value, out var year) && int.TryParse(match.Groups["month"].Value, out var month) && year is >= 1 and <= 9999 && month is >= 1 and <= 12)
             return new DateOnly(year, month, 1).ToString("yyyy-MM", CultureInfo.InvariantCulture);
         if (TryDay(source, out var date)) return date.ToString("yyyy-MM", CultureInfo.InvariantCulture);
-        Warn(warnings, field);
+        Warn(warnings, field, source);
         return null;
     }
 
@@ -56,7 +56,7 @@ internal static class AiListSourceNormalizer
     {
         if (source is null) return null;
         if (TryDay(source, out var date)) return date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        Warn(warnings, field);
+        Warn(warnings, field, source);
         return null;
     }
 
@@ -82,11 +82,17 @@ internal static class AiListSourceNormalizer
     {
         if (item.Any(field => !allowed.Contains(field.Key, StringComparer.Ordinal))) throw Invalid();
     }
-    private static void Warn(JsonArray warnings, string field)
+    private static void Warn(JsonArray warnings, string field, string source)
     {
-        if (warnings.Any(value => value is JsonObject && value["field"]?.GetValue<string>() == field && value["code"]?.GetValue<string>() == "INCOMPLETE_DATE")) return;
+        var message = $"Source date '{source}' has insufficient or ambiguous components; no date was inferred.";
+        var existing = warnings.FirstOrDefault(value => value is JsonObject && value["field"]?.GetValue<string>() == field && value["code"]?.GetValue<string>() == "INCOMPLETE_DATE");
+        if (existing is not null)
+        {
+            existing["message"] = message;
+            return;
+        }
         if (warnings.Count >= AiProfileLimits.MaxWarnings) throw Invalid();
-        warnings.Add(new JsonObject { ["field"] = field, ["code"] = "INCOMPLETE_DATE", ["message"] = "The source date has insufficient or ambiguous components; no date was inferred." });
+        warnings.Add(new JsonObject { ["field"] = field, ["code"] = "INCOMPLETE_DATE", ["message"] = message });
     }
     private static AiException Invalid() => new(AiFailure.InvalidOutput) { ValidationReason = "invalid_list_source_fields" };
 }
