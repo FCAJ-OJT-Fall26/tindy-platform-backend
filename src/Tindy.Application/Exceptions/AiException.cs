@@ -43,6 +43,8 @@ public sealed class AiException(AiFailure failure) : Exception(failure switch
     public string? RawOutput { get; }
     public bool RawOutputTruncated { get; }
     public string? RawOutputKind { get; }
+    public AiCallDiagnostics? Diagnostics { get; set; }
+    public string? ValidationReason { get; init; }
     public AiFailure Failure { get; } = failure;
     public string ErrorCode => Failure switch
     {

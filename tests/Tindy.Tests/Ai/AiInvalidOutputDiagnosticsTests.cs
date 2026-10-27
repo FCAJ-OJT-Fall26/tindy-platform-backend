@@ -20,7 +20,8 @@ public sealed class AiInvalidOutputDiagnosticsTests
     public async Task OnlyDevelopmentExposesRawOutput(string environment, bool expected)
     {
         const string raw = "```json\n{invalid: '<script>debug</script>'}\n```";
-        var exception = new AiException(AiFailure.InvalidOutput, raw);
+        var exception = new AiException(AiFailure.InvalidOutput, raw)
+        { Diagnostics = new("max_tokens", 120, 4096, 4096, 1000, "output_token_limit") };
         var context = new DefaultHttpContext();
         context.Request.Path = "/api/ai/extract-profile";
         context.Response.Body = new MemoryStream();
@@ -39,8 +40,13 @@ public sealed class AiInvalidOutputDiagnosticsTests
             Assert.Equal("model_text", json.RootElement.GetProperty("raw_output_kind").GetString());
             Assert.False(json.RootElement.GetProperty("raw_output_truncated").GetBoolean());
             Assert.Equal("no-store", context.Response.Headers.CacheControl);
+            Assert.Equal("max_tokens", json.RootElement.GetProperty("ai_diagnostics").GetProperty("stop_reason").GetString());
         }
-        else Assert.DoesNotContain("raw_output", json.RootElement.GetRawText());
+        else
+        {
+            Assert.DoesNotContain("raw_output", json.RootElement.GetRawText());
+            Assert.False(json.RootElement.TryGetProperty("ai_diagnostics", out _));
+        }
         Assert.DoesNotContain(raw, exception.ToString());
         Assert.Null(exception.InnerException);
     }

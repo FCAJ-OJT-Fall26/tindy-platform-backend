@@ -151,6 +151,13 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
             httpContext.Response.Headers.CacheControl = "no-store";
         }
 
+        if (_environment?.IsDevelopment() == true && exception is AiException aiDiagnostic)
+        {
+            if (aiDiagnostic.Diagnostics is not null) problemDetails.Extensions["ai_diagnostics"] = aiDiagnostic.Diagnostics;
+            if (aiDiagnostic.ValidationReason is not null) problemDetails.Extensions["validation_reason"] = aiDiagnostic.ValidationReason;
+            httpContext.Response.Headers.CacheControl = "no-store";
+        }
+
         // 5. Set HTTP status and write response
         httpContext.Response.StatusCode = statusCode;
 

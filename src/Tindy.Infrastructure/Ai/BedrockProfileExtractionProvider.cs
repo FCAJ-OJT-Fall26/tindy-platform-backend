@@ -17,14 +17,22 @@ namespace Tindy.Infrastructure.Ai;
 public sealed class BedrockProfileExtractionProvider(
     HttpClient httpClient,
     IOptions<BedrockOptions> options,
-    ILogger<BedrockProfileExtractionProvider> logger) : IProfileExtractionProvider, IDisposable
+    ILogger<BedrockProfileExtractionProvider> logger) : IProfileExtractionProvider, IAiListExtractionProvider, IDisposable
 {
     private const int MaxEnvelopeBytes = 1024 * 1024;
     private readonly SemaphoreSlim _slots = new(2, 2);
     private readonly BedrockOptions _options = options.Value;
 
     public async Task<string> ExtractAsync(AiProfileInput input, IReadOnlyList<AiCatalogItem> skills,
-        IReadOnlyList<AiCatalogItem> roles, CancellationToken cancellationToken = default)
+        IReadOnlyList<AiCatalogItem> roles, CancellationToken cancellationToken = default) =>
+        (await SendAsync(input, () => CreateRequest(input, skills, roles), ReadOutput, cancellationToken)).RawJson;
+
+    public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input,
+        IReadOnlyList<AiSkillReference> skills, CancellationToken cancellationToken = default) =>
+        SendAsync(input, () => CreateListRequest(input, skills), ReadListOutput, cancellationToken);
+
+    private async Task<AiListModelOutput> SendAsync(AiProfileInput input, Func<HttpRequestMessage> createRequest,
+        Func<JsonElement, string> readOutput, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ValidateConfiguration();
@@ -33,11 +41,12 @@ public sealed class BedrockProfileExtractionProvider(
 
         var timer = Stopwatch.StartNew();
         string? responseBody = null;
+        AiCallDiagnostics? diagnostics = null;
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
-            using var request = CreateRequest(input, skills, roles);
+            using var request = createRequest();
             using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             if (!response.IsSuccessStatusCode)
                 throw new AiException(MapFailure(response.StatusCode, input.Pdf is not null));
@@ -45,10 +54,13 @@ public sealed class BedrockProfileExtractionProvider(
             var bytes = await ReadBoundedAsync(response.Content, timeout.Token);
             responseBody = Encoding.UTF8.GetString(bytes);
             using var document = JsonDocument.Parse(bytes);
+            diagnostics = new AiCallDiagnostics(ReadStopReason(document.RootElement),
+                ReadTokens(document.RootElement, "inputTokens"), ReadTokens(document.RootElement, "outputTokens"),
+                4096, timer.ElapsedMilliseconds);
             string result;
             try
             {
-                result = ReadOutput(document.RootElement);
+                result = readOutput(document.RootElement);
             }
             catch (AiException exception) when (exception.Failure == AiFailure.InvalidOutput)
             {
@@ -58,7 +70,7 @@ public sealed class BedrockProfileExtractionProvider(
             logger.LogInformation("AI extraction completed TraceId={TraceId} ElapsedMs={ElapsedMs} InputTokens={InputTokens} OutputTokens={OutputTokens}",
                 Activity.Current?.TraceId.ToString(), timer.ElapsedMilliseconds,
                 ReadTokens(document.RootElement, "inputTokens"), ReadTokens(document.RootElement, "outputTokens"));
-            return result;
+            return new AiListModelOutput(result, diagnostics);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -66,11 +78,22 @@ public sealed class BedrockProfileExtractionProvider(
         }
         catch (OperationCanceledException)
         {
-            throw new AiException(AiFailure.Timeout);
+            throw new AiException(AiFailure.Timeout) { Diagnostics = new(null, null, null, 4096, timer.ElapsedMilliseconds, "timeout") };
+        }
+        catch (AiException exception)
+        {
+            var reason = diagnostics?.StopReason == "max_tokens" ? "output_token_limit" :
+                exception.Failure == AiFailure.InvalidOutput ? "invalid_tool_or_model_output" : "provider_http_error";
+            exception.Diagnostics = (diagnostics ?? new(null, null, null, 4096, timer.ElapsedMilliseconds)) with { FailureReason = reason };
+            logger.LogWarning("AI extraction failed TraceId={TraceId} Failure={Failure} StopReason={StopReason} ElapsedMs={ElapsedMs} OutputTokens={OutputTokens}",
+                Activity.Current?.TraceId.ToString(), exception.Failure, exception.Diagnostics.StopReason,
+                timer.ElapsedMilliseconds, exception.Diagnostics.OutputTokens);
+            throw;
         }
         catch (JsonException)
         {
-            throw new AiException(AiFailure.InvalidOutput, responseBody, "provider_response");
+            throw new AiException(AiFailure.InvalidOutput, responseBody, "provider_response")
+            { Diagnostics = new(null, null, null, 4096, timer.ElapsedMilliseconds, "invalid_provider_json") };
         }
         catch (HttpRequestException)
         {
@@ -84,6 +107,61 @@ public sealed class BedrockProfileExtractionProvider(
         {
             _slots.Release();
         }
+    }
+
+    private static string? ReadStopReason(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("stopReason", out var value) || value.ValueKind != JsonValueKind.String) return null;
+        var reason = value.GetString();
+        return reason is "end_turn" or "tool_use" or "max_tokens" or "stop_sequence" or
+            "guardrail_intervened" or "content_filtered" or "malformed_model_output" or
+            "malformed_tool_use" or "model_context_window_exceeded" ? reason : "unknown";
+    }
+
+    private HttpRequestMessage CreateListRequest(AiProfileInput input, IReadOnlyList<AiSkillReference> skills)
+    {
+        var content = new List<object>();
+        if (input.Pdf is not null)
+            content.Add(new { document = new { format = "pdf", name = "CV", source = new { bytes = Convert.ToBase64String(input.Pdf) } } });
+        content.Add(new { text = ListExtractionPrompt.User(input, skills) });
+        var request = new HttpRequestMessage(HttpMethod.Post,
+            $"https://bedrock-runtime.{_options.Region}.amazonaws.com/model/{Uri.EscapeDataString(_options.ModelId)}/converse");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
+        request.Content = JsonContent.Create(new
+        {
+            system = new[] { new { text = ListExtractionPrompt.System } },
+            messages = new[] { new { role = "user", content } },
+            inferenceConfig = new { maxTokens = 4096, temperature = 0.1 },
+            additionalModelRequestFields = new { reasoningConfig = new { type = "disabled" } },
+            toolConfig = new
+            {
+                tools = new[] { new { toolSpec = new { name = ListExtractionPrompt.ToolName,
+                    description = "Extract only evidenced skills, experiences and certificates; unknown values are null.",
+                    inputSchema = new { json = ListExtractionPrompt.Schema(skills) } } } },
+                toolChoice = new { tool = new { name = ListExtractionPrompt.ToolName } }
+            }
+        });
+        return request;
+    }
+
+    private static string ReadListOutput(JsonElement root)
+    {
+        if (ReadStopReason(root) != "tool_use" ||
+            !root.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Object ||
+            !output.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object ||
+            !message.TryGetProperty("role", out var role) || role.ValueKind != JsonValueKind.String || role.GetString() != "assistant" ||
+            !message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array || content.GetArrayLength() != 1)
+            throw new AiException(AiFailure.InvalidOutput);
+        var block = content[0];
+        if (block.ValueKind != JsonValueKind.Object || block.EnumerateObject().Count() != 1 ||
+            !block.TryGetProperty("toolUse", out var tool) || tool.ValueKind != JsonValueKind.Object ||
+            !tool.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String || name.GetString() != ListExtractionPrompt.ToolName ||
+            !tool.TryGetProperty("toolUseId", out var id) || id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString()) ||
+            !tool.TryGetProperty("input", out var input) || input.ValueKind != JsonValueKind.Object)
+            throw new AiException(AiFailure.InvalidOutput);
+        var json = input.GetRawText();
+        if (Encoding.UTF8.GetByteCount(json) > AiProfileLimits.MaxOutputBytes) throw new AiException(AiFailure.InvalidOutput);
+        return json;
     }
 
     private void ValidateConfiguration()
@@ -173,6 +251,10 @@ public sealed class BedrockProfileExtractionProvider(
             output.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.Object &&
             message.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
         {
+            if (content.GetArrayLength() == 1 && content[0].ValueKind == JsonValueKind.Object &&
+                content[0].TryGetProperty("toolUse", out var tool) && tool.ValueKind == JsonValueKind.Object &&
+                tool.TryGetProperty("input", out var input))
+                return (input.ValueKind == JsonValueKind.String ? input.GetString()! : input.GetRawText(), "tool_input");
             var parts = content.EnumerateArray()
                 .Where(block => block.ValueKind == JsonValueKind.Object &&
                     block.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
@@ -183,7 +265,7 @@ public sealed class BedrockProfileExtractionProvider(
     }
 
     private static int? ReadTokens(JsonElement root, string name) =>
-        root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object
+        root.ValueKind == JsonValueKind.Object && root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object
         && usage.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
         && value.TryGetInt32(out var count) && count >= 0 ? count : null;
 
