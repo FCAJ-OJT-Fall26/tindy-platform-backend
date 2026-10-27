@@ -257,8 +257,8 @@ public sealed class AiProfileHttpTests
         Assert.Equal("Tôi tên Lan và đã xây API bằng C#.", app.Provider.LastInput!.Text);
         Assert.NotNull(app.Provider.LastInput.Pdf);
         Assert.Equal("s1", Assert.Single(app.Provider.Skills!).Key);
-        Assert.Equal(new[] { "skills" }, app.Catalog.Reads);
-        Assert.Equal(1, app.Provider.Calls);
+        Assert.Equal(new[] { "skills", "roles" }, app.Catalog.Reads);
+        Assert.Equal(2, app.Provider.Calls);
         Assert.True(response.Headers.Contains("X-AI-Diagnostics"));
     }
 
@@ -290,11 +290,11 @@ public sealed class AiProfileHttpTests
         Assert.True(response.StatusCode == HttpStatusCode.OK, string.Join("\n", app.Base.Logs.Entries));
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var profile = body.RootElement.GetProperty("data").GetProperty("profile");
-        Assert.Equal(JsonValueKind.Null, profile.GetProperty("display_name").ValueKind);
+        Assert.Equal("Lan", profile.GetProperty("display_name").GetString());
         Assert.Equal(app.Catalog.SkillId, profile.GetProperty("skill_ids")[0].GetGuid());
         Assert.Equal(JsonValueKind.Null, profile.GetProperty("preferred_role_id").ValueKind);
         Assert.Equal(4, body.RootElement.GetProperty("data").EnumerateObject().Count());
-        foreach (var field in profile.EnumerateObject().Where(field => field.Name != "skill_ids"))
+        foreach (var field in profile.EnumerateObject().Where(field => field.Name is not "skill_ids" and not "display_name"))
             Assert.Equal(JsonValueKind.Null, field.Value.ValueKind);
     }
 
@@ -344,8 +344,8 @@ public sealed class AiProfileHttpTests
                     services.PostConfigure<BedrockOptions>(options => options.Enabled = false);
                 else
                 {
-                    services.RemoveAll<IAiListExtractionProvider>();
-                    services.AddSingleton<IAiListExtractionProvider>(Provider);
+                    services.RemoveAll<IAiExtractionBatchProvider>();
+                    services.AddSingleton<IAiExtractionBatchProvider>(Provider);
                 }
             }
         }));
@@ -381,14 +381,20 @@ public sealed class AiProfileHttpTests
         }
     }
 
-    private sealed class ExtractionProvider : IAiListExtractionProvider
+    private sealed class ExtractionProvider : IAiExtractionBatchProvider, IAiExtractionBatchSession
     {
+        public IAiExtractionBatchSession BeginBatch(CancellationToken cancellationToken = default) => this;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public Task<AiScalarProfileModelOutput> ExtractProfileScalarsAsync(AiProfileInput input, IReadOnlyList<AiRoleReference> roles)
+        {
+            Calls++;
+            return Task.FromResult(new AiScalarProfileModelOutput("""{"profile":{"display_name":"Lan"},"warnings":[]}""", new("tool_use", 80, 30, 4096, 1)));
+        }
         public AiProfileInput? LastInput { get; private set; }
         public IReadOnlyList<AiSkillReference>? Skills { get; private set; }
         public bool InvalidOutput { get; set; }
         public int Calls { get; private set; }
-        public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills,
-            CancellationToken cancellationToken = default)
+        public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input, IReadOnlyList<AiSkillReference> skills)
         {
             Calls++;
             LastInput = input;

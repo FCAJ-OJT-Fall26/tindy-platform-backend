@@ -10,20 +10,12 @@ public sealed class AiListExtractionService(ICatalogRepository catalog, IAiListE
     public async Task<ProfileDraftResponse> ExtractAsync(AiProfileInput input, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (input.Text?.Length > AiProfileLimits.MaxTextLength)
-            throw InvalidInput("text", "Text must not exceed 20000 characters.");
-        var text = string.IsNullOrWhiteSpace(input.Text) ? null : input.Text.Trim();
-        if (input.Pdf?.Length > AiProfileLimits.MaxPdfBytes)
-            throw new AiException(AiFailure.PayloadTooLarge);
-        if (input.Pdf is not null && (input.Pdf.Length < 5 || !input.Pdf.AsSpan(0, 5).SequenceEqual("%PDF-"u8)))
-            throw new AiException(AiFailure.DocumentRejected);
-        if (text is null && input.Pdf is null)
-            throw InvalidInput("input", "Provide a PDF file and/or non-empty text.");
+        input = AiExtractionInput.Normalize(input);
 
         var active = (await catalog.GetActiveSkillsAsync(null, null, cancellationToken))
             .Where(item => item.IsActive).Select(item => new AiCatalogItem(item.SkillId, item.Name));
         var references = new AiSkillReferenceMap(active);
-        var output = await provider.ExtractListsAsync(new(text, input.Pdf), references.References, cancellationToken);
+        var output = await provider.ExtractListsAsync(input, references.References, cancellationToken);
         try
         {
             var draft = AiListDraftValidator.Parse(output.RawJson, references);
@@ -36,6 +28,4 @@ public sealed class AiListExtractionService(ICatalogRepository catalog, IAiListE
         }
     }
 
-    private static ProfileValidationException InvalidInput(string field, string message) =>
-        new(new Dictionary<string, string[]> { [field] = [message] });
 }
