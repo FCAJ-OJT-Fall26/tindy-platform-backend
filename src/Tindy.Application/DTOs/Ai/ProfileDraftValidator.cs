@@ -115,7 +115,7 @@ public static class ProfileDraftValidator
         }
     }
 
-    private static void CheckUniqueProperties(JsonElement element)
+    internal static void CheckUniqueProperties(JsonElement element)
     {
         if (element.ValueKind == JsonValueKind.Object)
         {
