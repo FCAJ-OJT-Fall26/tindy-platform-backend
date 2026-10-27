@@ -30,8 +30,8 @@ public sealed class AiListSourceNormalizationTests
     {
         var json = JsonSerializer.Serialize(new
         {
-            skill_ids = Array.Empty<string>(),
-            experiences = new[] { new { employer_name = "Example Company", role_title = "AI Engineer", description = "Built models.\nUsed Python.", start_date_source = "01/2021", end_date_source = "Nay", skill_ids = Array.Empty<string>() } },
+            skill_ids = new Dictionary<string, string>(),
+            experiences = new[] { new { employer_name = "Example Company", role_title = "AI Engineer", description = "Built models.\nUsed Python.", start_date_source = "01/2021", end_date_source = "Nay", skill_ids = new Dictionary<string, string>() } },
             certificates = Array.Empty<object>(), warnings = Array.Empty<object>()
         });
         var value = Assert.Single(AiListDraftValidator.Parse(json, new([])).Experiences);
@@ -44,7 +44,7 @@ public sealed class AiListSourceNormalizationTests
 
     private static ProfileDraftResponse ParseCertificate(string source) => AiListDraftValidator.Parse(JsonSerializer.Serialize(new
     {
-        skill_ids = Array.Empty<string>(), experiences = Array.Empty<object>(),
+        skill_ids = new Dictionary<string, string>(), experiences = Array.Empty<object>(),
         certificates = new[] { new { title = "Certificate", issued_at_source = source } }, warnings = Array.Empty<object>()
     }), new([]));
 }

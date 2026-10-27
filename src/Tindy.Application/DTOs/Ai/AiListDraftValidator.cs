@@ -67,27 +67,19 @@ public static class AiListDraftValidator
 
     private static JsonArray Resolve(JsonNode? node, AiSkillReferenceMap references, int maximum, JsonArray warnings, string field)
     {
-        Require(node is JsonArray);
-        var items = (JsonArray)node!;
-        var keys = new List<string>();
-        var quotes = new List<string>();
-        foreach (var item in items)
-        {
-            Require(item is JsonObject match && match.Count == 2 && match.ContainsKey("key") && match.ContainsKey("evidence"));
-            var key = item!["key"]?.GetValue<string>();
-            var quote = item["evidence"]?.GetValue<string>();
-            Require(key is not null && !string.IsNullOrWhiteSpace(quote) && quote.Length <= 200);
-            keys.Add(key!);
-            quotes.Add(quote!);
-        }
+        Require(node is JsonObject);
+        var matches = (JsonObject)node!;
+        var keys = matches.Select(match => match.Key).ToArray();
+        var quotes = matches.Select(match => match.Value?.GetValue<string>()).ToArray();
+        Require(quotes.All(quote => !string.IsNullOrWhiteSpace(quote) && quote.Length <= 200));
         // Unknown/duplicate/excess keys are errors, never silently repaired by evidence filtering.
         var ids = references.Resolve(keys, maximum);
         var names = references.References.ToDictionary(reference => reference.Key, reference => reference.Name, StringComparer.Ordinal);
         var accepted = new JsonArray();
         var omitted = false;
-        for (var index = 0; index < keys.Count; index++)
+        for (var index = 0; index < keys.Length; index++)
         {
-            if (AiSkillEvidence.Matches(names[keys[index]], quotes[index])) accepted.Add(JsonValue.Create(ids[index]));
+            if (AiSkillEvidence.Matches(names[keys[index]], quotes[index]!)) accepted.Add(JsonValue.Create(ids[index]));
             else omitted = true;
         }
         if (omitted)

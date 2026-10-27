@@ -14,7 +14,7 @@ public sealed class AiListDraftValidatorTests
     public void MapsProfileAndExperienceSkillsAndPreservesPublicShape()
     {
         var output = AiListDraftValidator.Parse("""
-        {"skill_ids":[{"key":"s1","evidence":"Python"}],"experiences":[{"role_title":"AI Engineer","description":"Used Python","start_date_source":"01/2021","end_date_source":"Nay","skill_ids":[{"key":"s1","evidence":"Python"}]}],
+        {"skill_ids":{"s1":"Python"},"experiences":[{"role_title":"AI Engineer","description":"Used Python","start_date_source":"01/2021","end_date_source":"Nay","skill_ids":{"s1":"Python"}}],
         "certificates":[{"title":"ML Certificate","issued_at_source":null}],
         "warnings":[{"field":"skill_ids","code":"UNMATCHED_CATALOG","message":"SQL has no exact match."}]}
         """, Map);
@@ -48,7 +48,7 @@ public sealed class AiListDraftValidatorTests
     public void EnforcesThirtyDistinctSkillsWithoutSilentlyTrimming()
     {
         var map = new AiSkillReferenceMap(Enumerable.Range(0, 31).Select(i => new AiCatalogItem(Guid.NewGuid(), $"Skill {i}")));
-        var json = JsonSerializer.Serialize(new { skill_ids = map.References.Select(x => new { key = x.Key, evidence = x.Name }), experiences = Array.Empty<object>(), certificates = Array.Empty<object>(), warnings = Array.Empty<object>() });
+        var json = JsonSerializer.Serialize(new { skill_ids = map.References.ToDictionary(x => x.Key, x => x.Name), experiences = Array.Empty<object>(), certificates = Array.Empty<object>(), warnings = Array.Empty<object>() });
         Assert.Throws<AiException>(() => AiListDraftValidator.Parse(json, map));
     }
 
@@ -58,7 +58,7 @@ public sealed class AiListDraftValidatorTests
         var sql = new AiCatalogItem(Guid.Parse("11111111-1111-4111-8111-111111111111"), "SQL");
         var postgres = new AiCatalogItem(Guid.Parse("22222222-2222-4222-8222-222222222222"), "PostgreSQL");
         var map = new AiSkillReferenceMap([postgres, sql]);
-        var draft = AiListDraftValidator.Parse("""{"skill_ids":[{"key":"s1","evidence":"SQL"}],"experiences":[],"certificates":[],"warnings":[]}""", map);
+        var draft = AiListDraftValidator.Parse("""{"skill_ids":{"s1":"SQL"},"experiences":[],"certificates":[],"warnings":[]}""", map);
         Assert.Equal(sql.Id, Assert.Single(draft.Profile.SkillIds));
         Assert.DoesNotContain(postgres.Id, draft.Profile.SkillIds);
     }
@@ -66,7 +66,7 @@ public sealed class AiListDraftValidatorTests
     [Fact]
     public void EmptyEvidenceProducesAnInsufficientEvidenceWarning()
     {
-        var draft = AiListDraftValidator.Parse("""{"skill_ids":[],"experiences":[],"certificates":[],"warnings":[]}""", Map);
+        var draft = AiListDraftValidator.Parse("""{"skill_ids":{},"experiences":[],"certificates":[],"warnings":[]}""", Map);
         Assert.Empty(draft.Profile.SkillIds);
         Assert.Contains(draft.Warnings, warning => warning.Code == "INSUFFICIENT_EVIDENCE");
     }

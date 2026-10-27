@@ -236,7 +236,7 @@ public sealed class AiProfileServiceTests
 
     private sealed class FakeProvider : IAiListExtractionProvider
     {
-        public string Output { get; init; } = """{"skill_ids":[],"experiences":[],"certificates":[],"warnings":[]}""";
+        public string Output { get; init; } = """{"skill_ids":{},"experiences":[],"certificates":[],"warnings":[]}""";
         public int Calls { get; private set; }
         public AiProfileInput? Input { get; private set; }
         public IReadOnlyList<AiSkillReference>? Skills { get; private set; }

@@ -12,7 +12,7 @@ namespace Tindy.Tests.Ai;
 
 public sealed class BedrockListExtractionProviderTests
 {
-    private const string Lists = "{\"skill_ids\":[{\"key\":\"s1\",\"evidence\":\"Python\"}],\"experiences\":[],\"certificates\":[],\"warnings\":[]}";
+    private const string Lists = "{\"skill_ids\":{\"s1\":\"Python\"},\"experiences\":[],\"certificates\":[],\"warnings\":[]}";
 
     [Fact]
     public async Task UsesOneForcedToolAndPutsPdfBeforeTextWithNoUuidsOrRoles()
@@ -28,9 +28,9 @@ public sealed class BedrockListExtractionProviderTests
             Assert.Equal(4, schema.GetProperty("required").GetArrayLength());
             Assert.False(schema.GetProperty("additionalProperties").GetBoolean());
             var keys = schema.GetProperty("properties").GetProperty("skill_ids");
-            Assert.Equal(30, keys.GetProperty("maxItems").GetInt32());
-            Assert.True(keys.GetProperty("uniqueItems").GetBoolean());
-            Assert.Equal("s1", keys.GetProperty("items").GetProperty("properties").GetProperty("key").GetProperty("enum")[0].GetString());
+            Assert.Equal(30, keys.GetProperty("maxProperties").GetInt32());
+            Assert.Equal("s1", keys.GetProperty("propertyNames").GetProperty("enum")[0].GetString());
+            Assert.Equal("string", keys.GetProperty("additionalProperties").GetProperty("type").GetString());
             Assert.Equal(4096, root.GetProperty("inferenceConfig").GetProperty("maxTokens").GetInt32());
             var content = root.GetProperty("messages")[0].GetProperty("content");
             Assert.True(content[0].TryGetProperty("document", out _));
@@ -47,6 +47,22 @@ public sealed class BedrockListExtractionProviderTests
         Assert.Equal(100, result.Diagnostics.InputTokens);
         Assert.Equal(50, result.Diagnostics.OutputTokens);
         Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task EmptyCatalogAllowsOnlyAnEmptyMapWithoutAnInvalidEmptyEnum()
+    {
+        using var handler = new Stub(async (request, token) =>
+        {
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+            var schema = json.RootElement.GetProperty("toolConfig").GetProperty("tools")[0].GetProperty("toolSpec")
+                .GetProperty("inputSchema").GetProperty("json").GetProperty("properties").GetProperty("skill_ids");
+            Assert.Equal(0, schema.GetProperty("maxProperties").GetInt32());
+            Assert.False(schema.TryGetProperty("propertyNames", out _));
+            return Success();
+        });
+        using var provider = Create(handler);
+        await provider.ExtractListsAsync(new("source", null), []);
     }
 
     [Theory]
