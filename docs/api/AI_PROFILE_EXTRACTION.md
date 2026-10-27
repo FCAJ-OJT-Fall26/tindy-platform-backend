@@ -1,6 +1,6 @@
 # AI Profile Extraction API
 
-API độc lập để trích xuất danh sách kỹ năng, kinh nghiệm và chứng chỉ từ CV PDF, README được dán hoặc mô tả tự do. Giai đoạn hiện tại chỉ chạy lượt danh sách; lượt trích các trường đơn của profile được dành cho giai đoạn sau. Endpoint và schema response vẫn giữ nguyên; không sinh bio và không tự lưu dữ liệu.
+API trích xuất profile, kỹ năng, kinh nghiệm và chứng chỉ từ CV PDF, README được dán hoặc mô tả tự do. Hai lượt model chạy song song: một lượt các trường đơn của profile, một lượt danh sách. Endpoint và schema response giữ nguyên; không sinh bio và không tự lưu dữ liệu.
 
 ## Endpoint và quyền truy cập
 
@@ -24,7 +24,7 @@ Mỗi part chỉ xuất hiện một lần; `file` phải là file part và `tex
 Ví dụ text-only (chỉ chạy khi đã bật provider và được phép gọi AWS):
 
 ```bash
-curl http://localhost:5217/api/ai/extract-profile \
+curl https://localhost:7190/api/ai/extract-profile \
   -H "Authorization: Bearer $TINDY_ACCESS_TOKEN" \
   --form-string 'text=Tôi là sinh viên CNTT. Tôi đã viết API bằng C# trong dự án nhóm.'
 ```
@@ -42,17 +42,19 @@ HTTP 200 dùng envelope `{ "success": true, "message": "Profile extracted. Revie
 | `certificates[]` | `title`, `issuer`, `credential_id`, `credential_url`, `issued_at`, `expires_at` |
 | `warnings[]` | `field`, `code`, `message` |
 
-Trong giai đoạn danh sách, `profile.skill_ids` chứa UUID kỹ năng thật; **mọi trường đơn khác trong `profile` đều trả `null`**, kể cả thông tin có trong CV. Đây là hành vi theo giai đoạn, không phải model bỏ sót. `experiences` và `certificates` được trích xuất trong cùng một Bedrock call; không có lượt trích profile thứ hai.
+Lượt `extract_profile_scalars` chỉ trích các trường đơn của profile; lượt `extract_lists` sở hữu `profile.skill_ids`, `experiences` và `certificates`. Backend ghép và kiểm tra toàn bộ draft trước khi trả HTTP 200. Một lượt lỗi sẽ hủy và chờ lượt còn lại kết thúc, rồi trả lỗi của lượt thất bại; không trả kết quả một phần và không tự gọi sửa output.
 
-Scalar không có bằng chứng trả `null`; collection trả `[]`. `is_ongoing` cũng nullable, không đoán `false` khi không rõ. Không có `bio`, `resume_url`, ID của bản ghi, trường bảo mật, timestamp hoặc trạng thái xác minh. `skill_ids` chỉ chứa UUID thuộc catalog active; `preferred_role_id` hiện luôn null. Không tạo skill/role mới.
+Scalar không có bằng chứng trả `null`; collection trả `[]`. `is_ongoing` cũng nullable, không đoán `false` khi không rõ. Không có `bio`, `resume_url`, ID của bản ghi, trường bảo mật, timestamp hoặc trạng thái xác minh. `skill_ids` chỉ chứa UUID thuộc catalog active; `preferred_role_id` chỉ có giá trị khi nguồn nêu rõ vai trò mong muốn và khớp catalog active. Chức danh hiện tại không tự trở thành vai trò mong muốn. Không tạo skill/role mới.
 
 Ngày experience dùng `YYYY-MM`; ngày certificate dùng `YYYY-MM-DD`. Thiếu thành phần ngày không được tự thêm. Tối đa 20 experiences, 20 certificates, 50 warnings; profile có tối đa 30 skill IDs, mỗi experience tối đa 20. Các giới hạn độ dài scalar, URL/email và ngày tương thích với API profile hiện có, nhưng trường bắt buộc khi lưu vẫn có thể `null` trong draft.
 
-Model nhận catalog với mã ngắn theo request (`s1`, `s2`, …), không phải UUID. Backend kiểm tra mã, trùng lặp, số lượng rồi ánh xạ về đúng UUID trong snapshot catalog đã gửi. Không fuzzy-match mã sai. Tool input dùng map `{mã: bằng chứng}` để mỗi skill chỉ có một khóa; JSON có khóa trùng vẫn bị từ chối trước khi deserialize. Mỗi mã kỹ năng phải có trích đoạn bằng chứng ngắn chứa tên kỹ năng hoặc tên tương đương rõ ràng. Mã hợp lệ nhưng bằng chứng không khớp bị bỏ kèm `INSUFFICIENT_EVIDENCE`; mã lạ/trùng/vượt giới hạn vẫn là lỗi. Đây là kiểm tra nhất quán tên–bằng chứng, không phải OCR độc lập để chứng minh model đã chép đúng từng chữ từ PDF hoặc gắn đúng kỹ năng vào từng công việc. Các gợi ý gắn với experience vẫn cần người dùng đối chiếu với nguồn trước khi sử dụng. CV ghi SQL và catalog có SQL thì SQL vẫn được trả; không được tự thay SQL bằng PostgreSQL/MySQL/SQL Server khi nguồn không nêu các sản phẩm đó. Nếu catalog chưa có SQL tương đương, bỏ mục chưa khớp và trả `UNMATCHED_CATALOG`.
+Mỗi lượt nhận catalog riêng với mã ngắn theo request: skill `s1`, `s2`, … hoặc role `r1`, `r2`, …, không phải UUID. Backend đọc skill rồi role tuần tự trước khi bắt đầu hai lời gọi model để tránh dùng chung DbContext đồng thời. Role chỉ được chọn khi trích đoạn nêu rõ mong muốn nhận chính vai trò đó; chỉ tên chức danh hoặc mong muốn một môi trường kỹ thuật không đủ bằng chứng. Backend kiểm tra mã, trùng lặp, số lượng rồi ánh xạ về đúng UUID trong snapshot catalog đã gửi. Không fuzzy-match mã sai. Tool input dùng map `{mã: bằng chứng}` để mỗi skill chỉ có một khóa; JSON có khóa trùng vẫn bị từ chối trước khi deserialize. Mỗi mã kỹ năng phải có trích đoạn bằng chứng ngắn chứa tên kỹ năng hoặc tên tương đương rõ ràng. Mã hợp lệ nhưng bằng chứng không khớp bị bỏ kèm `INSUFFICIENT_EVIDENCE`; mã lạ/trùng/vượt giới hạn vẫn là lỗi. Đây là kiểm tra nhất quán tên–bằng chứng, không phải OCR độc lập để chứng minh model đã chép đúng từng chữ từ PDF hoặc gắn đúng kỹ năng vào từng công việc. Các gợi ý gắn với experience vẫn cần người dùng đối chiếu với nguồn trước khi sử dụng. CV ghi SQL và catalog có SQL thì SQL vẫn được trả; không được tự thay SQL bằng PostgreSQL/MySQL/SQL Server khi nguồn không nêu các sản phẩm đó. Nếu catalog chưa có SQL tương đương, bỏ mục chưa khớp và trả `UNMATCHED_CATALOG`.
 
 Với kinh nghiệm làm việc, tên công ty được giữ trong `description`; `project_name` không được tự lấy từ tên công ty. Model sao chép ngày nguyên gốc vào tool input nội bộ; backend chuẩn hóa tháng/năm cho experience và ngày/tháng/năm cho certificate. Ngày thiếu thành phần hoặc mơ hồ giữ null kèm `INCOMPLETE_DATE`, không tự thêm ngày 01/01.
 
 Warning dùng các code `CONFLICT`, `INSUFFICIENT_EVIDENCE`, `INCOMPLETE_DATE`, `UNMATCHED_CATALOG`, `MISSING_INFORMATION`, `LIMIT_EXCEEDED`. `field` là đường dẫn hợp lệ trong draft, như `profile.display_name`, `experiences[0].start_date`, tên collection khi bỏ một mục, hoặc `$` cho toàn nguồn. Backend từ chối mục experience/certificate hoàn toàn rỗng, đường dẫn/code lạ và cảnh báo `CONFLICT` đi kèm scalar vẫn có giá trị. Việc xác định dữ kiện có đúng với nguồn hay không vẫn phụ thuộc model và bước duyệt của người dùng.
+
+Frontend hiện có tiếp tục đọc `data.profile.skill_ids`, các warning và raw response như trước; các trường đơn được trả thêm giá trị trong chính các field đã có. Tích hợp này không thay UI và không tự điền tab Profile builder đang dùng template local.
 
 ## Cách hiểu bản nháp
 
@@ -63,13 +65,13 @@ Warning dùng các code `CONFLICT`, `INSUFFICIENT_EVIDENCE`, `INCOMPLETE_DATE`, 
 
 ## Vận hành và lỗi
 
-Quota 5 request/phút/người dùng, tối đa 2 Bedrock call đồng thời mỗi process, không có hàng đợi. Một extraction gọi model một lần, không tự retry/fallback; lỗi ở request mới có thể cần người dùng chủ động thử lại.
+Quota 5 request/phút/người dùng, tối đa 2 Bedrock call đồng thời mỗi process, không có hàng đợi. Một request đầy đủ giữ đủ hai slot trước khi gọi bất kỳ lượt nào; thiếu slot trả `AI_BUSY` mà không khởi chạy nửa request. Hai lượt chạy song song, mỗi lượt tối đa 4096 output tokens và dùng cùng timeout provider đã cấu hình. Deadline toàn HTTP request là 120 giây, gồm đọc multipart/catalog; tương thích timeout 130 giây hiện có của frontend. Lượt list-only trong manual runner vẫn dùng một slot cùng bộ giới hạn. Không tự retry/fallback. PDF/text được gửi riêng tới mỗi lượt, do đó mỗi request đầy đủ có hai lần xử lý input và chi phí tương ứng.
 
 Lỗi dùng `application/problem+json` với `error_code` và `traceId`; không bọc `{success:false}`.
 
-Riêng môi trường `Development`, lỗi `AI_INVALID_OUTPUT` có thể kèm `raw_model_output`, `raw_output_kind` (`tool_input`, `model_text` hoặc `provider_response`) và `raw_output_truncated` để xem nội dung bị từ chối. Nội dung tối đa 128 KiB UTF-8, chỉ nằm trong response `no-store`; không được ghi log hoặc lưu lâu dài. Production/Staging không trả các trường chẩn đoán này. Raw output vẫn là dữ liệu không hợp lệ, không phải draft được chấp nhận.
+Riêng môi trường `Development`, lỗi `AI_INVALID_OUTPUT` có thể kèm `raw_model_output`, `raw_output_kind` (`tool_input`, `model_text`, `provider_response` hoặc `merged_draft`) và `raw_output_truncated` để xem nội dung bị từ chối. Nội dung tối đa 128 KiB UTF-8, chỉ nằm trong response `no-store`; không được ghi log hoặc lưu lâu dài. Production/Staging không trả các trường chẩn đoán này. Raw output vẫn là dữ liệu không hợp lệ, không phải draft được chấp nhận.
 
-Ở Development, lỗi AI có thể kèm `ai_diagnostics` (`stop_reason`, `input_tokens`, `output_tokens`, `max_output_tokens`, `elapsed_ms`, `failure_reason`) và `validation_reason`. `max_tokens`/`output_token_limit` phân biệt hết token với HTTP 504 `AI_TIMEOUT`; mã lạ/trùng/vượt giới hạn được phân biệt bằng validation reason. Response thành công có header `X-AI-Diagnostics` ở Development, không thêm nhóm mới vào `data`. Production không trả metadata chẩn đoán này hoặc raw output.
+Ở Development, lỗi AI có thể kèm `ai_diagnostics` (`stop_reason`, `input_tokens`, `output_tokens`, `max_output_tokens`, `elapsed_ms`, `failure_reason`) và `validation_reason`. `max_tokens`/`output_token_limit` phân biệt hết token với HTTP 504 `AI_TIMEOUT`; mã lạ/trùng/vượt giới hạn được phân biệt bằng validation reason. Lỗi có thêm `stage` trong `ai_diagnostics` (`profile`, `lists`, `merge` hoặc `request`). Response thành công có header `X-AI-Diagnostics` ở Development: số token tổng, thời gian thực tế toàn request, cap tổng 8192 và `stages.profile`/`stages.lists` chứa metadata từng lượt. Không thêm nhóm mới vào `data`. Warnings được gộp, bỏ trùng theo field/code/message; nếu quá 50 thì giữ 49 và thêm một `LIMIT_EXCEEDED`. Cảnh báo thiếu dữ kiện của lượt danh sách được giới hạn về danh sách, không mô tả sai rằng profile không có thông tin. Production không trả metadata chẩn đoán này hoặc raw output.
 
 | HTTP | `error_code` | Tình huống |
 | --- | --- | --- |
@@ -81,6 +83,6 @@ Riêng môi trường `Development`, lỗi `AI_INVALID_OUTPUT` có thể kèm `r
 | 429 | `AI_RATE_LIMITED` / `AI_BUSY` | Hết quota người dùng hoặc không còn slot/provider bận. |
 | 502 | `AI_PROVIDER_ERROR` / `AI_INVALID_OUTPUT` | Provider lỗi, output sai schema hoặc bị cắt ngắn. |
 | 503 | `AI_UNAVAILABLE` | Tính năng tắt, thiếu hoặc sai cấu hình/quyền provider. |
-| 504 | `AI_TIMEOUT` | Provider quá thời gian chờ. |
+| 504 | `AI_TIMEOUT` | Provider hoặc toàn request quá thời gian chờ. |
 
 PDF/text và draft không được lưu vào database hoặc kho file lâu dài. Request được gửi tới Bedrock khi tính năng bật. Global inference có thể xử lý ngoài Singapore; xem [hướng dẫn cấu hình](../guide/AI_PROFILE_EXTRACTION_SETUP.md). Kiểm thử offline không chứng minh độ chính xác OCR/model thật trên mọi tài liệu.
