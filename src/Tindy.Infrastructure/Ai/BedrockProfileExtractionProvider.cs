@@ -32,6 +32,7 @@ public sealed class BedrockProfileExtractionProvider(
             throw new AiException(AiFailure.Busy);
 
         var timer = Stopwatch.StartNew();
+        string? responseBody = null;
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -42,8 +43,18 @@ public sealed class BedrockProfileExtractionProvider(
                 throw new AiException(MapFailure(response.StatusCode, input.Pdf is not null));
 
             var bytes = await ReadBoundedAsync(response.Content, timeout.Token);
+            responseBody = Encoding.UTF8.GetString(bytes);
             using var document = JsonDocument.Parse(bytes);
-            var result = ReadOutput(document.RootElement);
+            string result;
+            try
+            {
+                result = ReadOutput(document.RootElement);
+            }
+            catch (AiException exception) when (exception.Failure == AiFailure.InvalidOutput)
+            {
+                var raw = ReadDiagnosticOutput(document.RootElement);
+                throw new AiException(AiFailure.InvalidOutput, raw.Text, raw.Kind);
+            }
             logger.LogInformation("AI extraction completed TraceId={TraceId} ElapsedMs={ElapsedMs} InputTokens={InputTokens} OutputTokens={OutputTokens}",
                 Activity.Current?.TraceId.ToString(), timer.ElapsedMilliseconds,
                 ReadTokens(document.RootElement, "inputTokens"), ReadTokens(document.RootElement, "outputTokens"));
@@ -59,7 +70,7 @@ public sealed class BedrockProfileExtractionProvider(
         }
         catch (JsonException)
         {
-            throw new AiException(AiFailure.InvalidOutput);
+            throw new AiException(AiFailure.InvalidOutput, responseBody, "provider_response");
         }
         catch (HttpRequestException)
         {
@@ -153,6 +164,22 @@ public sealed class BedrockProfileExtractionProvider(
         if (string.IsNullOrWhiteSpace(result) || Encoding.UTF8.GetByteCount(result) > AiProfileLimits.MaxOutputBytes)
             throw new AiException(AiFailure.InvalidOutput);
         return result;
+    }
+
+    private static (string Text, string Kind) ReadDiagnosticOutput(JsonElement root)
+    {
+        if (root.ValueKind == JsonValueKind.Object &&
+            root.TryGetProperty("output", out var output) && output.ValueKind == JsonValueKind.Object &&
+            output.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.Object &&
+            message.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
+        {
+            var parts = content.EnumerateArray()
+                .Where(block => block.ValueKind == JsonValueKind.Object &&
+                    block.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                .Select(block => block.GetProperty("text").GetString()).ToArray();
+            if (parts.Length > 0) return (string.Concat(parts), "model_text");
+        }
+        return (root.GetRawText(), "provider_response");
     }
 
     private static int? ReadTokens(JsonElement root, string name) =>

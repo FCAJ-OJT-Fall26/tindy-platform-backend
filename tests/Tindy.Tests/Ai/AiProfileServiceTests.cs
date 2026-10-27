@@ -104,6 +104,23 @@ public sealed class AiProfileServiceTests
         var error = await Assert.ThrowsAsync<AiException>(() =>
             new AiProfileService(new FakeCatalog(), provider).ExtractAsync(new("A", null)));
         Assert.Equal(AiFailure.InvalidOutput, error.Failure);
+        Assert.True(error.RawOutputTruncated);
+        Assert.Equal(AiProfileLimits.MaxOutputBytes, Encoding.UTF8.GetByteCount(error.RawOutput!));
+    }
+
+    [Theory]
+    [InlineData("{invalid}")]
+    [InlineData("```json\n{}\n```")]
+    [InlineData("{\"profile\":{\"skill_ids\":[\"ffffffff-ffff-ffff-ffff-ffffffffffff\"]},\"experiences\":[],\"certificates\":[],\"warnings\":[]}")]
+    public async Task InvalidDraftRetainsExactModelTextForDevelopmentDiagnostics(string output)
+    {
+        var provider = new FakeProvider { Output = output };
+        var error = await Assert.ThrowsAsync<AiException>(() =>
+            new AiProfileService(new FakeCatalog(), provider).ExtractAsync(new("A", null)));
+        Assert.Equal(output, error.RawOutput);
+        Assert.False(error.RawOutputTruncated);
+        Assert.DoesNotContain(output, error.ToString());
+        Assert.Equal(1, provider.Calls);
     }
 
     [Fact]

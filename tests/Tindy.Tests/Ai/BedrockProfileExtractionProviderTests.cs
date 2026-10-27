@@ -135,6 +135,8 @@ public sealed class BedrockProfileExtractionProviderTests
         using var provider = Create(handler);
         var exception = await Assert.ThrowsAsync<AiException>(() => provider.ExtractAsync(new AiProfileInput("source", null), [], []));
         Assert.Equal(AiFailure.InvalidOutput, exception.Failure);
+        Assert.Equal(Draft, exception.RawOutput);
+        Assert.Equal("model_text", exception.RawOutputKind);
         Assert.Equal(1, handler.Calls);
     }
 
@@ -151,6 +153,7 @@ public sealed class BedrockProfileExtractionProviderTests
         using var provider = Create(handler);
         var exception = await Assert.ThrowsAsync<AiException>(() => provider.ExtractAsync(new AiProfileInput("source", null), [], []));
         Assert.Equal(AiFailure.InvalidOutput, exception.Failure);
+        Assert.NotNull(exception.RawOutput);
     }
 
     [Fact]

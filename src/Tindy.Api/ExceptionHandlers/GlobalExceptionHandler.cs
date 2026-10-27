@@ -7,10 +7,12 @@ namespace Tindy.Api.ExceptionHandlers;
 public sealed class GlobalExceptionHandler : IExceptionHandler
 {
     private readonly ILogger<GlobalExceptionHandler> _logger;
+    private readonly IHostEnvironment? _environment;
 
-    public GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger)
+    public GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger, IHostEnvironment? environment = null)
     {
         _logger = logger;
+        _environment = environment;
     }
 
     public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
@@ -139,6 +141,15 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         // 4. Include TraceId
         problemDetails.Extensions["traceId"] =
             httpContext.TraceIdentifier;
+
+        if (_environment?.IsDevelopment() == true &&
+            exception is AiException { Failure: AiFailure.InvalidOutput, RawOutput: not null } diagnostic)
+        {
+            problemDetails.Extensions["raw_model_output"] = diagnostic.RawOutput;
+            problemDetails.Extensions["raw_output_kind"] = diagnostic.RawOutputKind;
+            problemDetails.Extensions["raw_output_truncated"] = diagnostic.RawOutputTruncated;
+            httpContext.Response.Headers.CacheControl = "no-store";
+        }
 
         // 5. Set HTTP status and write response
         httpContext.Response.StatusCode = statusCode;

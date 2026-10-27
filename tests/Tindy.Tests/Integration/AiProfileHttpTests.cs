@@ -269,6 +269,9 @@ public sealed class AiProfileHttpTests
         using var client = app.Client();
         using var response = await client.PostAsync(Endpoint, Form("source"));
         await AssertProblem(response, HttpStatusCode.BadGateway, "AI_INVALID_OUTPUT");
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("{invalid}", json.RootElement.GetProperty("raw_model_output").GetString());
+        Assert.DoesNotContain(app.Base.Logs.Entries, entry => entry.Contains("{invalid}"));
     }
 
     [Fact]

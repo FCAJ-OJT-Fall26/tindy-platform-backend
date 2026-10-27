@@ -27,8 +27,15 @@ public sealed class AiProfileService(ICatalogRepository catalog, IProfileExtract
             .Where(x => x.IsActive).Select(x => new AiCatalogItem(x.ProfessionalRoleId, x.Name)).ToArray();
         var output = await provider.ExtractAsync(new AiProfileInput(text, input.Pdf), skills, roles, cancellationToken);
         if (output is null || Encoding.UTF8.GetByteCount(output) > AiProfileLimits.MaxOutputBytes)
-            throw new AiException(AiFailure.InvalidOutput);
-        return ProfileDraftValidator.Parse(output, skills.Select(x => x.Id).ToHashSet(), roles.Select(x => x.Id).ToHashSet());
+            throw new AiException(AiFailure.InvalidOutput, output);
+        try
+        {
+            return ProfileDraftValidator.Parse(output, skills.Select(x => x.Id).ToHashSet(), roles.Select(x => x.Id).ToHashSet());
+        }
+        catch (AiException exception) when (exception.Failure == AiFailure.InvalidOutput)
+        {
+            throw new AiException(AiFailure.InvalidOutput, output);
+        }
     }
 
     private static ProfileValidationException InvalidInput(string field, string message) =>

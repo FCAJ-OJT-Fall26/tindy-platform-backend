@@ -1,3 +1,6 @@
+using System.Text;
+using Tindy.Application.DTOs.Ai;
+
 namespace Tindy.Application.Exceptions;
 
 public enum AiFailure
@@ -12,7 +15,7 @@ public enum AiFailure
     UnsupportedMedia
 }
 
-// Only fixed, public messages cross the HTTP boundary. Never include provider bodies or secrets.
+// Messages remain public and fixed. Bounded invalid-output diagnostics are exposed only in Development.
 public sealed class AiException(AiFailure failure) : Exception(failure switch
 {
     AiFailure.Unavailable => "AI extraction is unavailable. Check the server configuration or try again later.",
@@ -25,6 +28,21 @@ public sealed class AiException(AiFailure failure) : Exception(failure switch
     _ => "The AI provider could not process the request. Please try again later."
 })
 {
+    public AiException(AiFailure failure, string? rawOutput, string rawOutputKind = "model_text") : this(failure)
+    {
+        if (failure != AiFailure.InvalidOutput || rawOutput is null) return;
+        var buffer = new byte[AiProfileLimits.MaxOutputBytes];
+        Encoding.UTF8.GetEncoder().Convert(rawOutput.AsSpan(), buffer, true,
+            out var charactersUsed, out _, out var completed);
+        RawOutput = rawOutput[..charactersUsed];
+        RawOutputTruncated = !completed;
+        RawOutputKind = rawOutputKind;
+    }
+
+    // Kept out of Message/InnerException/ToString so normal exception logging cannot print the draft.
+    public string? RawOutput { get; }
+    public bool RawOutputTruncated { get; }
+    public string? RawOutputKind { get; }
     public AiFailure Failure { get; } = failure;
     public string ErrorCode => Failure switch
     {

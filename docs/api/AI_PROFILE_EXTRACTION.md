@@ -61,6 +61,8 @@ Quota 5 request/phút/người dùng, tối đa 2 Bedrock call đồng thời m�
 
 Lỗi dùng `application/problem+json` với `error_code` và `traceId`; không bọc `{success:false}`.
 
+Riêng môi trường `Development`, lỗi `AI_INVALID_OUTPUT` có thể kèm `raw_model_output`, `raw_output_kind` (`model_text` hoặc `provider_response`) và `raw_output_truncated` để xem nội dung bị từ chối. Nội dung tối đa 128 KiB UTF-8, chỉ nằm trong response `no-store`; không được ghi log hoặc lưu lâu dài. Production/Staging không trả các trường chẩn đoán này. Raw output vẫn là dữ liệu không hợp lệ, không phải draft được chấp nhận.
+
 | HTTP | `error_code` | Tình huống |
 | --- | --- | --- |
 | 400 | `VALIDATION_FAILED` | Thiếu nguồn, text quá dài, PDF rỗng, multipart/fields không hợp lệ. |
