@@ -35,9 +35,16 @@ public static class AiListDraftValidator
                 Require(field == "$" || field == "skill_ids" || field.StartsWith("skill_ids[", StringComparison.Ordinal) ||
                     field == "experiences" || field.StartsWith("experiences[", StringComparison.Ordinal) ||
                     field == "certificates" || field.StartsWith("certificates[", StringComparison.Ordinal));
+                field = field.Replace(".start_date_source", ".start_date", StringComparison.Ordinal)
+                    .Replace(".end_date_source", ".end_date", StringComparison.Ordinal)
+                    .Replace(".issued_at_source", ".issued_at", StringComparison.Ordinal)
+                    .Replace(".expires_at_source", ".expires_at", StringComparison.Ordinal)
+                    .Replace(".employer_name", ".description", StringComparison.Ordinal);
+                warning["field"] = field;
                 if (field == "skill_ids" || field.StartsWith("skill_ids[", StringComparison.Ordinal))
                     warning["field"] = "profile." + field;
             }
+            AiListSourceNormalizer.Normalize(experiences, (JsonArray)root["certificates"]!, warnings);
             var normalized = new JsonObject
             {
                 ["profile"] = new JsonObject { ["skill_ids"] = ids },

@@ -14,8 +14,8 @@ public sealed class AiListDraftValidatorTests
     public void MapsProfileAndExperienceSkillsAndPreservesPublicShape()
     {
         var output = AiListDraftValidator.Parse("""
-        {"skill_ids":["s1"],"experiences":[{"role_title":"AI Engineer","description":"Used Python","start_date":"2021-01","end_date":null,"is_ongoing":true,"skill_ids":["s1"]}],
-        "certificates":[{"title":"ML Certificate","issued_at":null}],
+        {"skill_ids":["s1"],"experiences":[{"role_title":"AI Engineer","description":"Used Python","start_date_source":"01/2021","end_date_source":"Nay","skill_ids":["s1"]}],
+        "certificates":[{"title":"ML Certificate","issued_at_source":null}],
         "warnings":[{"field":"skill_ids","code":"UNMATCHED_CATALOG","message":"SQL has no exact match."}]}
         """, Map);
         Assert.Equal(Id, Assert.Single(output.Profile.SkillIds));
