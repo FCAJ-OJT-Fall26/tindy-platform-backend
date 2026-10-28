@@ -4,9 +4,9 @@ Chạy các lệnh dưới đây từ `backend/`. Hợp đồng HTTP nằm tại
 
 ## Provider được chọn
 
-Backend gọi Amazon Bedrock Converse trực tiếp bằng `HttpClient` và Bearer API key, không cần AWS SDK hoặc dependency mới. Model ban đầu là Amazon Nova 2 Lite (`global.amazon.nova-2-lite-v1:0`) qua endpoint vùng `ap-southeast-1`; không dùng Claude và không có model fallback.
+Backend gọi Gemma 4 31B (`google.gemma-4-31b`) qua Amazon Bedrock Mantle Responses API bằng `HttpClient` và Bearer API key, không cần AWS SDK hoặc dependency mới. Endpoint mặc định: `https://bedrock-mantle.us-east-1.api.aws/openai/v1/responses`. Đây là model Google, không phải model OpenAI; `/openai/v1` chỉ là định dạng API tương thích.
 
-Đây là **global inference profile**: endpoint Singapore không bảo đảm dữ liệu chỉ được xử lý tại Singapore. Trước khi gửi CV thật, cần hiểu phạm vi xử lý dữ liệu và chỉ dùng tài liệu được phép gửi tới AWS. Không có OCR service riêng; mỗi lượt Nova nhận cùng PDF/text, xử lý theo prompt và catalog riêng.
+Provider gửi nguyên PDF dưới dạng `input_file` base64 tới AWS tại vùng được cấu hình, mặc định US East (N. Virginia). Chỉ dùng tài liệu được phép gửi tới AWS. Không có OCR service, chuyển PDF thành ảnh hay dependency xử lý ảnh riêng. `store=false`; reasoning được bỏ khỏi draft và raw-output panel. Nova 2 Lite vẫn có thể được chọn rõ ràng bằng cấu hình cũ để rollback, không có fallback tự động.
 
 ## Profile và danh sách chạy song song
 
@@ -22,16 +22,18 @@ Mỗi lượt sử dụng một forced tool tương ứng, catalog mã ngắn th
 {
   "Bedrock": {
     "Enabled": false,
-    "Region": "ap-southeast-1",
-    "ModelId": "global.amazon.nova-2-lite-v1:0",
-    "TimeoutSeconds": 60
+    "Region": "us-east-1",
+    "ModelId": "google.gemma-4-31b",
+    "TimeoutSeconds": 90
   }
 }
 ```
 
-`Enabled` mặc định tắt. `TimeoutSeconds` cho phép 1–120. Implementation chỉ chấp nhận model đã chọn; đổi model là thay đổi cần đánh giá lại contract/khả năng PDF, không phải cách khắc phục lỗi quyền truy cập.
+`Enabled` mặc định tắt. `TimeoutSeconds` cho phép 1–120. Implementation chấp nhận Gemma 4 31B hoặc Nova 2 Lite; Gemma chỉ dùng các vùng commercial được hỗ trợ (`us-east-1`, `us-east-2`, `us-west-2`, `eu-central-1`). Đổi model không phải cách khắc phục lỗi quyền truy cập. User Secrets/environment có ưu tiên cao hơn appsettings: cập nhật cả ModelId và Region nếu máy vẫn đang ghi đè bằng cấu hình Nova cũ.
 
-Các giá trị cố định trong code, **không phải config keys**: `maxTokens=4096`, `temperature=0.1`, reasoning tắt, tối đa 2 calls đồng thời/process và không xếp hàng. API giới hạn 5 request/phút/người dùng. Không retry, repair call hoặc fallback tự động; mỗi request đầy đủ giữ đồng thời hai slot trước khi gọi hai lượt model. Nếu thiếu slot, không lượt nào được khởi chạy và request trả `AI_BUSY`. List-only manual mode vẫn giữ một slot từ cùng bộ giới hạn. Nếu một lượt lỗi, backend hủy/chờ lượt kia rồi trả lỗi gốc, không có HTTP 200 một phần. Deadline tổng của endpoint là 120 giây, gồm đọc multipart/catalog; timeout mỗi lượt vẫn theo `TimeoutSeconds`. Hai lượt gửi cùng PDF/text riêng biệt nên mỗi request đầy đủ có hai lần tính input và chi phí tương ứng. Khi chạy nhiều replica, giới hạn trong bộ nhớ áp dụng riêng từng process, không phải quota phân tán.
+Các giá trị cố định trong code, **không phải config keys**: Gemma dùng `max_output_tokens=8192` mỗi lượt (gồm phần suy luận), `reasoning.effort=high`, một forced function call và `parallel_tool_calls=false`; Nova giữ 4096 tokens, temperature 0.1 và reasoning tắt. Giới hạn chung: tối đa 2 calls đồng thời/process và không xếp hàng. API giới hạn 5 request/phút/người dùng. Không retry, repair call hoặc fallback tự động; mỗi request đầy đủ giữ đồng thời hai slot trước khi gọi hai lượt model. Nếu thiếu slot, không lượt nào được khởi chạy và request trả `AI_BUSY`. List-only manual mode vẫn giữ một slot từ cùng bộ giới hạn. Nếu một lượt lỗi, backend hủy/chờ lượt kia rồi trả lỗi gốc, không có HTTP 200 một phần. Deadline tổng của endpoint là 120 giây, gồm đọc multipart/catalog; timeout mỗi lượt vẫn theo `TimeoutSeconds`. Hai lượt gửi cùng PDF/text riêng biệt nên mỗi request đầy đủ có hai lần tính input và chi phí tương ứng. Khi chạy nhiều replica, giới hạn trong bộ nhớ áp dụng riêng từng process, không phải quota phân tán.
+
+Gemma giới hạn tổng request provider ở 3.500.000 byte, gồm PDF base64, text, system prompt và catalog/schema. Provider đo chính xác JSON UTF-8 sau serialize và trả HTTP 413 `AI_PAYLOAD_TOO_LARGE` trước khi gọi mạng nếu quá giới hạn. Giới hạn upload HTTP 4 MiB không bảo đảm file đó vừa request Gemma; không tự cắt/rasterize PDF để né giới hạn. Hai keyword map `propertyNames`/`maxProperties` được bỏ khỏi schema transport vì Mantle từ chối chúng; validator phía server vẫn kiểm tra mọi mã skill/role, trùng khóa, bằng chứng và số lượng.
 
 ## API key trong .NET User Secrets
 
@@ -40,6 +42,9 @@ Các giá trị cố định trong code, **không phải config keys**: `maxToke
 ```bash
 dotnet user-secrets set "Bedrock:ApiKey" "<BEDROCK_API_KEY>" --project src/Tindy.Api
 dotnet user-secrets set "Bedrock:Enabled" "true" --project src/Tindy.Api
+dotnet user-secrets set "Bedrock:ModelId" "google.gemma-4-31b" --project src/Tindy.Api
+dotnet user-secrets set "Bedrock:Region" "us-east-1" --project src/Tindy.Api
+dotnet user-secrets set "Bedrock:TimeoutSeconds" "90" --project src/Tindy.Api
 ```
 
 `<BEDROCK_API_KEY>` là placeholder, không phải key mẫu dùng được. Không chia sẻ output `user-secrets list`; tránh để key thật trong shell history hoặc bản ghi terminal. User Secrets chỉ dành cho development và không mã hóa trên ổ đĩa. Khi deploy, inject `Bedrock__ApiKey` qua secret store của môi trường; không commit file chứa secret.
@@ -79,6 +84,7 @@ Chỉ log trace, loại lỗi, thời gian và số token; không log key, ngu�
 ## Tham chiếu AWS
 
 - [Dùng Bedrock API keys](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys-use.html).
+- [Gemma 4 31B: endpoint, reasoning và payload limit](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-google-gemma-4-31b.html).
 - [Nova 2 Lite model card và inference profiles](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.html).
 - [Nova 2 multimodal/PDF input](https://docs.aws.amazon.com/nova/latest/nova2-userguide/using-multimodal-models.html).
 - [Nova 2 reasoning configuration](https://docs.aws.amazon.com/nova/latest/nova2-userguide/extended-thinking.html).
@@ -92,3 +98,9 @@ Build solution đã qua, không warning/lỗi. Bộ regression không cần Dock
 Đây là bằng chứng offline/contract. Kiểm thử hai lượt thật với PDF đang chờ quyền gửi tài liệu cá nhân tới Amazon Bedrock; chưa có kết quả live cho giai đoạn profile. Kỳ vọng và tiến độ được giữ ngoài repository, không ghi báo cáo thành công khi chưa gọi model.
 
 Role-title follow-up: 252/252 test AI/provider/HTTP đã qua; manual reviewer self-test kiểm tra thêm membership của role title trong catalog active. Đây là kiểm thử offline, chưa xác minh việc model chọn đúng nhóm nghề nghiệp trên PDF thật.
+
+## Kiểm chứng Gemma
+
+Regression sau khi đổi default: 559 test không cần Docker qua, bao gồm 263 test AI/provider/HTTP. Các test dùng PostgreSQL Testcontainers chưa chạy được do Docker không hoạt động. Live smoke test hai lượt bằng PDF scan tiếng Việt giả lập, catalog database thật và production validators đã qua: profile, Python/TensorFlow, chứng chỉ và warning giữ năm nguồn.
+
+Sau khi có chấp thuận gửi PDF cá nhân tới Bedrock, một lượt CV thật hoàn tất trong khoảng 35 giây, qua validator và trả 6 skill, 3 experience cùng 4 certificate. Bộ đối chiếu nội dung chưa đạt hoàn toàn: tên employer AICORE không khớp kỳ vọng và technologies_to_learn thiếu từ khóa. Không coi kết quả này là chứng minh mọi thông tin đều chính xác; người dùng vẫn cần duyệt bản nháp. Kỳ vọng/báo cáo live và tài liệu cá nhân nằm ngoài repository.

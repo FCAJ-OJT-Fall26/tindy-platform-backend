@@ -19,6 +19,8 @@ Content type: `multipart/form-data` với boundary do HTTP client tạo.
 
 Cần ít nhất một nguồn không rỗng; có thể gửi cả hai. Tổng HTTP body tối đa 5 MiB (5.242.880 byte), bao gồm multipart overhead. Không hỗ trợ DOCX, ảnh upload riêng, URL cần tải xuống, nhiều file hoặc field lạ. Các giới hạn này là giới hạn của ứng dụng, không phải tuyên bố giới hạn tối đa của Bedrock.
 
+Với Gemma 4 31B, tổng JSON gửi provider còn bị giới hạn 3.500.000 byte, gồm PDF base64, prompt và catalog. Request upload hợp lệ nhưng vượt giới hạn provider vẫn trả 413 `AI_PAYLOAD_TOO_LARGE` trước khi gửi AWS; không tự chuyển ảnh hay cắt PDF.
+
 Mỗi part chỉ xuất hiện một lần; `file` phải là file part và `text` phải là text part. Duplicate/unknown fields hoặc tráo kiểu part trả 400. PDF rỗng trả 400 ngay cả khi có text đi kèm.
 
 Ví dụ text-only (chỉ chạy khi đã bật provider và được phép gọi AWS):
@@ -67,13 +69,13 @@ Frontend hiện có tiếp tục đọc `data.profile.skill_ids`, các warning v
 
 ## Vận hành và lỗi
 
-Quota 5 request/phút/người dùng, tối đa 2 Bedrock call đồng thời mỗi process, không có hàng đợi. Một request đầy đủ giữ đủ hai slot trước khi gọi bất kỳ lượt nào; thiếu slot trả `AI_BUSY` mà không khởi chạy nửa request. Hai lượt chạy song song, mỗi lượt tối đa 4096 output tokens và dùng cùng timeout provider đã cấu hình. Deadline toàn HTTP request là 120 giây, gồm đọc multipart/catalog; tương thích timeout 130 giây hiện có của frontend. Lượt list-only trong manual runner vẫn dùng một slot cùng bộ giới hạn. Không tự retry/fallback. PDF/text được gửi riêng tới mỗi lượt, do đó mỗi request đầy đủ có hai lần xử lý input và chi phí tương ứng.
+Quota 5 request/phút/người dùng, tối đa 2 Bedrock call đồng thời mỗi process, không có hàng đợi. Một request đầy đủ giữ đủ hai slot trước khi gọi bất kỳ lượt nào; thiếu slot trả `AI_BUSY` mà không khởi chạy nửa request. Hai lượt chạy song song, Gemma mỗi lượt tối đa 8192 output tokens (gồm reasoning), Nova mỗi lượt 4096 output tokens và dùng cùng timeout provider đã cấu hình. Deadline toàn HTTP request là 120 giây, gồm đọc multipart/catalog; tương thích timeout 130 giây hiện có của frontend. Lượt list-only trong manual runner vẫn dùng một slot cùng bộ giới hạn. Không tự retry/fallback. PDF/text được gửi riêng tới mỗi lượt, do đó mỗi request đầy đủ có hai lần xử lý input và chi phí tương ứng.
 
 Lỗi dùng `application/problem+json` với `error_code` và `traceId`; không bọc `{success:false}`.
 
 Riêng môi trường `Development`, lỗi `AI_INVALID_OUTPUT` có thể kèm `raw_model_output`, `raw_output_kind` (`tool_input`, `model_text`, `provider_response` hoặc `merged_draft`) và `raw_output_truncated` để xem nội dung bị từ chối. Nội dung tối đa 128 KiB UTF-8, chỉ nằm trong response `no-store`; không được ghi log hoặc lưu lâu dài. Production/Staging không trả các trường chẩn đoán này. Raw output vẫn là dữ liệu không hợp lệ, không phải draft được chấp nhận.
 
-Ở Development, lỗi AI có thể kèm `ai_diagnostics` (`stop_reason`, `input_tokens`, `output_tokens`, `max_output_tokens`, `elapsed_ms`, `failure_reason`) và `validation_reason`. `max_tokens`/`output_token_limit` phân biệt hết token với HTTP 504 `AI_TIMEOUT`; mã lạ/trùng/vượt giới hạn được phân biệt bằng validation reason. Lỗi có thêm `stage` trong `ai_diagnostics` (`profile`, `lists`, `merge` hoặc `request`). Response thành công có header `X-AI-Diagnostics` ở Development: số token tổng, thời gian thực tế toàn request, cap tổng 8192 và `stages.profile`/`stages.lists` chứa metadata từng lượt. Không thêm nhóm mới vào `data`. Warnings được gộp, bỏ trùng theo field/code/message; nếu quá 50 thì giữ 49 và thêm một `LIMIT_EXCEEDED`. Cảnh báo thiếu dữ kiện của lượt danh sách được giới hạn về danh sách, không mô tả sai rằng profile không có thông tin. Production không trả metadata chẩn đoán này hoặc raw output.
+Ở Development, lỗi AI có thể kèm `ai_diagnostics` (`stop_reason`, `input_tokens`, `output_tokens`, `max_output_tokens`, `elapsed_ms`, `failure_reason`) và `validation_reason`. `max_tokens`/`output_token_limit` phân biệt hết token với HTTP 504 `AI_TIMEOUT`; mã lạ/trùng/vượt giới hạn được phân biệt bằng validation reason. Lỗi có thêm `stage` trong `ai_diagnostics` (`profile`, `lists`, `merge` hoặc `request`). Response thành công có header `X-AI-Diagnostics` ở Development: số token tổng, thời gian thực tế toàn request, cap tổng theo provider (Gemma 16384, Nova 8192) và `stages.profile`/`stages.lists` chứa metadata từng lượt. Không thêm nhóm mới vào `data`. Warnings được gộp, bỏ trùng theo field/code/message; nếu quá 50 thì giữ 49 và thêm một `LIMIT_EXCEEDED`. Cảnh báo thiếu dữ kiện của lượt danh sách được giới hạn về danh sách, không mô tả sai rằng profile không có thông tin. Production không trả metadata chẩn đoán này hoặc raw output.
 
 | HTTP | `error_code` | Tình huống |
 | --- | --- | --- |
@@ -87,4 +89,4 @@ Riêng môi trường `Development`, lỗi `AI_INVALID_OUTPUT` có thể kèm `r
 | 503 | `AI_UNAVAILABLE` | Tính năng tắt, thiếu hoặc sai cấu hình/quyền provider. |
 | 504 | `AI_TIMEOUT` | Provider hoặc toàn request quá thời gian chờ. |
 
-PDF/text và draft không được lưu vào database hoặc kho file lâu dài. Request được gửi tới Bedrock khi tính năng bật. Global inference có thể xử lý ngoài Singapore; xem [hướng dẫn cấu hình](../guide/AI_PROFILE_EXTRACTION_SETUP.md). Kiểm thử offline không chứng minh độ chính xác OCR/model thật trên mọi tài liệu.
+PDF/text và draft không được lưu vào database hoặc kho file lâu dài. Request được gửi tới Bedrock khi tính năng bật. Gemma mặc định được gọi tại `us-east-1`, nhận nguyên PDF và dùng `store=false`; reasoning không được trả trong draft/raw output; xem [hướng dẫn cấu hình](../guide/AI_PROFILE_EXTRACTION_SETUP.md). Kiểm thử offline không chứng minh độ chính xác OCR/model thật trên mọi tài liệu.
