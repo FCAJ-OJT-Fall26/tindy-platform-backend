@@ -237,7 +237,7 @@ public sealed class BedrockProfileExtractionProviderTests
         Assert.DoesNotContain("test-api-key", exception.ToString());
     }
 
-    private static BedrockOptions ValidOptions() => new() { Enabled = true, ApiKey = "test-api-key" };
+    private static BedrockOptions ValidOptions() => new() { Enabled = true, ApiKey = "test-api-key", ModelId = "global.amazon.nova-2-lite-v1:0", Region = "ap-southeast-1" };
 
     private static BedrockProfileExtractionProvider Create(HttpMessageHandler handler, BedrockOptions? options = null) =>
         new(new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan }, Options.Create(options ?? ValidOptions()),
