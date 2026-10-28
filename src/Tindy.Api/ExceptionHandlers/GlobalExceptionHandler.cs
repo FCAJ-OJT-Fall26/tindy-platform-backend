@@ -20,6 +20,8 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         {
             MediaRequestException media => media.StatusCode,
 
+            ProjectException project => project.StatusCode,
+
             InvalidCredentialsException =>
                 StatusCodes.Status401Unauthorized,
 
@@ -90,6 +92,8 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
             exception switch
             {
                 MediaRequestException media => media.ErrorCode,
+
+                ProjectException project => project.ErrorCode,
 
                 ProfileValidationException =>
                     "VALIDATION_FAILED",

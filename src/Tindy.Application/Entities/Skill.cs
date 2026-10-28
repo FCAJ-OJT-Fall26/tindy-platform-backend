@@ -18,4 +18,7 @@ public class Skill
 
     public ICollection<SkillCategorySkill> SkillCategorySkills { get; set; }
         = new List<SkillCategorySkill>();
+
+    public ICollection<ProjectPositionSkill> PositionSkills { get; set; }
+        = new List<ProjectPositionSkill>();
 }
