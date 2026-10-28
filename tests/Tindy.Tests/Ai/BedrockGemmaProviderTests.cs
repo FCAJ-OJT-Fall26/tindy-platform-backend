@@ -82,6 +82,43 @@ public sealed class BedrockGemmaProviderTests
     }
 
     [Fact]
+    public async Task MalformedProviderJsonDoesNotDiscloseReasoning()
+    {
+        using var handler = new Stub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent("{\"output\":[{\"type\":\"reasoning\",\"text\":\"private reasoning\"},") }));
+        using var provider = Create(handler);
+        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractProfileForTestAsync(new("source", null), []));
+        Assert.Equal(AiFailure.InvalidOutput, error.Failure);
+        Assert.Equal("invalid_provider_json", error.Diagnostics!.FailureReason);
+        Assert.Null(error.RawOutput);
+    }
+
+    [Theory]
+    [InlineData("failed")]
+    [InlineData("cancelled")]
+    [InlineData("pending-call")]
+    [InlineData("empty-call-id")]
+    [InlineData("extra-output")]
+    public async Task RejectsUnfinishedCallsOrExtraOutputWithoutDisclosingReasoning(string variant)
+    {
+        using var handler = new Stub(async _ =>
+        {
+            using var response = Response();
+            var node = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+            if (variant is "failed" or "cancelled") node["status"] = variant;
+            if (variant == "pending-call") node["output"]![1]!["status"] = "in_progress";
+            if (variant == "empty-call-id") node["output"]![1]!["call_id"] = " ";
+            if (variant == "extra-output") node["output"]!.AsArray().Add(new JsonObject
+            { ["type"] = "message", ["role"] = "assistant", ["status"] = "completed", ["content"] = new JsonArray() });
+            return new(HttpStatusCode.OK) { Content = new StringContent(node.ToJsonString()) };
+        });
+        using var provider = Create(handler);
+        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractProfileForTestAsync(new("source", null), []));
+        Assert.Equal(AiFailure.InvalidOutput, error.Failure);
+        Assert.DoesNotContain("private reasoning", error.RawOutput ?? "");
+    }
+
+    [Fact]
     public async Task PreservesDuplicateJsonPropertiesForStrictApplicationValidation()
     {
         const string arguments = "{\"profile\":{},\"profile\":{\"display_name\":\"Lan\"},\"warnings\":[]}";

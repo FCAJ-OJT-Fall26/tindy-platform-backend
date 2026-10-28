@@ -18,14 +18,13 @@ public sealed class BedrockScalarProfileProviderTests
         {
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             var root = json.RootElement;
-            var content = root.GetProperty("messages")[0].GetProperty("content");
-            Assert.True(content[0].TryGetProperty("document", out _));
+            var content = root.GetProperty("input")[1].GetProperty("content");
+            Assert.Equal("input_file", content[0].GetProperty("type").GetString());
             using var source = JsonDocument.Parse(content[1].GetProperty("text").GetString()!);
             Assert.Equal("r1", source.RootElement.GetProperty("active_roles")[0].GetProperty("key").GetString());
             Assert.False(source.RootElement.TryGetProperty("active_skills", out _));
-            var tools = root.GetProperty("toolConfig");
-            Assert.Equal("extract_profile_scalars", tools.GetProperty("toolChoice").GetProperty("tool").GetProperty("name").GetString());
-            var schema = tools.GetProperty("tools")[0].GetProperty("toolSpec").GetProperty("inputSchema").GetProperty("json");
+            Assert.Equal("extract_profile_scalars", root.GetProperty("tool_choice").GetProperty("name").GetString());
+            var schema = root.GetProperty("tools")[0].GetProperty("parameters");
             var properties = schema.GetProperty("properties");
             Assert.Equal(2, properties.EnumerateObject().Count());
             var fields = properties.GetProperty("profile").GetProperty("properties");
@@ -41,7 +40,7 @@ public sealed class BedrockScalarProfileProviderTests
             Assert.DoesNotContain("profile.preferred_role_key", paths);
             Assert.Contains("introduction", fields.GetProperty("learning_goals").GetProperty("description").GetString());
             Assert.Contains("contributions", fields.GetProperty("previous_projects_and_contribution").GetProperty("description").GetString());
-            Assert.Equal(4096, root.GetProperty("inferenceConfig").GetProperty("maxTokens").GetInt32());
+            Assert.Equal(8192, root.GetProperty("max_output_tokens").GetInt32());
             return Success();
         });
         using var provider = Create(handler);
@@ -65,18 +64,10 @@ public sealed class BedrockScalarProfileProviderTests
         Assert.NotNull(error.RawOutput);
     }
 
-    internal static HttpResponseMessage Success(string reason = "tool_use", string name = "extract_profile_scalars") => new(HttpStatusCode.OK)
-    {
-        Content = new StringContent(JsonSerializer.Serialize(new
-        {
-            stopReason = reason,
-            output = new { message = new { role = "assistant", content = new[] { new { toolUse = new { toolUseId = "profile-1", name,
-                input = new { profile = new { display_name = "Lan" }, warnings = Array.Empty<object>() } } } } } },
-            usage = new { inputTokens = 100, outputTokens = 40 }
-        }))
-    };
+    private static HttpResponseMessage Success(string reason = "tool_use", string name = "extract_profile_scalars") =>
+        BedrockTestSupport.ToolResponse(name, "{\"profile\":{\"display_name\":\"Lan\"},\"warnings\":[]}", reason);
     private static BedrockProfileExtractionProvider Create(HttpMessageHandler handler) => new(new HttpClient(handler),
-        Options.Create(new BedrockOptions { Enabled = true, ApiKey = "test-key", ModelId = "global.amazon.nova-2-lite-v1:0", Region = "ap-southeast-1" }), NullLogger<BedrockProfileExtractionProvider>.Instance);
+        Options.Create(new BedrockOptions { Enabled = true, ApiKey = "test-key" }), NullLogger<BedrockProfileExtractionProvider>.Instance);
     private sealed class Stub(Func<HttpRequestMessage, Task<HttpResponseMessage>> callback) : HttpMessageHandler
     {
         public int Calls;

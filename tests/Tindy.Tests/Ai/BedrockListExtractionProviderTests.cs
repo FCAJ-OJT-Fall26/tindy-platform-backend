@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -22,22 +21,22 @@ public sealed class BedrockListExtractionProviderTests
             Assert.Equal("Bearer", request.Headers.Authorization!.Scheme);
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
             var root = json.RootElement;
-            Assert.Equal("extract_lists", root.GetProperty("toolConfig").GetProperty("toolChoice").GetProperty("tool").GetProperty("name").GetString());
-            Assert.Single(root.GetProperty("toolConfig").GetProperty("tools").EnumerateArray());
-            var schema = root.GetProperty("toolConfig").GetProperty("tools")[0].GetProperty("toolSpec").GetProperty("inputSchema").GetProperty("json");
+            Assert.Equal("extract_lists", root.GetProperty("tool_choice").GetProperty("name").GetString());
+            Assert.Single(root.GetProperty("tools").EnumerateArray());
+            var schema = root.GetProperty("tools")[0].GetProperty("parameters");
             Assert.Equal(4, schema.GetProperty("required").GetArrayLength());
             Assert.False(schema.GetProperty("additionalProperties").GetBoolean());
             var keys = schema.GetProperty("properties").GetProperty("skill_ids");
-            Assert.Equal(30, keys.GetProperty("maxProperties").GetInt32());
-            Assert.Equal("s1", keys.GetProperty("propertyNames").GetProperty("enum")[0].GetString());
+            Assert.False(keys.TryGetProperty("propertyNames", out _));
+            Assert.False(keys.TryGetProperty("maxProperties", out _));
             Assert.Equal("string", keys.GetProperty("additionalProperties").GetProperty("type").GetString());
             var experience = schema.GetProperty("properties").GetProperty("experiences").GetProperty("items").GetProperty("properties");
             Assert.False(experience.TryGetProperty("role_title", out _));
             Assert.True(experience.TryGetProperty("role_title_source", out _));
             Assert.Equal(new string?[] { null, "r1" }, experience.GetProperty("role_key").GetProperty("enum").EnumerateArray().Select(x => x.GetString()));
-            Assert.Equal(4096, root.GetProperty("inferenceConfig").GetProperty("maxTokens").GetInt32());
-            var content = root.GetProperty("messages")[0].GetProperty("content");
-            Assert.True(content[0].TryGetProperty("document", out _));
+            Assert.Equal(8192, root.GetProperty("max_output_tokens").GetInt32());
+            var content = root.GetProperty("input")[1].GetProperty("content");
+            Assert.Equal("input_file", content[0].GetProperty("type").GetString());
             using var source = JsonDocument.Parse(content[1].GetProperty("text").GetString()!);
             Assert.Equal("s1", source.RootElement.GetProperty("active_skills")[0].GetProperty("key").GetString());
             Assert.Equal("Python", source.RootElement.GetProperty("active_skills")[0].GetProperty("name").GetString());
@@ -60,12 +59,10 @@ public sealed class BedrockListExtractionProviderTests
         using var handler = new Stub(async (request, token) =>
         {
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
-            var schema = json.RootElement.GetProperty("toolConfig").GetProperty("tools")[0].GetProperty("toolSpec")
-                .GetProperty("inputSchema").GetProperty("json").GetProperty("properties").GetProperty("skill_ids");
-            Assert.Equal(0, schema.GetProperty("maxProperties").GetInt32());
+            var schema = json.RootElement.GetProperty("tools")[0].GetProperty("parameters").GetProperty("properties").GetProperty("skill_ids");
+            Assert.False(schema.TryGetProperty("maxProperties", out _));
             Assert.False(schema.TryGetProperty("propertyNames", out _));
-            var experience = json.RootElement.GetProperty("toolConfig").GetProperty("tools")[0].GetProperty("toolSpec")
-                .GetProperty("inputSchema").GetProperty("json").GetProperty("properties").GetProperty("experiences").GetProperty("items").GetProperty("properties");
+            var experience = json.RootElement.GetProperty("tools")[0].GetProperty("parameters").GetProperty("properties").GetProperty("experiences").GetProperty("items").GetProperty("properties");
             Assert.Equal(JsonValueKind.Null, Assert.Single(experience.GetProperty("role_key").GetProperty("enum").EnumerateArray()).ValueKind);
             return Success();
         });
@@ -93,7 +90,7 @@ public sealed class BedrockListExtractionProviderTests
     [Theory]
     [InlineData("null")]
     [InlineData("not json")]
-    [InlineData("{\"stopReason\":\"tool_use\",\"output\":{\"message\":{\"role\":1,\"content\":[]}}}")]
+    [InlineData("{\"status\":\"completed\",\"output\":{}}") ]
     public async Task RejectsMalformedProviderEnvelopes(string body)
     {
         using var handler = new Stub((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) }));
@@ -102,18 +99,11 @@ public sealed class BedrockListExtractionProviderTests
     }
 
     private static BedrockProfileExtractionProvider Create(HttpMessageHandler handler) =>
-        new(new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan }, Options.Create(new BedrockOptions { Enabled = true, ApiKey = "test-key", ModelId = "global.amazon.nova-2-lite-v1:0", Region = "ap-southeast-1" }),
+        new(new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan }, Options.Create(new BedrockOptions { Enabled = true, ApiKey = "test-key" }),
             NullLogger<BedrockProfileExtractionProvider>.Instance);
 
-    private static HttpResponseMessage Success(string stop = "tool_use", string name = "extract_lists", int count = 1) => new(HttpStatusCode.OK)
-    {
-        Content = new StringContent(JsonSerializer.Serialize(new
-        {
-            output = new { message = new { role = "assistant", content = Enumerable.Range(0, count).Select(i => new { toolUse = new { toolUseId = "tool-" + i, name, input = JsonSerializer.Deserialize<JsonElement>(Lists) } }) } },
-            stopReason = stop,
-            usage = new { inputTokens = 100, outputTokens = 50 }
-        }), Encoding.UTF8, "application/json")
-    };
+    private static HttpResponseMessage Success(string stop = "tool_use", string name = "extract_lists", int count = 1) =>
+        BedrockTestSupport.ToolResponse(name, Lists, stop, count);
 
     private sealed class Stub(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> callback) : HttpMessageHandler
     {

@@ -9,8 +9,7 @@ namespace Tindy.Infrastructure.Ai;
 public sealed partial class BedrockProfileExtractionProvider
 {
     private const int GemmaRequestLimit = 3_500_000;
-    private bool IsGemma => _options.ModelId == "google.gemma-4-31b";
-    private int OutputTokenLimit => IsGemma ? 8192 : 4096;
+    private const int OutputTokenLimit = 8192;
 
     private HttpRequestMessage CreateGemmaRequest(AiProfileInput input, string system, string user,
         string toolName, JsonObject schema)
@@ -73,50 +72,4 @@ public sealed partial class BedrockProfileExtractionProvider
         }
     }
 
-    // Normalize transport metadata only. The existing readers still enforce one complete tool result,
-    // and the application validators resolve references and validate the unchanged public draft.
-    private static JsonDocument NormalizeGemmaResponse(JsonElement root)
-    {
-        var content = new JsonArray();
-        var status = String(root, "status");
-        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("output", out var output)
-            || output.ValueKind != JsonValueKind.Array)
-            throw new AiException(AiFailure.InvalidOutput);
-        foreach (var item in output.EnumerateArray())
-        {
-            switch (String(item, "type"))
-            {
-                case "reasoning": break; // Never include reasoning text in the draft or raw-output panel.
-                case "function_call" when String(item, "status") == "completed":
-                    content.Add(new JsonObject { ["toolUse"] = new JsonObject
-                    {
-                        ["toolUseId"] = String(item, "call_id"), ["name"] = String(item, "name"), ["input"] = String(item, "arguments")
-                    } });
-                    break;
-                case "message" when String(item, "role") == "assistant" && String(item, "status") == "completed":
-                    if (!item.TryGetProperty("content", out var parts) || parts.ValueKind != JsonValueKind.Array)
-                    { content.Add(new JsonObject { ["invalid"] = true }); break; }
-                    foreach (var part in parts.EnumerateArray())
-                        content.Add(String(part, "type") == "output_text" && String(part, "text") is { } text
-                            ? new JsonObject { ["text"] = text } : new JsonObject { ["invalid"] = true });
-                    break;
-                default: content.Add(new JsonObject { ["invalid"] = true }); break;
-            }
-        }
-        var reason = status == "completed"
-            ? content.Any(block => block is JsonObject obj && obj.ContainsKey("toolUse")) ? "tool_use" : "end_turn"
-            : status == "incomplete" && root.TryGetProperty("incomplete_details", out var details)
-                && String(details, "reason") == "max_output_tokens" ? "max_tokens" : "unknown";
-        var normalized = new JsonObject
-        {
-            ["stopReason"] = reason,
-            ["output"] = new JsonObject { ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = content } },
-            ["usage"] = new JsonObject { ["inputTokens"] = ReadTokens(root, "input_tokens"), ["outputTokens"] = ReadTokens(root, "output_tokens") }
-        };
-        return JsonDocument.Parse(normalized.ToJsonString());
-    }
-
-    private static string? String(JsonElement value, string name) =>
-        value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var field)
-        && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
 }

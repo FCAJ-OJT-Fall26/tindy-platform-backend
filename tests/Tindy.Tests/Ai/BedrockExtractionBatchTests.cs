@@ -65,7 +65,7 @@ public sealed class BedrockExtractionBatchTests
     }
 
     private static BedrockProfileExtractionProvider Create(HttpMessageHandler handler) => new(new HttpClient(handler),
-        Options.Create(new BedrockOptions { Enabled = true, ApiKey = "test-key", ModelId = "global.amazon.nova-2-lite-v1:0", Region = "ap-southeast-1" }), NullLogger<BedrockProfileExtractionProvider>.Instance);
+        Options.Create(new BedrockOptions { Enabled = true, ApiKey = "test-key" }), NullLogger<BedrockProfileExtractionProvider>.Instance);
 
     private sealed class BlockingHandler : HttpMessageHandler
     {

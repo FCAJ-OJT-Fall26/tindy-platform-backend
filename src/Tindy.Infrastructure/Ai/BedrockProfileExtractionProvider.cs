@@ -1,10 +1,7 @@
 using System.Diagnostics;
 using System.Net;
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Tindy.Application.DTOs.Ai;
@@ -25,17 +22,16 @@ public sealed partial class BedrockProfileExtractionProvider(
 
     public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input,
         IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles, CancellationToken cancellationToken = default) =>
-        SendAsync(input, () => CreateListRequest(input, skills, roles), ReadListOutput, cancellationToken);
+        SendAsync(input, () => CreateListRequest(input, skills, roles), ListExtractionPrompt.ToolName, cancellationToken);
 
     private async Task<AiListModelOutput> SendAsync(AiProfileInput input, Func<HttpRequestMessage> createRequest,
-        Func<JsonElement, string> readOutput, CancellationToken cancellationToken, bool reserved = false)
+        string toolName, CancellationToken cancellationToken, bool reserved = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ValidateConfiguration();
         if (!reserved) Reserve(1, cancellationToken);
 
         var timer = Stopwatch.StartNew();
-        string? responseBody = null;
         AiCallDiagnostics? diagnostics = null;
         try
         {
@@ -47,16 +43,14 @@ public sealed partial class BedrockProfileExtractionProvider(
                 throw new AiException(MapFailure(response.StatusCode, input.Pdf is not null));
 
             var bytes = await ReadBoundedAsync(response.Content, timeout.Token);
-            responseBody = Encoding.UTF8.GetString(bytes);
-            using var original = JsonDocument.Parse(bytes);
-            using var document = IsGemma ? NormalizeGemmaResponse(original.RootElement) : JsonDocument.Parse(bytes);
+            using var document = JsonDocument.Parse(bytes);
             diagnostics = new AiCallDiagnostics(ReadStopReason(document.RootElement),
-                ReadTokens(document.RootElement, "inputTokens"), ReadTokens(document.RootElement, "outputTokens"),
+                ReadTokens(document.RootElement, "input_tokens"), ReadTokens(document.RootElement, "output_tokens"),
                 OutputTokenLimit, timer.ElapsedMilliseconds);
             string result;
             try
             {
-                result = readOutput(document.RootElement);
+                result = ReadToolOutput(document.RootElement, toolName);
             }
             catch (AiException exception) when (exception.Failure == AiFailure.InvalidOutput)
             {
@@ -65,7 +59,7 @@ public sealed partial class BedrockProfileExtractionProvider(
             }
             logger.LogInformation("AI extraction completed TraceId={TraceId} ElapsedMs={ElapsedMs} InputTokens={InputTokens} OutputTokens={OutputTokens}",
                 Activity.Current?.TraceId.ToString(), timer.ElapsedMilliseconds,
-                ReadTokens(document.RootElement, "inputTokens"), ReadTokens(document.RootElement, "outputTokens"));
+                ReadTokens(document.RootElement, "input_tokens"), ReadTokens(document.RootElement, "output_tokens"));
             return new AiListModelOutput(result, diagnostics);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -88,7 +82,7 @@ public sealed partial class BedrockProfileExtractionProvider(
         }
         catch (JsonException)
         {
-            throw new AiException(AiFailure.InvalidOutput, responseBody, "provider_response")
+            throw new AiException(AiFailure.InvalidOutput)
             { Diagnostics = new(null, null, null, OutputTokenLimit, timer.ElapsedMilliseconds, "invalid_provider_json") };
         }
         catch (HttpRequestException)
@@ -105,100 +99,39 @@ public sealed partial class BedrockProfileExtractionProvider(
         }
     }
 
-    private static string? ReadStopReason(JsonElement root)
+    private static string? ReadStopReason(JsonElement root) => String(root, "status") switch
     {
-        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("stopReason", out var value) || value.ValueKind != JsonValueKind.String) return null;
-        var reason = value.GetString();
-        return reason is "end_turn" or "tool_use" or "max_tokens" or "stop_sequence" or
-            "guardrail_intervened" or "content_filtered" or "malformed_model_output" or
-            "malformed_tool_use" or "model_context_window_exceeded" ? reason : "unknown";
-    }
+        "completed" => OutputItems(root).Any(item => String(item, "type") == "function_call") ? "tool_use" : "end_turn",
+        "incomplete" when root.TryGetProperty("incomplete_details", out var details)
+            && String(details, "reason") == "max_output_tokens" => "max_tokens",
+        null => null,
+        _ => "unknown"
+    };
 
-    private HttpRequestMessage CreateListRequest(AiProfileInput input, IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles)
-    {
-        if (IsGemma) return CreateGemmaRequest(input, ListExtractionPrompt.System, ListExtractionPrompt.User(input, skills, roles),
+    private HttpRequestMessage CreateListRequest(AiProfileInput input, IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles) =>
+        CreateGemmaRequest(input, ListExtractionPrompt.System, ListExtractionPrompt.User(input, skills, roles),
             ListExtractionPrompt.ToolName, ListExtractionPrompt.Schema(skills, roles));
-        var content = new List<object>();
-        if (input.Pdf is not null)
-            content.Add(new { document = new { format = "pdf", name = "CV", source = new { bytes = Convert.ToBase64String(input.Pdf) } } });
-        content.Add(new { text = ListExtractionPrompt.User(input, skills, roles) });
-        var request = new HttpRequestMessage(HttpMethod.Post,
-            $"https://bedrock-runtime.{_options.Region}.amazonaws.com/model/{Uri.EscapeDataString(_options.ModelId)}/converse");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        request.Content = JsonContent.Create(new
-        {
-            system = new[] { new { text = ListExtractionPrompt.System } },
-            messages = new[] { new { role = "user", content } },
-            inferenceConfig = new { maxTokens = 4096, temperature = 0.1 },
-            additionalModelRequestFields = new { reasoningConfig = new { type = "disabled" } },
-            toolConfig = new
-            {
-                tools = new[] { new { toolSpec = new { name = ListExtractionPrompt.ToolName,
-                    description = "Extract only evidenced skills, experiences and certificates; unknown values are null.",
-                    inputSchema = new { json = ListExtractionPrompt.Schema(skills, roles) } } } },
-                toolChoice = new { tool = new { name = ListExtractionPrompt.ToolName } }
-            }
-        });
-        return request;
-    }
 
-    private HttpRequestMessage CreateScalarRequest(AiProfileInput input, IReadOnlyList<AiRoleReference> roles)
-    {
-        if (IsGemma) return CreateGemmaRequest(input, ScalarProfileExtractionPrompt.System, ScalarProfileExtractionPrompt.User(input, roles),
+    private HttpRequestMessage CreateScalarRequest(AiProfileInput input, IReadOnlyList<AiRoleReference> roles) =>
+        CreateGemmaRequest(input, ScalarProfileExtractionPrompt.System, ScalarProfileExtractionPrompt.User(input, roles),
             ScalarProfileExtractionPrompt.ToolName, ScalarProfileExtractionPrompt.Schema(roles));
-        var content = new List<object>();
-        if (input.Pdf is not null)
-            content.Add(new { document = new { format = "pdf", name = "CV", source = new { bytes = Convert.ToBase64String(input.Pdf) } } });
-        content.Add(new { text = ScalarProfileExtractionPrompt.User(input, roles) });
-        var request = new HttpRequestMessage(HttpMethod.Post,
-            $"https://bedrock-runtime.{_options.Region}.amazonaws.com/model/{Uri.EscapeDataString(_options.ModelId)}/converse");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        request.Content = JsonContent.Create(new
-        {
-            system = new[] { new { text = ScalarProfileExtractionPrompt.System } },
-            messages = new[] { new { role = "user", content } },
-            inferenceConfig = new { maxTokens = 4096, temperature = 0.1 },
-            additionalModelRequestFields = new { reasoningConfig = new { type = "disabled" } },
-            toolConfig = new
-            {
-                tools = new[] { new { toolSpec = new { name = ScalarProfileExtractionPrompt.ToolName,
-                    description = "Extract only explicitly supported scalar profile facts, not lists.",
-                    inputSchema = new { json = ScalarProfileExtractionPrompt.Schema(roles) } } } },
-                toolChoice = new { tool = new { name = ScalarProfileExtractionPrompt.ToolName } }
-            }
-        });
-        return request;
-    }
 
-    private string ReadListOutput(JsonElement root) => ReadToolOutput(root, ListExtractionPrompt.ToolName);
-
-    private string ReadToolOutput(JsonElement root, string toolName)
+    private static string ReadToolOutput(JsonElement root, string toolName)
     {
-        if (ReadStopReason(root) != "tool_use" ||
-            !root.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Object ||
-            !output.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object ||
-            !message.TryGetProperty("role", out var role) || role.ValueKind != JsonValueKind.String || role.GetString() != "assistant" ||
-            !message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array || content.GetArrayLength() != 1)
+        var items = OutputItems(root).Where(item => String(item, "type") != "reasoning").ToArray();
+        if (String(root, "status") != "completed" || items.Length != 1)
             throw new AiException(AiFailure.InvalidOutput);
-        var block = content[0];
-        if (block.ValueKind != JsonValueKind.Object || block.EnumerateObject().Count() != 1 ||
-            !block.TryGetProperty("toolUse", out var tool) || tool.ValueKind != JsonValueKind.Object ||
-            !tool.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String || name.GetString() != toolName ||
-            !tool.TryGetProperty("toolUseId", out var id) || id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString()) ||
-            !tool.TryGetProperty("input", out var input) ||
-            (input.ValueKind != JsonValueKind.Object && !(IsGemma && input.ValueKind == JsonValueKind.String)))
+        var call = items[0];
+        if (String(call, "type") != "function_call" || String(call, "status") != "completed"
+            || String(call, "name") != toolName || string.IsNullOrWhiteSpace(String(call, "call_id"))
+            || String(call, "arguments") is not { } json || Encoding.UTF8.GetByteCount(json) > AiProfileLimits.MaxOutputBytes)
             throw new AiException(AiFailure.InvalidOutput);
-        var json = IsGemma && input.ValueKind == JsonValueKind.String ? input.GetString()! : input.GetRawText();
-        if (Encoding.UTF8.GetByteCount(json) > AiProfileLimits.MaxOutputBytes) throw new AiException(AiFailure.InvalidOutput);
-        if (IsGemma)
+        try
         {
-            try
-            {
-                using var parsed = JsonDocument.Parse(json);
-                if (parsed.RootElement.ValueKind != JsonValueKind.Object) throw new AiException(AiFailure.InvalidOutput);
-            }
-            catch (JsonException) { throw new AiException(AiFailure.InvalidOutput); }
+            using var parsed = JsonDocument.Parse(json);
+            if (parsed.RootElement.ValueKind != JsonValueKind.Object) throw new AiException(AiFailure.InvalidOutput);
         }
+        catch (JsonException) { throw new AiException(AiFailure.InvalidOutput); }
         return json; // Preserve duplicate keys for the application's strict validators.
     }
 
@@ -207,9 +140,8 @@ public sealed partial class BedrockProfileExtractionProvider(
         if (!_options.Enabled || string.IsNullOrWhiteSpace(_options.ApiKey)
             || _options.ApiKey.Any(character => character is <= ' ' or >= '\u007f')
             || _options.TimeoutSeconds is < 1 or > 120
-            || (_options.ModelId != "global.amazon.nova-2-lite-v1:0" && !IsGemma)
-            || (IsGemma && _options.Region is not ("us-east-1" or "us-east-2" or "us-west-2" or "eu-central-1"))
-            || !Regex.IsMatch(_options.Region ?? string.Empty, @"\A[a-z]{2}-[a-z]+-\d\z", RegexOptions.CultureInvariant))
+            || _options.ModelId != "google.gemma-4-31b"
+            || _options.Region is not ("us-east-1" or "us-east-2" or "us-west-2" or "eu-central-1"))
             throw new AiException(AiFailure.Unavailable);
     }
 
@@ -242,23 +174,26 @@ public sealed partial class BedrockProfileExtractionProvider(
 
     private static (string Text, string Kind) ReadDiagnosticOutput(JsonElement root)
     {
-        if (root.ValueKind == JsonValueKind.Object &&
-            root.TryGetProperty("output", out var output) && output.ValueKind == JsonValueKind.Object &&
-            output.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.Object &&
-            message.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
-        {
-            if (content.GetArrayLength() == 1 && content[0].ValueKind == JsonValueKind.Object &&
-                content[0].TryGetProperty("toolUse", out var tool) && tool.ValueKind == JsonValueKind.Object &&
-                tool.TryGetProperty("input", out var input))
-                return (input.ValueKind == JsonValueKind.String ? input.GetString()! : input.GetRawText(), "tool_input");
-            var parts = content.EnumerateArray()
-                .Where(block => block.ValueKind == JsonValueKind.Object &&
-                    block.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
-                .Select(block => block.GetProperty("text").GetString()).ToArray();
-            if (parts.Length > 0) return (string.Concat(parts), "model_text");
-        }
-        return (root.GetRawText(), "provider_response");
+        var calls = OutputItems(root).Where(item => String(item, "type") == "function_call").ToArray();
+        if (calls.Length == 1 && String(calls[0], "arguments") is { } arguments)
+            return (arguments, "tool_input");
+        var text = OutputItems(root).Where(item => String(item, "type") == "message")
+            .Where(item => item.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
+            .SelectMany(item => item.GetProperty("content").EnumerateArray())
+            .Where(part => String(part, "type") == "output_text")
+            .Select(part => String(part, "text")).ToArray();
+        if (text.Length > 0) return (string.Concat(text), "model_text");
+        // Keep only function diagnostics; never copy reasoning blocks or the full provider envelope.
+        return (JsonSerializer.Serialize(new { status = String(root, "status"), calls }), "provider_response");
     }
+
+    private static string? String(JsonElement value, string name) =>
+        value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var field)
+        && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
+
+    private static IEnumerable<JsonElement> OutputItems(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Object && root.TryGetProperty("output", out var output) && output.ValueKind == JsonValueKind.Array
+            ? output.EnumerateArray() : [];
 
     private static int? ReadTokens(JsonElement root, string name) =>
         root.ValueKind == JsonValueKind.Object && root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object
