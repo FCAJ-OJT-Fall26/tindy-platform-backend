@@ -6,7 +6,7 @@ Chạy các lệnh dưới đây từ `backend/`. Hợp đồng HTTP nằm tại
 
 Backend gọi Gemma 4 31B (`google.gemma-4-31b`) qua Amazon Bedrock Mantle Responses API bằng `HttpClient` và Bearer API key, không cần AWS SDK hoặc dependency mới. Endpoint mặc định: `https://bedrock-mantle.us-east-1.api.aws/openai/v1/responses`. Đây là model Google, không phải model OpenAI; `/openai/v1` chỉ là định dạng API tương thích.
 
-Provider gửi nguyên PDF dưới dạng `input_file` base64 tới AWS tại vùng được cấu hình, mặc định US East (N. Virginia). Chỉ dùng tài liệu được phép gửi tới AWS. Không có OCR service, chuyển PDF thành ảnh hay dependency xử lý ảnh riêng. `store=false`; reasoning được bỏ khỏi draft và raw-output panel. Nova 2 Lite vẫn có thể được chọn rõ ràng bằng cấu hình cũ để rollback, không có fallback tự động.
+Provider gửi nguyên PDF dưới dạng `input_file` base64 tới AWS tại vùng được cấu hình, mặc định US East (N. Virginia). Chỉ dùng tài liệu được phép gửi tới AWS. Không có OCR service, chuyển PDF thành ảnh hay dependency xử lý ảnh riêng. `store=false`; reasoning được bỏ khỏi draft và raw-output panel. Chỉ hỗ trợ Gemma 4 31B; không có đường gọi model cũ hoặc fallback tự động. Provider đọc trực tiếp Responses API, không dựng envelope Converse trung gian.
 
 ## Profile và danh sách chạy song song
 
@@ -29,9 +29,9 @@ Mỗi lượt sử dụng một forced tool tương ứng, catalog mã ngắn th
 }
 ```
 
-`Enabled` mặc định tắt. `TimeoutSeconds` cho phép 1–120. Implementation chấp nhận Gemma 4 31B hoặc Nova 2 Lite; Gemma chỉ dùng các vùng commercial được hỗ trợ (`us-east-1`, `us-east-2`, `us-west-2`, `eu-central-1`). Đổi model không phải cách khắc phục lỗi quyền truy cập. User Secrets/environment có ưu tiên cao hơn appsettings: cập nhật cả ModelId và Region nếu máy vẫn đang ghi đè bằng cấu hình Nova cũ.
+`Enabled` mặc định tắt. `TimeoutSeconds` cho phép 1–120. Implementation chỉ chấp nhận Gemma 4 31B và dùng các vùng commercial được hỗ trợ (`us-east-1`, `us-east-2`, `us-west-2`, `eu-central-1`). Đổi model không phải cách khắc phục lỗi quyền truy cập. User Secrets/environment có ưu tiên cao hơn appsettings: cập nhật cả ModelId và Region nếu máy vẫn đang ghi đè bằng cấu hình model/vùng khác.
 
-Các giá trị cố định trong code, **không phải config keys**: Gemma dùng `max_output_tokens=8192` mỗi lượt (gồm phần suy luận), `reasoning.effort=high`, một forced function call và `parallel_tool_calls=false`; Nova giữ 4096 tokens, temperature 0.1 và reasoning tắt. Giới hạn chung: tối đa 2 calls đồng thời/process và không xếp hàng. API giới hạn 5 request/phút/người dùng. Không retry, repair call hoặc fallback tự động; mỗi request đầy đủ giữ đồng thời hai slot trước khi gọi hai lượt model. Nếu thiếu slot, không lượt nào được khởi chạy và request trả `AI_BUSY`. List-only manual mode vẫn giữ một slot từ cùng bộ giới hạn. Nếu một lượt lỗi, backend hủy/chờ lượt kia rồi trả lỗi gốc, không có HTTP 200 một phần. Deadline tổng của endpoint là 120 giây, gồm đọc multipart/catalog; timeout mỗi lượt vẫn theo `TimeoutSeconds`. Hai lượt gửi cùng PDF/text riêng biệt nên mỗi request đầy đủ có hai lần tính input và chi phí tương ứng. Khi chạy nhiều replica, giới hạn trong bộ nhớ áp dụng riêng từng process, không phải quota phân tán.
+Các giá trị cố định trong code, **không phải config keys**: Gemma dùng `max_output_tokens=8192` mỗi lượt (gồm phần suy luận), `reasoning.effort=high`, một forced function call và `parallel_tool_calls=false`. Prompt giới hạn tool input 4096 tokens; đây là giới hạn riêng, không phải tổng budget gồm reasoning. Giới hạn chung: tối đa 2 calls đồng thời/process và không xếp hàng. API giới hạn 5 request/phút/người dùng. Không retry, repair call hoặc fallback tự động; mỗi request đầy đủ giữ đồng thời hai slot trước khi gọi hai lượt model. Nếu thiếu slot, không lượt nào được khởi chạy và request trả `AI_BUSY`. List-only manual mode vẫn giữ một slot từ cùng bộ giới hạn. Nếu một lượt lỗi, backend hủy/chờ lượt kia rồi trả lỗi gốc, không có HTTP 200 một phần. Deadline tổng của endpoint là 120 giây, gồm đọc multipart/catalog; timeout mỗi lượt vẫn theo `TimeoutSeconds`. Hai lượt gửi cùng PDF/text riêng biệt nên mỗi request đầy đủ có hai lần tính input và chi phí tương ứng. Khi chạy nhiều replica, giới hạn trong bộ nhớ áp dụng riêng từng process, không phải quota phân tán.
 
 Gemma giới hạn tổng request provider ở 3.500.000 byte, gồm PDF base64, text, system prompt và catalog/schema. Provider đo chính xác JSON UTF-8 sau serialize và trả HTTP 413 `AI_PAYLOAD_TOO_LARGE` trước khi gọi mạng nếu quá giới hạn. Giới hạn upload HTTP 4 MiB không bảo đảm file đó vừa request Gemma; không tự cắt/rasterize PDF để né giới hạn. Hai keyword map `propertyNames`/`maxProperties` được bỏ khỏi schema transport vì Mantle từ chối chúng; validator phía server vẫn kiểm tra mọi mã skill/role, trùng khóa, bằng chứng và số lượng.
 
@@ -77,7 +77,7 @@ Kiểm thử PDF có sẵn trong folder bằng manual runner riêng: xem [Local 
 - `AI_INVALID_OUTPUT`: tool result/schema/reference không hợp lệ hoặc bị cắt ngắn. Backend từ chối toàn draft. Ở Development, xem `ai_diagnostics.stage`, `ai_diagnostics.stop_reason`, `failure_reason`, `validation_reason` và raw tool input. `max_tokens` xác nhận hết token; tăng timeout không giải quyết nguyên nhân đó.
 - `AI_TIMEOUT`: provider hoặc toàn request quá timeout; cancellation hủy/chờ cả hai lượt và giải phóng slot. Không tăng timeout vô hạn.
 
-Development có thể trả raw output lỗi tối đa 128 KiB và metadata trong response `no-store`; Production/Staging không trả các trường đó. Thành công ở Development có header `X-AI-Diagnostics` với tổng token/thời gian/cap và `stages.profile`/`stages.lists`; lỗi chỉ rõ lượt thất bại và raw output của lượt đó. Không thay cấu trúc `data`.
+Development có thể trả raw output lỗi tối đa 128 KiB và metadata trong response `no-store`; Production/Staging không trả các trường đó. Thành công ở Development có header `X-AI-Diagnostics` với tổng token/thời gian/cap và `stages.profile`/`stages.lists`; lỗi chỉ rõ lượt thất bại và raw tool input/model text nếu đọc được. Với provider envelope không phải JSON hợp lệ, chỉ trả diagnostics lỗi parse; không trả nguyên envelope vì không thể tách reasoning an toàn. Không thay cấu trúc `data`.
 
 Chỉ log trace, loại lỗi, thời gian và số token; không log key, nguồn tài liệu, raw provider response hoặc draft. Không lưu draft/file lâu dài hay tự cập nhật profile; người dùng kiểm tra kết quả rồi lưu qua API hiện có.
 
@@ -85,22 +85,13 @@ Chỉ log trace, loại lỗi, thời gian và số token; không log key, ngu�
 
 - [Dùng Bedrock API keys](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys-use.html).
 - [Gemma 4 31B: endpoint, reasoning và payload limit](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-google-gemma-4-31b.html).
-- [Nova 2 Lite model card và inference profiles](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.html).
-- [Nova 2 multimodal/PDF input](https://docs.aws.amazon.com/nova/latest/nova2-userguide/using-multimodal-models.html).
-- [Nova 2 reasoning configuration](https://docs.aws.amazon.com/nova/latest/nova2-userguide/extended-thinking.html).
 
 Provider/model capabilities có thể thay đổi; kiểm tra lại nguồn chính thức trước khi thay model, region hoặc format request.
 
-## Kiểm chứng triển khai profile + danh sách
+## Kiểm chứng sau refactor
 
-Build solution đã qua, không warning/lỗi. Bộ regression không cần Docker: 530/530 test qua (máy local cần `DOTNET_USE_POLLING_FILE_WATCHER=1 DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false` để tránh giới hạn inotify khi tạo nhiều host test). Trong đó có 234 test AI/provider/HTTP. Manual reviewer self-test offline qua; frontend hiện có qua typecheck, build và 13/13 kiểm tra trình duyệt AI mà không sửa file frontend.
+Build/test không cần gọi AWS: 558 regression test không cần Docker qua, bao gồm 262 test AI/provider/HTTP. Các test PostgreSQL Testcontainers cần Docker riêng. Máy local dùng `DOTNET_USE_POLLING_FILE_WATCHER=1 DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false` để tránh giới hạn inotify khi tạo nhiều host test.
 
-Đây là bằng chứng offline/contract. Kiểm thử hai lượt thật với PDF đang chờ quyền gửi tài liệu cá nhân tới Amazon Bedrock; chưa có kết quả live cho giai đoạn profile. Kỳ vọng và tiến độ được giữ ngoài repository, không ghi báo cáo thành công khi chưa gọi model.
+Cả hai công cụ manual vẫn build được: self-test của reviewer PDF qua; công cụ HTTP qua 71/71 self-test offline. Công cụ HTTP kiểm tra auth/multipart/catalog qua API, còn runner PDF đọc catalog local và kiểm tra riêng danh sách hoặc hai lượt kết hợp. Không gộp chúng vì mục đích khác nhau. Refactor không gọi lại AWS, không gửi CV, không sửa frontend, prompt hoặc kỳ vọng nội dung.
 
-Role-title follow-up: 252/252 test AI/provider/HTTP đã qua; manual reviewer self-test kiểm tra thêm membership của role title trong catalog active. Đây là kiểm thử offline, chưa xác minh việc model chọn đúng nhóm nghề nghiệp trên PDF thật.
-
-## Kiểm chứng Gemma
-
-Regression sau khi đổi default: 559 test không cần Docker qua, bao gồm 263 test AI/provider/HTTP. Các test dùng PostgreSQL Testcontainers chưa chạy được do Docker không hoạt động. Live smoke test hai lượt bằng PDF scan tiếng Việt giả lập, catalog database thật và production validators đã qua: profile, Python/TensorFlow, chứng chỉ và warning giữ năm nguồn.
-
-Sau khi có chấp thuận gửi PDF cá nhân tới Bedrock, một lượt CV thật hoàn tất trong khoảng 35 giây, qua validator và trả 6 skill, 3 experience cùng 4 certificate. Bộ đối chiếu nội dung chưa đạt hoàn toàn: tên employer AICORE không khớp kỳ vọng và technologies_to_learn thiếu từ khóa. Không coi kết quả này là chứng minh mọi thông tin đều chính xác; người dùng vẫn cần duyệt bản nháp. Kỳ vọng/báo cáo live và tài liệu cá nhân nằm ngoài repository.
+Lần live Gemma trước refactor (commit `6445ea2`) hoàn tất CV thật trong khoảng 35 giây, qua validator và trả 6 skill, 3 experience cùng 4 certificate. Reviewer nội dung chưa đạt: quy tắc AICORE không tìm thấy đúng một mô tả khớp và technologies_to_learn thiếu từ khóa kỳ vọng. Báo cáo không giữ mô tả đầy đủ, nên chưa kết luận được AICORE bị bỏ, viết sai hay nhắc trùng. Đây là kết quả lịch sử, không phải lượt live sau refactor. Kỳ vọng/báo cáo và tài liệu cá nhân nằm ngoài repository.

@@ -13,7 +13,7 @@ dotnet run --project tests/Manual/AiListExtraction -- --self-test
 
 ## Live verification
 
-Live calls send your document to the configured Amazon Nova model and incur Bedrock charges. Only use a document you are permitted to send. The explicit `--live` switch is required. There is no automatic retry; provider/validation errors stop the run. Semantic mismatches are reported for each requested run. Keep credentials only in User Secrets/environment variables, never command arguments or expectation files.
+Live calls send your document to Gemma 4 31B through the configured Amazon Bedrock Mantle endpoint and incur Bedrock charges. Only use a document you are permitted to send. The explicit `--live` switch is required. There is no automatic retry; provider/validation errors stop the run. Semantic mismatches are reported for each requested run. Keep credentials only in User Secrets/environment variables, never command arguments or expectation files.
 
 Create an expectations JSON **outside the repository**. Required skills are the exact reference skill set for that document and active catalog; update expectations when the catalog changes (for example, when an explicit SQL entry is added). Forbidden skills are checked in both overall skills and experiences. Each experience is matched by employer in the final description; its canonical catalog role and dates must match and its project name must be null. Every nonnull role title must exactly match an active database role name. Optional `sourceRole` verifies that the original title/seniority is retained in the description when different from the catalog name. Each certificate is matched by title and must have null issue/expiry dates for this year-only reference-document scenario. This is a reference-CV reviewer, not a universal claim that certificates should never have dates.
 
@@ -37,7 +37,7 @@ DOTNET_SYSTEM_NET_DISABLEIPV6=1 dotnet run --project tests/Manual/AiListExtracti
   --report ../AI_LIST_EXTRACTION_VERIFICATION.json
 ```
 
-- `--pdf-file`: one local PDF, nonempty, correct PDF signature, up to 4 MiB. File is read into memory; it is not copied into fixtures.
+- `--pdf-file`: one local PDF, nonempty, correct PDF signature, up to 4 MiB. The serialized Gemma request must also fit 3,500,000 bytes including base64 PDF, prompts and catalogs. File is read into memory; it is not copied into fixtures.
 - `--expectations`: local JSON rules for the reference document.
 - `--runs`: 1–3 independent live requests, default 1. Lists use one model call/request; full profile uses two parallel model calls/request (up to six for three requests).
 - `--full-profile`: opt in to the combined production service. Default remains list-only. Requires a nonempty `profile` expectation object; `profileContains` optionally checks literal evidence keywords in selected strings.

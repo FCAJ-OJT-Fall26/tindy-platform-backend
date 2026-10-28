@@ -9,10 +9,10 @@ Project không nằm trong solution, không chạy cùng `dotnet test`, không t
 Chạy các lệnh từ thư mục `backend/`. Cấu hình database, JWT và Bedrock theo [hướng dẫn setup](../../../docs/guide/AI_PROFILE_EXTRACTION_SETUP.md), rồi khởi động API:
 
 ```bash
-dotnet run --project src/Tindy.Api --launch-profile http
+dotnet run --project src/Tindy.Api --launch-profile https
 ```
 
-Đăng nhập qua Swagger (`http://localhost:5217/swagger`) bằng `POST /api/auth/login`, body gồm `identifier` và `password`. Lấy `data.access_token` của tài khoản active; tài khoản chưa hoàn thành onboarding vẫn dùng được. Nhập JWT vào biến môi trường, không kèm `Bearer`.
+Đăng nhập qua Swagger (`https://localhost:7190/swagger`) bằng `POST /api/auth/login`, body gồm `identifier` và `password`. Lấy `data.access_token` của tài khoản active; tài khoản chưa hoàn thành onboarding vẫn dùng được. Nhập JWT vào biến môi trường, không kèm `Bearer`.
 
 Trong Bash/Zsh, lệnh sau cho phép dán token mà không hiển thị khi nhập hay lưu token vào lịch sử lệnh:
 
@@ -36,14 +36,17 @@ API key Bedrock chỉ nằm ở backend trong .NET User Secrets. Chạy live s�
 ```bash
 # Text-only
 dotnet run --project tests/Manual/AiProfileExtraction -- \
+  --base-url https://localhost:7190 \
   --text-file tests/Manual/AiProfileExtraction/private/bio.txt
 
 # PDF-only: thay URL ví dụ bằng URL tải file trực tiếp
 dotnet run --project tests/Manual/AiProfileExtraction -- \
+  --base-url https://localhost:7190 \
   --pdf-url "https://example.com/cv.pdf"
 
 # Kết hợp PDF và text
 dotnet run --project tests/Manual/AiProfileExtraction -- \
+  --base-url https://localhost:7190 \
   --pdf-url "https://example.com/cv.pdf" \
   --text-file tests/Manual/AiProfileExtraction/private/bio.txt
 ```
@@ -54,11 +57,11 @@ PowerShell: viết các lệnh trên một dòng hoặc thay dấu nối dòng `
 | --- | --- |
 | `--pdf-url` | HTTPS, không có thông tin đăng nhập trong URL; file tải trực tiếp, không phải trang preview/login. |
 | `--text-file` | Bio/text/README, tối đa 20.000 ký tự; cần ít nhất một nguồn không rỗng. |
-| `--base-url` | Mặc định `http://localhost:5217`; URL gốc không path/query. HTTP chỉ cho loopback, server khác phải HTTPS. |
+| `--base-url` | Mặc định CLI là `http://localhost:5217`; khi chạy launch profile HTTPS như ví dụ, truyền `https://localhost:7190` để tránh redirect. URL gốc không path/query. HTTP chỉ cho loopback, server khác phải HTTPS. |
 | `--self-test` | Chạy kiểm tra offline, dùng riêng, không cần JWT/backend/database/AWS. |
 | `--help` | Hiện cú pháp, dùng riêng. |
 
-PDF được tải trong bộ nhớ, tối đa 4 MiB, kiểm tra chữ ký `%PDF-`, timeout tổng 30 giây và tối đa 3 redirect HTTPS. Client tải PDF không mang JWT. Request tới backend không theo redirect, timeout 90 giây mỗi request; JSON response giới hạn 4 MiB. Không có retry tự động. Nhấn Ctrl+C để hủy.
+Gemma còn kiểm tra tổng request sau base64 và prompt/catalog tối đa 3.500.000 byte; upload hợp lệ ở CLI vẫn có thể bị backend trả 413. PDF được tải trong bộ nhớ, tối đa 4 MiB, kiểm tra chữ ký `%PDF-`, timeout tổng 30 giây và tối đa 3 redirect HTTPS. Client tải PDF không mang JWT. Request tới backend không theo redirect, timeout 90 giây mỗi request; JSON response giới hạn 4 MiB. Không có retry tự động. Nhấn Ctrl+C để hủy.
 
 ## Đọc kết quả
 
