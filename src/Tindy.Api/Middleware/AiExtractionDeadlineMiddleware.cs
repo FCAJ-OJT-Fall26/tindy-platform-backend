@@ -1,10 +1,11 @@
 using Tindy.Application.Exceptions;
+using Tindy.Application.DTOs.Ai;
 
 namespace Tindy.Api.Middleware;
 
 public sealed class AiExtractionDeadlineMiddleware(RequestDelegate next)
 {
-    public Task InvokeAsync(HttpContext context) => InvokeWithBudgetAsync(context, next, TimeSpan.FromSeconds(120));
+    public Task InvokeAsync(HttpContext context) => InvokeWithBudgetAsync(context, next, TimeSpan.FromSeconds(AiProfileLimits.ExtractionDeadlineSeconds));
 
     // Public for deterministic short-budget tests; production always uses 120s.
     public static async Task InvokeWithBudgetAsync(HttpContext context, RequestDelegate next, TimeSpan budget)
@@ -28,7 +29,7 @@ public sealed class AiExtractionDeadlineMiddleware(RequestDelegate next)
             // Restore before the outer exception handler writes the 504 response.
             context.RequestAborted = original;
             throw new AiException(AiFailure.Timeout)
-            { Diagnostics = new(null, null, null, 8192, (long)budget.TotalMilliseconds, "request_deadline", "request") };
+            { Diagnostics = new(null, null, null, AiProfileLimits.MaxCombinedOutputTokens, (long)budget.TotalMilliseconds, "request_deadline", "request") };
         }
         finally { context.RequestAborted = original; }
     }

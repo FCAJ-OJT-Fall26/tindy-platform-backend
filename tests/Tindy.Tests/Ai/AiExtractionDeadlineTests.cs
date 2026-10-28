@@ -16,6 +16,7 @@ public sealed class AiExtractionDeadlineTests
             async ctx => await Task.Delay(Timeout.Infinite, ctx.RequestAborted), TimeSpan.FromMilliseconds(30)));
         Assert.Equal(AiFailure.Timeout, error.Failure);
         Assert.Equal("request", error.Diagnostics!.Stage);
+        Assert.Equal(16384, error.Diagnostics.MaxOutputTokens);
         Assert.Equal(original, context.RequestAborted);
         Assert.False(context.RequestAborted.IsCancellationRequested);
     }

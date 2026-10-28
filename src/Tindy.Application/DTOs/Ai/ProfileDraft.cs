@@ -10,6 +10,11 @@ public static class AiProfileLimits
     public const int MaxCollectionItems = 20;
     public const int MaxWarnings = 50;
     public const int MaxOutputBytes = 128 * 1024;
+    public const int MaxOutputTokensPerStage = 8192;
+    public const int MaxCombinedOutputTokens = 2 * MaxOutputTokensPerStage;
+    public const int ExtractionDeadlineSeconds = 120;
+    public const int MaxProviderRequestBytes = 3_500_000;
+    public const int MaxProviderResponseBytes = 1024 * 1024;
 }
 
 public sealed record AiProfileInput(string? Text, byte[]? Pdf);

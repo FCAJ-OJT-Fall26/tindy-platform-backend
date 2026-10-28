@@ -49,6 +49,7 @@ public sealed class AiCombinedProfileServiceTests
         var error = await Assert.ThrowsAsync<AiException>(() => new AiProfileService(catalog, batch).ExtractAsync(new("source", null)));
         Assert.Equal(providerFailure ? AiFailure.Timeout : AiFailure.InvalidOutput, error.Failure);
         Assert.Equal(failing, error.Diagnostics!.Stage);
+        if (providerFailure) Assert.Equal(8192, error.Diagnostics.MaxOutputTokens);
         if (!providerFailure) Assert.Equal("{invalid}", error.RawOutput);
         Assert.Equal(1, batch.SiblingCancelled);
         Assert.True(batch.Disposed);

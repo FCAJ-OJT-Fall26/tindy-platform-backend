@@ -16,12 +16,12 @@ public sealed class AiProfileService(ICatalogRepository catalog, IAiExtractionBa
     {
         var timer = Stopwatch.StartNew();
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        budget.CancelAfter(TimeSpan.FromSeconds(120));
+        budget.CancelAfter(TimeSpan.FromSeconds(AiProfileLimits.ExtractionDeadlineSeconds));
         try { return await ExtractCoreAsync(AiExtractionInput.Normalize(input), timer, budget.Token); }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && budget.IsCancellationRequested)
         {
             throw new AiException(AiFailure.Timeout)
-            { Diagnostics = new(null, null, null, 8192, timer.ElapsedMilliseconds, "request_deadline", "request") };
+            { Diagnostics = new(null, null, null, AiProfileLimits.MaxCombinedOutputTokens, timer.ElapsedMilliseconds, "request_deadline", "request") };
         }
     }
 
@@ -53,7 +53,7 @@ public sealed class AiProfileService(ICatalogRepository catalog, IAiExtractionBa
             catch (Exception error)
             {
                 if (error is AiException ai)
-                    ai.Diagnostics = (ai.Diagnostics ?? diagnostics ?? new(null, null, null, 4096, timer.ElapsedMilliseconds)) with
+                    ai.Diagnostics = (ai.Diagnostics ?? diagnostics ?? new(null, null, null, AiProfileLimits.MaxOutputTokensPerStage, timer.ElapsedMilliseconds)) with
                     { Stage = name, FailureReason = ai.ValidationReason ?? ai.Diagnostics?.FailureReason ?? "stage_failed" };
                 Interlocked.CompareExchange(ref firstFailure, error, null);
                 await siblings.CancelAsync();
@@ -107,7 +107,7 @@ public sealed class AiProfileService(ICatalogRepository catalog, IAiExtractionBa
         catch (AiException error) when (error.Failure == AiFailure.InvalidOutput)
         {
             throw new AiException(AiFailure.InvalidOutput, json, "merged_draft")
-            { ValidationReason = "invalid_merged_draft", Diagnostics = new(null, null, null, 8192, timer.ElapsedMilliseconds, "invalid_merged_draft", "merge") };
+            { ValidationReason = "invalid_merged_draft", Diagnostics = new(null, null, null, AiProfileLimits.MaxCombinedOutputTokens, timer.ElapsedMilliseconds, "invalid_merged_draft", "merge") };
         }
     }
 

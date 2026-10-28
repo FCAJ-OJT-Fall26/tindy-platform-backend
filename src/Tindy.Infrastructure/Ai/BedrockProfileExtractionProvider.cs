@@ -16,7 +16,6 @@ public sealed partial class BedrockProfileExtractionProvider(
     IOptions<BedrockOptions> options,
     ILogger<BedrockProfileExtractionProvider> logger) : IAiListExtractionProvider, IAiExtractionBatchProvider, IDisposable
 {
-    private const int MaxEnvelopeBytes = 1024 * 1024;
     private readonly SemaphoreSlim _slots = new(2, 2);
     private readonly BedrockOptions _options = options.Value;
 
@@ -46,7 +45,7 @@ public sealed partial class BedrockProfileExtractionProvider(
             using var document = JsonDocument.Parse(bytes);
             diagnostics = new AiCallDiagnostics(ReadStopReason(document.RootElement),
                 ReadTokens(document.RootElement, "input_tokens"), ReadTokens(document.RootElement, "output_tokens"),
-                OutputTokenLimit, timer.ElapsedMilliseconds);
+                AiProfileLimits.MaxOutputTokensPerStage, timer.ElapsedMilliseconds);
             string result;
             try
             {
@@ -68,13 +67,13 @@ public sealed partial class BedrockProfileExtractionProvider(
         }
         catch (OperationCanceledException)
         {
-            throw new AiException(AiFailure.Timeout) { Diagnostics = new(null, null, null, OutputTokenLimit, timer.ElapsedMilliseconds, "timeout") };
+            throw new AiException(AiFailure.Timeout) { Diagnostics = new(null, null, null, AiProfileLimits.MaxOutputTokensPerStage, timer.ElapsedMilliseconds, "timeout") };
         }
         catch (AiException exception)
         {
             var reason = diagnostics?.StopReason == "max_tokens" ? "output_token_limit" :
                 exception.Failure == AiFailure.InvalidOutput ? "invalid_tool_or_model_output" : "provider_http_error";
-            exception.Diagnostics = (diagnostics ?? new(null, null, null, OutputTokenLimit, timer.ElapsedMilliseconds)) with { FailureReason = reason };
+            exception.Diagnostics = (diagnostics ?? new(null, null, null, AiProfileLimits.MaxOutputTokensPerStage, timer.ElapsedMilliseconds)) with { FailureReason = reason };
             logger.LogWarning("AI extraction failed TraceId={TraceId} Failure={Failure} StopReason={StopReason} ElapsedMs={ElapsedMs} OutputTokens={OutputTokens}",
                 Activity.Current?.TraceId.ToString(), exception.Failure, exception.Diagnostics.StopReason,
                 timer.ElapsedMilliseconds, exception.Diagnostics.OutputTokens);
@@ -83,7 +82,7 @@ public sealed partial class BedrockProfileExtractionProvider(
         catch (JsonException)
         {
             throw new AiException(AiFailure.InvalidOutput)
-            { Diagnostics = new(null, null, null, OutputTokenLimit, timer.ElapsedMilliseconds, "invalid_provider_json") };
+            { Diagnostics = new(null, null, null, AiProfileLimits.MaxOutputTokensPerStage, timer.ElapsedMilliseconds, "invalid_provider_json") };
         }
         catch (HttpRequestException)
         {
@@ -157,7 +156,7 @@ public sealed partial class BedrockProfileExtractionProvider(
 
     private static async Task<byte[]> ReadBoundedAsync(HttpContent content, CancellationToken cancellationToken)
     {
-        if (content.Headers.ContentLength > MaxEnvelopeBytes)
+        if (content.Headers.ContentLength > AiProfileLimits.MaxProviderResponseBytes)
             throw new AiException(AiFailure.InvalidOutput);
         await using var stream = await content.ReadAsStreamAsync(cancellationToken);
         using var buffer = new MemoryStream();
@@ -165,7 +164,7 @@ public sealed partial class BedrockProfileExtractionProvider(
         int count;
         while ((count = await stream.ReadAsync(chunk, cancellationToken)) != 0)
         {
-            if (buffer.Length + count > MaxEnvelopeBytes)
+            if (buffer.Length + count > AiProfileLimits.MaxProviderResponseBytes)
                 throw new AiException(AiFailure.InvalidOutput);
             buffer.Write(chunk, 0, count);
         }

@@ -8,9 +8,6 @@ namespace Tindy.Infrastructure.Ai;
 
 public sealed partial class BedrockProfileExtractionProvider
 {
-    private const int GemmaRequestLimit = 3_500_000;
-    private const int OutputTokenLimit = 8192;
-
     private HttpRequestMessage CreateGemmaRequest(AiProfileInput input, string system, string user,
         string toolName, JsonObject schema)
     {
@@ -28,7 +25,7 @@ public sealed partial class BedrockProfileExtractionProvider
             ["input"] = new JsonArray(
                 new JsonObject { ["role"] = "system", ["content"] = system },
                 new JsonObject { ["role"] = "user", ["content"] = content }),
-            ["max_output_tokens"] = OutputTokenLimit,
+            ["max_output_tokens"] = AiProfileLimits.MaxOutputTokensPerStage,
             ["reasoning"] = new JsonObject { ["effort"] = "high" }
         };
         body["tools"] = new JsonArray(new JsonObject
@@ -41,7 +38,7 @@ public sealed partial class BedrockProfileExtractionProvider
         body["tool_choice"] = new JsonObject { ["type"] = "function", ["name"] = toolName };
         body["parallel_tool_calls"] = false;
         var bytes = JsonSerializer.SerializeToUtf8Bytes(body);
-        if (bytes.Length > GemmaRequestLimit) throw new AiException(AiFailure.PayloadTooLarge);
+        if (bytes.Length > AiProfileLimits.MaxProviderRequestBytes) throw new AiException(AiFailure.PayloadTooLarge);
         var request = new HttpRequestMessage(HttpMethod.Post,
             $"https://bedrock-mantle.{_options.Region}.api.aws/openai/v1/responses");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
