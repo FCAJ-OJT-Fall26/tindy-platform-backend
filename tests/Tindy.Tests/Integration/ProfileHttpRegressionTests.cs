@@ -71,8 +71,8 @@ public sealed class ProfileHttpRegressionTests : IClassFixture<TindyApiFactory>
 
         var certificateBody = new
         {
-            title = "AWS Badge", issuer = "AWS", credential_id = (string?)null,
-            credential_url = "https://www.credly.com/badges/test", issued_at = "2026-09-01", expires_at = (string?)null
+            title = "AWS Badge", issuer = "AWS", description = "Foundational AWS knowledge.",
+            credential_url = "https://www.credly.com/badges/test"
         };
         var createdCertificate = await owner.PostAsJsonAsync("/api/me/profile/certificates", certificateBody);
         Assert.Equal(HttpStatusCode.Created, createdCertificate.StatusCode);
@@ -110,7 +110,7 @@ public sealed class ProfileHttpRegressionTests : IClassFixture<TindyApiFactory>
         await AssertErrorAsync(invalidTimeline, "VALIDATION_FAILED");
         var invalidCertificate = await owner.PostAsJsonAsync("/api/me/profile/certificates", new
         {
-            title = "Invalid", issuer = "AWS", issued_at = "2026-10-01", expires_at = "2026-09-30"
+            title = "Invalid", issuer = "AWS", description = new string('x', 2001)
         });
         Assert.Equal(HttpStatusCode.BadRequest, invalidCertificate.StatusCode);
 

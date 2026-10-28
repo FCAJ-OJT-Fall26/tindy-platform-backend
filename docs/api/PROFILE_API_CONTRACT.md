@@ -1,5 +1,7 @@
 # Tindy Profile Backend API Contract — V1 (STEP 01)
 
+> **Phần mở rộng Media (23/10/2026):** [OpenAPI STEP 04/05](PROFILE_MEDIA_OPENAPI.yaml), [Certificate Attachments](../guide/PROFILE_MEDIA_STEP04_CERTIFICATE_ATTACHMENTS.md), [PDF Scanning/Cleanup](../guide/PROFILE_MEDIA_STEP05_PDF_SCANNING_CLEANUP.md). Các routes media đã triển khai; phần V1 bên dưới giữ bối cảnh contract ban đầu. `PROFILE_OPENAPI.yaml` tham chiếu các path media mới.
+
 > **Trạng thái:** Contract thiết kế dành cho Backend MVP — chưa có endpoint mới nào được triển khai bởi STEP 01.  
 > **Cơ sở:** `tindy-backend-platform(20261020-101054).zip`, `TINDY_PROFILE_BACKEND_IMPLEMENTATION_PLAN(2).md`.  
 > **Mục đích:** Làm nguồn hợp đồng duy nhất để triển khai STEP 02–12; không yêu cầu thay đổi Frontend ở bước này.  
@@ -27,7 +29,7 @@
 | Xóa thành công | `204 No Content`, response **không** có body/envelope **[STEP01 default]** |
 | Danh sách rỗng | `data: []`; optional scalar `null` |
 | Lỗi | `application/problem+json`, `error_code` theo exception handler/API validation đang có |
-| Time JSON | `YYYY-MM` đối với Experiences; `YYYY-MM-DD` đối với Certificates |
+| Time JSON | `YYYY-MM` đối với Experiences; `created_at`/`updated_at` là UTC ISO 8601 |
 | Pagination | Các collection ban đầu trả array, **chưa** phân trang **[STEP01 default]** |
 | Tên field | Ưu tiên tên Backend đã dùng; không đổi schema chỉ để khớp FE mock |
 
@@ -78,7 +80,7 @@
 | DELETE | `/api/me/profile/certificates/{certificate_id}` | — | 204 |
 | GET | `/api/users/{user_id}/profile/certificates` | — | 200 `CertificateResponse[]` |
 
-**Không triển khai trong MVP:** API avatar/cover/certificate upload; verification; S3/local file storage; Project CRUD; AI-generated Bio; Refresh Token.
+**Ngoài phạm vi Profile CRUD:** verification; Project CRUD; AI-generated Bio; Refresh Token. Media upload đã triển khai qua các endpoint riêng, xem `PROFILE_MEDIA_OPENAPI.yaml` và media guides.
 
 ## 4. Profile DTOs
 
@@ -242,23 +244,22 @@ Endpoint dùng **JSON object partial update** với `Content-Type: application/j
 
 ## 6. Certificate DTOs
 
-**Schema dự kiến STEP 02:** `user_certificates` (`certificate_id`, `user_id`, `title`, `issuer`, `credential_id?`, `credential_url?`, `issued_at date?`, `expires_at date?`, `created_at`, `updated_at`).
+**Schema hiện tại (23/10/2026):** `user_certificates` (`certificate_id`, `user_id`, `title`, `issuer`, `description?`, `credential_url?`, `created_at`, `updated_at`). File lưu qua Media Asset và Certificate Attachment riêng. Xem [migration/preflight](../guide/PROFILE_CERTIFICATES_SIMPLIFICATION.md).
 
 | Property (Create/PUT) | Validation V1 |
 |---|---|
 | `title` | Required, trim 1–255 |
 | `issuer` | Required, trim 1–255 |
-| `credential_id` | Nullable, trim <=255 |
+| `description` | Nullable, trim <=2000 |
 | `credential_url` | Nullable, absolute HTTP/HTTPS URL <=1000 |
-| `issued_at` | Nullable `YYYY-MM-DD` valid calendar date |
-| `expires_at` | Nullable `YYYY-MM-DD` valid calendar date |
 
-- `credential_id`/`credential_url` đều optional, **không yêu cầu phải có nguồn bằng chứng** trong MVP (thông tin self-declared).
-- Nếu cả hai ngày có giá trị thì `expires_at >= issued_at`; không tự sinh ngày hết hạn.
+- Description/URL optional; omitted, null hoặc blank thành null, kể cả PUT full replacement. Certificate là thông tin self-declared.
+- JSON chỉ nhận bốn field ở bảng trên; unknown/duplicate properties trả 400, gồm mọi field đã loại bỏ.
 - POST 201; PUT full replacement 200; DELETE 204. Không được tự chỉnh certificate thuộc người khác (404).
 - Không unique theo `title`/`issuer`, vì cùng loại chứng chỉ có thể được cấp lại.
-- Không có `is_verified`, `verification_status`, `file_storage_key`, `file_url`, upload endpoint hay S3.
-- Danh sách sort **[STEP01 default]**: `issued_at` giảm dần, null cuối, `created_at` giảm dần, `certificate_id` tie-breaker.
+- Không có `is_verified`, `verification_status` hay file bytes/public URL trong CertificateResponse. Metadata file được đọc qua attachment endpoints riêng.
+- Tối đa một attachment liên kết, gồm pending_upload/processing/active/rejected; file thứ hai trả `409 MEDIA_ATTACHMENT_LIMIT`. Owner phải DELETE file cũ trước khi upload file khác. Giữ giới hạn 10.000.000 bytes/file, quota 200.000.000 bytes/user và PDF scan clean trước khi đọc.
+- Danh sách owner/member sort `created_at DESC`, `certificate_id ASC`.
 
 **Ví dụ response item:**
 
@@ -267,10 +268,8 @@ Endpoint dùng **JSON object partial update** với `Content-Type: application/j
   "certificate_id": "55555555-5555-4555-8555-555555555555",
   "title": "AWS Certified Cloud Practitioner",
   "issuer": "Amazon Web Services",
-  "credential_id": null,
+  "description": "Foundational knowledge of AWS Cloud services.",
   "credential_url": "https://www.credly.com/badges/example",
-  "issued_at": "2026-09-01",
-  "expires_at": null,
   "created_at": "2026-10-20T08:00:00Z",
   "updated_at": null
 }
@@ -293,7 +292,7 @@ Endpoint dùng **JSON object partial update** với `Content-Type: application/j
 3. University/display_name null/blank; availability `0`, `41`, non-integer; invalid preferred role GUID.
 4. `skill_ids`: omitted, null, [], >30, duplicate IDs, Guid.Empty, inactive new ID, inactive already-selected ID, transaction rollback.
 5. Experiences: `YYYY-MM`, invalid `2026-13`, end before start, ongoing with end date, 0/20/21 skills, unexpected `technologies` payload, duplicate IDs.
-6. Certificates: bad date `2026-02-30`, expiration earlier than issuance, invalid URL, optional credential ID/URL.
+6. Certificates: description 2000/2001 ký tự, invalid URL, optional description/URL null hoặc omitted, field đã loại bỏ/unknown/duplicate bị từ chối; attachment thứ hai 409 ở mọi trạng thái còn liên kết.
 7. Anonymous request 401; incomplete caller 403 `ONBOARDING_REQUIRED`; inactive/soft-deleted caller cannot pass authorization.
 8. Inactive/uncompleted/deleted target member profile GET → 404; cross-user PUT/DELETE resources → 404; no sensitive fields in serialized member JSON.
 9. Local and OAuth users after completed onboarding; profile scalar/skill consistency with existing Onboarding data.

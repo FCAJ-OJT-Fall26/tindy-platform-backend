@@ -10,6 +10,16 @@ public class UserProfile
     public string? Location { get; set; }
     public string? AvatarUrl { get; set; }
     public string? CoverImageUrl { get; set; }
+
+    // Nullable while legacy avatar_url / cover_image_url values are migrated.
+    // Null means legacy/unclassified, not "default".
+    public string? AvatarSource { get; set; }
+    public Guid? AvatarAssetId { get; set; }
+    public string? AvatarOAuthProvider { get; set; }
+    public Guid? CoverAssetId { get; set; }
+    public MediaAsset? AvatarAsset { get; set; }
+    public MediaAsset? CoverAsset { get; set; }
+    public ExternalAuthAccount? AvatarOAuthAccount { get; set; }
     public string? University { get; set; }
     public int? AvailableHoursPerWeek { get; set; }
     public string? CurrentRole { get; set; }

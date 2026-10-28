@@ -29,6 +29,9 @@ public sealed class ExternalAuthService : IExternalAuthService
 
         if (existing is not null)
         {
+            // Refresh provider avatar metadata, never mutate the selected profile avatar.
+            if (data.AvatarUrl is not null && existing.ProviderAvatarUrl != data.AvatarUrl)
+                await _repository.UpdateProviderAvatarAsync(existing.ExternalAuthAccountId, data.AvatarUrl, cancellationToken);
             return ResultFor(existing.User, isNewUser: false);
         }
 
@@ -63,7 +66,9 @@ public sealed class ExternalAuthService : IExternalAuthService
                 DisplayName = data.DisplayName,
                 University = null,
                 Bio = null,
-                AvatarUrl = data.AvatarUrl,
+                // OAuth avatar remains default until imported to Tindy private storage.
+                AvatarUrl = null,
+                AvatarSource = "default",
                 CreatedAt = now
             },
             UserRoles = new List<UserRole>
@@ -80,6 +85,7 @@ public sealed class ExternalAuthService : IExternalAuthService
                     ProviderUserId = data.ProviderUserId,
                     ProviderUsername = data.ProviderUsername,
                     ProviderEmail = data.ProviderEmail,
+                    ProviderAvatarUrl = data.AvatarUrl,
                     CreatedAt = now
                 }
             }

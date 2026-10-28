@@ -16,6 +16,7 @@ public class User
     public DateTime CreatedAt {get; set;} 
     public DateTime? UpdatedAt {get;set;}
     public DateTime? DeletedAt {get;set;}
+    public ICollection<MediaAsset> MediaAssets { get; set; } = new List<MediaAsset>();
     public UserProfile? Profile { get; set; }
     public ICollection<ProfileExperience> ProfileExperiences { get; set; } = new List<ProfileExperience>();
     public ICollection<UserCertificate> Certificates { get; set; } = new List<UserCertificate>();
@@ -26,4 +27,6 @@ public class User
     = new List<ExternalAuthAccount>();   
     public ICollection<UserOnboardingStep> OnboardingSteps
     { get; set; } = new List<UserOnboardingStep>();
+    public ICollection<Project> LedProjects { get; set; } = new List<Project>();
+    public ICollection<ProjectMember> ProjectMemberships { get; set; } = new List<ProjectMember>();
 }

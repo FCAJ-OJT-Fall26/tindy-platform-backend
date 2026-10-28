@@ -59,24 +59,18 @@ public sealed class ExternalAuthRepository : IExternalAuthRepository
         await _context.ExternalAuthAccounts.AddAsync(account, cancellationToken);
     }
 
+    public Task UpdateProviderAvatarAsync(Guid externalAuthAccountId, string providerAvatarUrl,
+        CancellationToken cancellationToken = default) =>
+        _context.ExternalAuthAccounts.Where(x => x.ExternalAuthAccountId == externalAuthAccountId)
+            .ExecuteUpdateAsync(update => update.SetProperty(x => x.ProviderAvatarUrl, providerAvatarUrl), cancellationToken);
+
     public async Task AddExternalAccountAndFillAvatarAsync(ExternalAuthAccount account, string? avatarUrl,
         CancellationToken cancellationToken = default)
     {
-        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        // Link must never mutate the currently selected profile avatar.
+        account.ProviderAvatarUrl = avatarUrl;
         await AddExternalAccountAsync(account, cancellationToken);
         await SaveChangesAsync(cancellationToken);
-
-        if (avatarUrl is not null)
-        {
-            DateTime? now = DateTime.UtcNow;
-            await _context.UserProfiles
-                .Where(x => x.UserId == account.UserId && x.AvatarUrl == null)
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(x => x.AvatarUrl, avatarUrl)
-                    .SetProperty(x => x.UpdatedAt, now), cancellationToken);
-        }
-
-        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)

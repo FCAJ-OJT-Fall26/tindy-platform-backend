@@ -30,4 +30,7 @@ public sealed record MyProfileResponse(
     string? CoverImageUrl,
     IReadOnlyList<ProfileSkillSummary> Skills,
     int ExperiencesCount,
-    int CertificatesCount);
+    int CertificatesCount,
+    string? AvatarSource = null,
+    Guid? AvatarMediaAssetId = null,
+    Guid? CoverMediaAssetId = null);

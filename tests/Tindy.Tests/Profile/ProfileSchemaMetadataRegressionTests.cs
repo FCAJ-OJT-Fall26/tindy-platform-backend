@@ -50,13 +50,13 @@ public sealed class ProfileSchemaMetadataRegressionTests
     }
 
     [Fact]
-    public void Certificates_HaveOwnerForeignKey_AndNativeDateColumns()
+    public void Certificates_HaveOwnerForeignKey_AndNullableDescription()
     {
         using var context = NewContext();
         var entity = context.Model.FindEntityType(typeof(UserCertificate))!;
         Assert.Equal("user_certificates", entity.GetTableName());
-        Assert.Equal("date", entity.FindProperty(nameof(UserCertificate.IssuedAt))!.GetColumnType());
-        Assert.Equal("date", entity.FindProperty(nameof(UserCertificate.ExpiresAt))!.GetColumnType());
+        Assert.Equal(2000, entity.FindProperty(nameof(UserCertificate.Description))!.GetMaxLength());
+        Assert.True(entity.FindProperty(nameof(UserCertificate.Description))!.IsNullable);
         Assert.Equal(255, entity.FindProperty(nameof(UserCertificate.Title))!.GetMaxLength());
         Assert.Equal(1000, entity.FindProperty(nameof(UserCertificate.CredentialUrl))!.GetMaxLength());
         Assert.Equal(DeleteBehavior.Cascade, entity.GetForeignKeys().Single(fk => fk.PrincipalEntityType.ClrType == typeof(User)).DeleteBehavior);

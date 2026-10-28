@@ -31,6 +31,10 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 _ => StatusCodes.Status502BadGateway
             },
 
+            MediaRequestException media => media.StatusCode,
+
+            ProjectException project => project.StatusCode,
+
             InvalidCredentialsException =>
                 StatusCodes.Status401Unauthorized,
 
@@ -78,7 +82,9 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
 
                 Title = statusCode switch
                 {
+                    400 => "Bad Request",
                     401 => "Unauthorized",
+                    403 => "Forbidden",
                     404 => "Not Found",
                     409 => "Conflict",
                     413 => "Payload Too Large",
@@ -102,6 +108,10 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
             exception switch
             {
                 AiException ai => ai.ErrorCode,
+                MediaRequestException media => media.ErrorCode,
+
+                ProjectException project => project.ErrorCode,
+
                 ProfileValidationException =>
                     "VALIDATION_FAILED",
 

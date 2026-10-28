@@ -253,6 +253,18 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAiListExtractionService, AiListExtractionService>();
         services.AddScoped<IAiProfileService, AiProfileService>();
 
+        // Project management service (Group B).
+        services.AddScoped<IProjectService, ProjectService>();
+
+        // Project positions & skills service (Group C).
+        services.AddScoped<IProjectPositionService, ProjectPositionService>();
+
+        // Project management service (Group B).
+        services.AddScoped<IProjectService, ProjectService>();
+
+        // Project positions & skills service (Group C).
+        services.AddScoped<IProjectPositionService, ProjectPositionService>();
+
 
 
 
@@ -308,29 +320,98 @@ public static class ServiceCollectionExtensions
                     AutoReplenishment = true
                 }));
 
+            // STEP 03: limits are per authenticated user. Single-instance in-memory limits;
+            // move to a distributed store when horizontal scaling is enabled.
+            static string MediaPartitionKey(HttpContext context) =>
+                context.User.FindFirst("sub")?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+            // Existing ASP.NET Core limiter also limits the whole HTTP upload lifetime.
+            options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+            {
+                var path = (context.Request.Path.Value ?? "").TrimEnd('/');
+                var upload = (HttpMethods.IsPost(context.Request.Method) && path.StartsWith("/api/me/profile/", StringComparison.OrdinalIgnoreCase) &&
+                    (path.EndsWith("/attachments", StringComparison.OrdinalIgnoreCase) || path.EndsWith("/avatar", StringComparison.OrdinalIgnoreCase) || path.EndsWith("/cover-image", StringComparison.OrdinalIgnoreCase))) ||
+                    (HttpMethods.IsPut(context.Request.Method) && path.Equals("/api/me/profile/avatar/source", StringComparison.OrdinalIgnoreCase));
+                return upload ? RateLimitPartition.GetConcurrencyLimiter(MediaPartitionKey(context), _ => new ConcurrencyLimiterOptions
+                {
+                    PermitLimit = 2, QueueLimit = 0
+                }) : RateLimitPartition.GetNoLimiter("other");
+            });
+            options.AddPolicy("media-certificate-upload", context => RateLimitPartition.GetFixedWindowLimiter(
+                MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 20, Window = TimeSpan.FromDays(1), QueueLimit = 0, AutoReplenishment = true
+                }));
+            options.AddPolicy("media-visibility", context => RateLimitPartition.GetFixedWindowLimiter(
+                MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 60, Window = TimeSpan.FromHours(1), QueueLimit = 0, AutoReplenishment = true
+                }));
+
+            options.AddPolicy("media-avatar", context => RateLimitPartition.GetFixedWindowLimiter(
+                MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10, Window = TimeSpan.FromHours(1), QueueLimit = 0, AutoReplenishment = true
+                }));
+            options.AddPolicy("media-cover", context => RateLimitPartition.GetFixedWindowLimiter(
+                MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 6, Window = TimeSpan.FromHours(1), QueueLimit = 0, AutoReplenishment = true
+                }));
+            options.AddPolicy("media-read", context => RateLimitPartition.GetFixedWindowLimiter(
+                MediaPartitionKey(context), _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 300, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true
+                }));
+
             // ===================================
             // 2. CUSTOM 429 ERROR RESPONSE
             // ===================================
+
             options.OnRejected = async (context, cancellationToken) =>
             {
                 var httpContext = context.HttpContext;
-                var isAiExtraction = httpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()
-                    ?.PolicyName == "ai-extract-profile";
+
+                // ===================================
+                // RATE LIMITING REQUEST CLASSIFICATION
+                // ===================================
+
+                // Check whether the request targets AI extraction.
+                var isAiExtraction = httpContext.GetEndpoint()?
+                    .Metadata.GetMetadata<EnableRateLimitingAttribute>()?
+                    .PolicyName == "ai-extract-profile";
+
+                // Check whether the request targets media endpoints.
+                var isMediaRequest =
+                    httpContext.Request.Path.StartsWithSegments("/api/media") ||
+                    httpContext.Request.Path.StartsWithSegments("/api/me/profile");
+
 
                 var problem = new ProblemDetails
                 {
                     Status = StatusCodes.Status429TooManyRequests,
                     Title = "Too Many Requests",
-                    Detail = isAiExtraction ? "Too many extraction requests. Please try again later."
-                        : "Too many login attempts. Please try again later.",
+                    Detail = isAiExtraction
+                        ? "Too many extraction requests. Please try again later."
+                        : isMediaRequest
+                            ? "Too many media requests. Please try again later."
+                            : "Too many requests. Please try again later.",
                     Instance = httpContext.Request.Path.ToString()
                 };
 
-                problem.Extensions["error_code"] =
-                    isAiExtraction ? "AI_RATE_LIMITED" : "AUTH_TOO_MANY_ATTEMPTS";
+                // Assign an error code based on the request category.
+                problem.Extensions["error_code"] = isAiExtraction
+                    ? "AI_RATE_LIMITED"
+                    : isMediaRequest
+                        ? "MEDIA_RATE_LIMITED"
+                        : "AUTH_TOO_MANY_ATTEMPTS";
 
                 problem.Extensions["traceId"] =
                     httpContext.TraceIdentifier;
+
+                // ===================================
+                // WRITE HTTP RESPONSE
+                // ===================================
 
                 httpContext.Response.StatusCode =
                     StatusCodes.Status429TooManyRequests;
@@ -338,14 +419,16 @@ public static class ServiceCollectionExtensions
                 httpContext.Response.ContentType =
                     "application/problem+json";
 
-                await httpContext.Response.WriteAsync(JsonSerializer.Serialize(problem), cancellationToken);
-            };
-        });
+                await httpContext.Response.WriteAsync(
+                    JsonSerializer.Serialize(problem),
+                    cancellationToken);
+                };
+            });
 
 
 
-        return services;
-    }
+            return services;
+        }
 
     // ===================================
     // 7. AUTH ERROR RESPONSE HELPER
