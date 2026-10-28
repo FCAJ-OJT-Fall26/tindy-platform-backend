@@ -17,27 +17,15 @@ namespace Tindy.Infrastructure.Ai;
 public sealed partial class BedrockProfileExtractionProvider(
     HttpClient httpClient,
     IOptions<BedrockOptions> options,
-    ILogger<BedrockProfileExtractionProvider> logger) : IProfileExtractionProvider, IAiListExtractionProvider, IAiScalarProfileProvider, IAiExtractionBatchProvider, IDisposable
+    ILogger<BedrockProfileExtractionProvider> logger) : IAiListExtractionProvider, IAiExtractionBatchProvider, IDisposable
 {
     private const int MaxEnvelopeBytes = 1024 * 1024;
     private readonly SemaphoreSlim _slots = new(2, 2);
     private readonly BedrockOptions _options = options.Value;
 
-    public async Task<string> ExtractAsync(AiProfileInput input, IReadOnlyList<AiCatalogItem> skills,
-        IReadOnlyList<AiCatalogItem> roles, CancellationToken cancellationToken = default) =>
-        (await SendAsync(input, () => CreateRequest(input, skills, roles), ReadOutput, cancellationToken)).RawJson;
-
     public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input,
         IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles, CancellationToken cancellationToken = default) =>
         SendAsync(input, () => CreateListRequest(input, skills, roles), ReadListOutput, cancellationToken);
-
-    public async Task<AiScalarProfileModelOutput> ExtractProfileScalarsAsync(AiProfileInput input,
-        IReadOnlyList<AiRoleReference> roles, CancellationToken cancellationToken = default)
-    {
-        var output = await SendAsync(input, () => CreateScalarRequest(input, roles),
-            root => ReadToolOutput(root, ScalarProfileExtractionPrompt.ToolName), cancellationToken);
-        return new(output.RawJson, output.Diagnostics);
-    }
 
     private async Task<AiListModelOutput> SendAsync(AiProfileInput input, Func<HttpRequestMessage> createRequest,
         Func<JsonElement, string> readOutput, CancellationToken cancellationToken, bool reserved = false)
@@ -225,27 +213,6 @@ public sealed partial class BedrockProfileExtractionProvider(
             throw new AiException(AiFailure.Unavailable);
     }
 
-    private HttpRequestMessage CreateRequest(AiProfileInput input, IReadOnlyList<AiCatalogItem> skills,
-        IReadOnlyList<AiCatalogItem> roles)
-    {
-        if (IsGemma) return CreateGemmaRequest(input, ProfileExtractionPrompt.System, ProfileExtractionPrompt.User(input, skills, roles));
-        var content = new List<object> { new { text = ProfileExtractionPrompt.User(input, skills, roles) } };
-        if (input.Pdf is not null)
-            content.Add(new { document = new { format = "pdf", name = "CV", source = new { bytes = Convert.ToBase64String(input.Pdf) } } });
-
-        var request = new HttpRequestMessage(HttpMethod.Post,
-            $"https://bedrock-runtime.{_options.Region}.amazonaws.com/model/{Uri.EscapeDataString(_options.ModelId)}/converse");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        request.Content = JsonContent.Create(new
-        {
-            system = new[] { new { text = ProfileExtractionPrompt.System } },
-            messages = new[] { new { role = "user", content } },
-            inferenceConfig = new { maxTokens = 4096, temperature = 0.1 },
-            additionalModelRequestFields = new { reasoningConfig = new { type = "disabled" } }
-        });
-        return request;
-    }
-
     private static AiFailure MapFailure(HttpStatusCode status, bool hasPdf) => status switch
     {
         HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound => AiFailure.Unavailable,
@@ -271,30 +238,6 @@ public sealed partial class BedrockProfileExtractionProvider(
             buffer.Write(chunk, 0, count);
         }
         return buffer.ToArray();
-    }
-
-    private static string ReadOutput(JsonElement root)
-    {
-        if (root.ValueKind != JsonValueKind.Object
-            || !root.TryGetProperty("stopReason", out var reason) || reason.ValueKind != JsonValueKind.String || reason.GetString() != "end_turn"
-            || !root.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Object
-            || !output.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object
-            || !message.TryGetProperty("role", out var role) || role.ValueKind != JsonValueKind.String || role.GetString() != "assistant"
-            || !message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
-            throw new AiException(AiFailure.InvalidOutput);
-
-        var text = new StringBuilder();
-        foreach (var block in content.EnumerateArray())
-        {
-            if (block.ValueKind != JsonValueKind.Object || block.EnumerateObject().Count() != 1
-                || !block.TryGetProperty("text", out var part) || part.ValueKind != JsonValueKind.String)
-                throw new AiException(AiFailure.InvalidOutput);
-            text.Append(part.GetString());
-        }
-        var result = text.ToString();
-        if (string.IsNullOrWhiteSpace(result) || Encoding.UTF8.GetByteCount(result) > AiProfileLimits.MaxOutputBytes)
-            throw new AiException(AiFailure.InvalidOutput);
-        return result;
     }
 
     private static (string Text, string Kind) ReadDiagnosticOutput(JsonElement root)

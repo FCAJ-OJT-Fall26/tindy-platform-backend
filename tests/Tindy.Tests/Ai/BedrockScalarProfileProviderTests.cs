@@ -45,7 +45,7 @@ public sealed class BedrockScalarProfileProviderTests
             return Success();
         });
         using var provider = Create(handler);
-        var result = await provider.ExtractProfileScalarsAsync(new("My name is Lan", "%PDF-test"u8.ToArray()), [new("r1", "AI Engineer")]);
+        var result = await provider.ExtractProfileForTestAsync(new("My name is Lan", "%PDF-test"u8.ToArray()), [new("r1", "AI Engineer")]);
         Assert.Contains("Lan", result.RawJson);
         Assert.Equal("tool_use", result.Diagnostics.StopReason);
         Assert.Equal(1, handler.Calls);
@@ -59,7 +59,7 @@ public sealed class BedrockScalarProfileProviderTests
     {
         using var handler = new Stub(_ => Task.FromResult(Success(reason, name)));
         using var provider = Create(handler);
-        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractProfileScalarsAsync(new("source", null), []));
+        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractProfileForTestAsync(new("source", null), []));
         Assert.Equal(AiFailure.InvalidOutput, error.Failure);
         Assert.Equal(reason, error.Diagnostics!.StopReason);
         Assert.NotNull(error.RawOutput);

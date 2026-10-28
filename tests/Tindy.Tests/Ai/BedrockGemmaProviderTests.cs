@@ -34,7 +34,7 @@ public sealed class BedrockGemmaProviderTests
             return Response();
         });
         using var provider = Create(handler);
-        var result = await provider.ExtractProfileScalarsAsync(new("Vietnamese source", pdf), [new("r1", "AI Engineer")]);
+        var result = await provider.ExtractProfileForTestAsync(new("Vietnamese source", pdf), [new("r1", "AI Engineer")]);
         Assert.Equal("{\"profile\":{\"display_name\":\"Lan\"},\"warnings\":[]}", result.RawJson);
         Assert.Equal("tool_use", result.Diagnostics.StopReason);
         Assert.Equal(100, result.Diagnostics.InputTokens);
@@ -71,7 +71,7 @@ public sealed class BedrockGemmaProviderTests
     {
         using var handler = new Stub(_ => Task.FromResult(Response(name, arguments, status, duplicate)));
         using var provider = Create(handler);
-        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractProfileScalarsAsync(new("source", null), []));
+        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractProfileForTestAsync(new("source", null), []));
         Assert.Equal(AiFailure.InvalidOutput, error.Failure);
         Assert.DoesNotContain("private reasoning", error.RawOutput ?? "");
         if (status == "incomplete")
@@ -87,7 +87,7 @@ public sealed class BedrockGemmaProviderTests
         const string arguments = "{\"profile\":{},\"profile\":{\"display_name\":\"Lan\"},\"warnings\":[]}";
         using var handler = new Stub(_ => Task.FromResult(Response(arguments: arguments)));
         using var provider = Create(handler);
-        var result = await provider.ExtractProfileScalarsAsync(new("source", null), []);
+        var result = await provider.ExtractProfileForTestAsync(new("source", null), []);
         Assert.Equal(arguments, result.RawJson);
         var error = Assert.Throws<AiException>(() => AiScalarProfileDraftValidator.Parse(result.RawJson, new AiRoleReferenceMap([])));
         Assert.Equal(AiFailure.InvalidOutput, error.Failure);
@@ -98,10 +98,10 @@ public sealed class BedrockGemmaProviderTests
     {
         using var handler = new Stub(_ => Task.FromResult(Response()));
         using var provider = Create(handler);
-        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractProfileScalarsAsync(new(null, new byte[2_700_000]), []));
+        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractProfileForTestAsync(new(null, new byte[2_700_000]), []));
         Assert.Equal(AiFailure.PayloadTooLarge, error.Failure);
         Assert.Equal(0, handler.Calls);
-        await provider.ExtractProfileScalarsAsync(new("small source", null), []);
+        await provider.ExtractProfileForTestAsync(new("small source", null), []);
         Assert.Equal(1, handler.Calls);
     }
 
@@ -110,7 +110,7 @@ public sealed class BedrockGemmaProviderTests
     {
         using var handler = new Stub(_ => Task.FromResult(Response()));
         using var provider = Create(handler, "ap-southeast-1");
-        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractProfileScalarsAsync(new("source", null), []));
+        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractProfileForTestAsync(new("source", null), []));
         Assert.Equal(AiFailure.Unavailable, error.Failure);
         Assert.Equal(0, handler.Calls);
     }

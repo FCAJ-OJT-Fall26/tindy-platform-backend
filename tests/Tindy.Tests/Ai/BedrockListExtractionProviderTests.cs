@@ -101,29 +101,6 @@ public sealed class BedrockListExtractionProviderTests
         Assert.Equal(AiFailure.InvalidOutput, (await Assert.ThrowsAsync<AiException>(() => provider.ExtractListsAsync(new("source", null), [], []))).Failure);
     }
 
-    [Fact]
-    public async Task ProfileAndListCallsShareOneConcurrencyGate()
-    {
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var handler = new Stub(async (_, token) =>
-        {
-            entered.TrySetResult();
-            await Task.Delay(Timeout.Infinite, token);
-            return Success();
-        });
-        using var provider = Create(handler);
-        using var cancellation = new CancellationTokenSource();
-        var profile = provider.ExtractAsync(new("source", null), [], [], cancellation.Token);
-        var lists = provider.ExtractListsAsync(new("source", null), [], [], cancellation.Token);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractListsAsync(new("third", null), [], []));
-        Assert.Equal(AiFailure.Busy, error.Failure);
-        Assert.Equal(2, handler.Calls);
-        await cancellation.CancelAsync();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => profile);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lists);
-    }
-
     private static BedrockProfileExtractionProvider Create(HttpMessageHandler handler) =>
         new(new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan }, Options.Create(new BedrockOptions { Enabled = true, ApiKey = "test-key", ModelId = "global.amazon.nova-2-lite-v1:0", Region = "ap-southeast-1" }),
             NullLogger<BedrockProfileExtractionProvider>.Instance);

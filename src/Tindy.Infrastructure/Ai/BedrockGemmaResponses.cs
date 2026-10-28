@@ -13,7 +13,7 @@ public sealed partial class BedrockProfileExtractionProvider
     private int OutputTokenLimit => IsGemma ? 8192 : 4096;
 
     private HttpRequestMessage CreateGemmaRequest(AiProfileInput input, string system, string user,
-        string? toolName = null, JsonObject? schema = null)
+        string toolName, JsonObject schema)
     {
         var content = new JsonArray();
         if (input.Pdf is not null)
@@ -32,18 +32,15 @@ public sealed partial class BedrockProfileExtractionProvider
             ["max_output_tokens"] = OutputTokenLimit,
             ["reasoning"] = new JsonObject { ["effort"] = "high" }
         };
-        if (toolName is not null)
+        body["tools"] = new JsonArray(new JsonObject
         {
-            body["tools"] = new JsonArray(new JsonObject
-            {
-                ["type"] = "function", ["name"] = toolName,
-                ["description"] = "Extract only explicitly supported facts using the provided schema and catalog keys.",
-                // Dynamic skill/evidence maps use the existing schema; the server validates all values.
-                ["parameters"] = GemmaSchema(schema!), ["strict"] = false
-            });
-            body["tool_choice"] = new JsonObject { ["type"] = "function", ["name"] = toolName };
-            body["parallel_tool_calls"] = false;
-        }
+            ["type"] = "function", ["name"] = toolName,
+            ["description"] = "Extract only explicitly supported facts using the provided schema and catalog keys.",
+            // Dynamic skill/evidence maps use the existing schema; the server validates all values.
+            ["parameters"] = GemmaSchema(schema), ["strict"] = false
+        });
+        body["tool_choice"] = new JsonObject { ["type"] = "function", ["name"] = toolName };
+        body["parallel_tool_calls"] = false;
         var bytes = JsonSerializer.SerializeToUtf8Bytes(body);
         if (bytes.Length > GemmaRequestLimit) throw new AiException(AiFailure.PayloadTooLarge);
         var request = new HttpRequestMessage(HttpMethod.Post,
