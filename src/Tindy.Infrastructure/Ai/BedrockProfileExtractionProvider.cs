@@ -60,10 +60,11 @@ public sealed partial class BedrockProfileExtractionProvider(
 
             var bytes = await ReadBoundedAsync(response.Content, timeout.Token);
             responseBody = Encoding.UTF8.GetString(bytes);
-            using var document = JsonDocument.Parse(bytes);
+            using var original = JsonDocument.Parse(bytes);
+            using var document = IsGemma ? NormalizeGemmaResponse(original.RootElement) : JsonDocument.Parse(bytes);
             diagnostics = new AiCallDiagnostics(ReadStopReason(document.RootElement),
                 ReadTokens(document.RootElement, "inputTokens"), ReadTokens(document.RootElement, "outputTokens"),
-                4096, timer.ElapsedMilliseconds);
+                OutputTokenLimit, timer.ElapsedMilliseconds);
             string result;
             try
             {
@@ -85,13 +86,13 @@ public sealed partial class BedrockProfileExtractionProvider(
         }
         catch (OperationCanceledException)
         {
-            throw new AiException(AiFailure.Timeout) { Diagnostics = new(null, null, null, 4096, timer.ElapsedMilliseconds, "timeout") };
+            throw new AiException(AiFailure.Timeout) { Diagnostics = new(null, null, null, OutputTokenLimit, timer.ElapsedMilliseconds, "timeout") };
         }
         catch (AiException exception)
         {
             var reason = diagnostics?.StopReason == "max_tokens" ? "output_token_limit" :
                 exception.Failure == AiFailure.InvalidOutput ? "invalid_tool_or_model_output" : "provider_http_error";
-            exception.Diagnostics = (diagnostics ?? new(null, null, null, 4096, timer.ElapsedMilliseconds)) with { FailureReason = reason };
+            exception.Diagnostics = (diagnostics ?? new(null, null, null, OutputTokenLimit, timer.ElapsedMilliseconds)) with { FailureReason = reason };
             logger.LogWarning("AI extraction failed TraceId={TraceId} Failure={Failure} StopReason={StopReason} ElapsedMs={ElapsedMs} OutputTokens={OutputTokens}",
                 Activity.Current?.TraceId.ToString(), exception.Failure, exception.Diagnostics.StopReason,
                 timer.ElapsedMilliseconds, exception.Diagnostics.OutputTokens);
@@ -100,7 +101,7 @@ public sealed partial class BedrockProfileExtractionProvider(
         catch (JsonException)
         {
             throw new AiException(AiFailure.InvalidOutput, responseBody, "provider_response")
-            { Diagnostics = new(null, null, null, 4096, timer.ElapsedMilliseconds, "invalid_provider_json") };
+            { Diagnostics = new(null, null, null, OutputTokenLimit, timer.ElapsedMilliseconds, "invalid_provider_json") };
         }
         catch (HttpRequestException)
         {
@@ -127,6 +128,8 @@ public sealed partial class BedrockProfileExtractionProvider(
 
     private HttpRequestMessage CreateListRequest(AiProfileInput input, IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles)
     {
+        if (IsGemma) return CreateGemmaRequest(input, ListExtractionPrompt.System, ListExtractionPrompt.User(input, skills, roles),
+            ListExtractionPrompt.ToolName, ListExtractionPrompt.Schema(skills, roles));
         var content = new List<object>();
         if (input.Pdf is not null)
             content.Add(new { document = new { format = "pdf", name = "CV", source = new { bytes = Convert.ToBase64String(input.Pdf) } } });
@@ -153,6 +156,8 @@ public sealed partial class BedrockProfileExtractionProvider(
 
     private HttpRequestMessage CreateScalarRequest(AiProfileInput input, IReadOnlyList<AiRoleReference> roles)
     {
+        if (IsGemma) return CreateGemmaRequest(input, ScalarProfileExtractionPrompt.System, ScalarProfileExtractionPrompt.User(input, roles),
+            ScalarProfileExtractionPrompt.ToolName, ScalarProfileExtractionPrompt.Schema(roles));
         var content = new List<object>();
         if (input.Pdf is not null)
             content.Add(new { document = new { format = "pdf", name = "CV", source = new { bytes = Convert.ToBase64String(input.Pdf) } } });
@@ -177,9 +182,9 @@ public sealed partial class BedrockProfileExtractionProvider(
         return request;
     }
 
-    private static string ReadListOutput(JsonElement root) => ReadToolOutput(root, ListExtractionPrompt.ToolName);
+    private string ReadListOutput(JsonElement root) => ReadToolOutput(root, ListExtractionPrompt.ToolName);
 
-    private static string ReadToolOutput(JsonElement root, string toolName)
+    private string ReadToolOutput(JsonElement root, string toolName)
     {
         if (ReadStopReason(root) != "tool_use" ||
             !root.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Object ||
@@ -192,11 +197,21 @@ public sealed partial class BedrockProfileExtractionProvider(
             !block.TryGetProperty("toolUse", out var tool) || tool.ValueKind != JsonValueKind.Object ||
             !tool.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String || name.GetString() != toolName ||
             !tool.TryGetProperty("toolUseId", out var id) || id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString()) ||
-            !tool.TryGetProperty("input", out var input) || input.ValueKind != JsonValueKind.Object)
+            !tool.TryGetProperty("input", out var input) ||
+            (input.ValueKind != JsonValueKind.Object && !(IsGemma && input.ValueKind == JsonValueKind.String)))
             throw new AiException(AiFailure.InvalidOutput);
-        var json = input.GetRawText();
+        var json = IsGemma && input.ValueKind == JsonValueKind.String ? input.GetString()! : input.GetRawText();
         if (Encoding.UTF8.GetByteCount(json) > AiProfileLimits.MaxOutputBytes) throw new AiException(AiFailure.InvalidOutput);
-        return json;
+        if (IsGemma)
+        {
+            try
+            {
+                using var parsed = JsonDocument.Parse(json);
+                if (parsed.RootElement.ValueKind != JsonValueKind.Object) throw new AiException(AiFailure.InvalidOutput);
+            }
+            catch (JsonException) { throw new AiException(AiFailure.InvalidOutput); }
+        }
+        return json; // Preserve duplicate keys for the application's strict validators.
     }
 
     private void ValidateConfiguration()
@@ -204,7 +219,8 @@ public sealed partial class BedrockProfileExtractionProvider(
         if (!_options.Enabled || string.IsNullOrWhiteSpace(_options.ApiKey)
             || _options.ApiKey.Any(character => character is <= ' ' or >= '\u007f')
             || _options.TimeoutSeconds is < 1 or > 120
-            || _options.ModelId != "global.amazon.nova-2-lite-v1:0"
+            || (_options.ModelId != "global.amazon.nova-2-lite-v1:0" && !IsGemma)
+            || (IsGemma && _options.Region is not ("us-east-1" or "us-east-2" or "us-west-2" or "eu-central-1"))
             || !Regex.IsMatch(_options.Region ?? string.Empty, @"\A[a-z]{2}-[a-z]+-\d\z", RegexOptions.CultureInvariant))
             throw new AiException(AiFailure.Unavailable);
     }
@@ -212,6 +228,7 @@ public sealed partial class BedrockProfileExtractionProvider(
     private HttpRequestMessage CreateRequest(AiProfileInput input, IReadOnlyList<AiCatalogItem> skills,
         IReadOnlyList<AiCatalogItem> roles)
     {
+        if (IsGemma) return CreateGemmaRequest(input, ProfileExtractionPrompt.System, ProfileExtractionPrompt.User(input, skills, roles));
         var content = new List<object> { new { text = ProfileExtractionPrompt.User(input, skills, roles) } };
         if (input.Pdf is not null)
             content.Add(new { document = new { format = "pdf", name = "CV", source = new { bytes = Convert.ToBase64String(input.Pdf) } } });
@@ -233,6 +250,7 @@ public sealed partial class BedrockProfileExtractionProvider(
     {
         HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound => AiFailure.Unavailable,
         HttpStatusCode.TooManyRequests => AiFailure.Busy,
+        HttpStatusCode.RequestEntityTooLarge => AiFailure.PayloadTooLarge,
         HttpStatusCode.RequestTimeout or HttpStatusCode.GatewayTimeout => AiFailure.Timeout,
         HttpStatusCode.BadRequest when hasPdf => AiFailure.DocumentRejected,
         _ => AiFailure.Provider

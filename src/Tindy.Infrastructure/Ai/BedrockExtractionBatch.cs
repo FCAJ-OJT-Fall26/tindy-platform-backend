@@ -54,7 +54,7 @@ public sealed partial class BedrockProfileExtractionProvider
         private async Task<AiScalarProfileModelOutput> RunProfile(AiProfileInput input, IReadOnlyList<AiRoleReference> roles)
         {
             var result = await owner.SendAsync(input, () => owner.CreateScalarRequest(input, roles),
-                root => ReadToolOutput(root, ScalarProfileExtractionPrompt.ToolName), _cancellation.Token, reserved: true);
+                root => owner.ReadToolOutput(root, ScalarProfileExtractionPrompt.ToolName), _cancellation.Token, reserved: true);
             return new(result.RawJson, result.Diagnostics);
         }
 
@@ -64,7 +64,7 @@ public sealed partial class BedrockProfileExtractionProvider
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 if (_lists is not null) throw new InvalidOperationException("The list stage has already started.");
-                var task = owner.SendAsync(input, () => owner.CreateListRequest(input, skills, roles), ReadListOutput,
+                var task = owner.SendAsync(input, () => owner.CreateListRequest(input, skills, roles), owner.ReadListOutput,
                     _cancellation.Token, reserved: true);
                 _lists = task;
                 return task;
