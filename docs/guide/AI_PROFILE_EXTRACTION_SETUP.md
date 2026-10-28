@@ -1,0 +1,97 @@
+# Cấu hình AI Profile Extraction
+
+Chạy các lệnh dưới đây từ `backend/`. Hợp đồng HTTP nằm tại [AI_PROFILE_EXTRACTION.md](../api/AI_PROFILE_EXTRACTION.md). Bio chưa được triển khai; xem [kế hoạch riêng](../../../BIO_IMPLEMENTATION_PLAN.md).
+
+## Provider được chọn
+
+Backend gọi Gemma 4 31B (`google.gemma-4-31b`) qua Amazon Bedrock Mantle Responses API bằng `HttpClient` và Bearer API key, không cần AWS SDK hoặc dependency mới. Endpoint mặc định: `https://bedrock-mantle.us-east-1.api.aws/openai/v1/responses`. Đây là model Google, không phải model OpenAI; `/openai/v1` chỉ là định dạng API tương thích.
+
+Provider gửi nguyên PDF dưới dạng `input_file` base64 tới AWS tại vùng được cấu hình, mặc định US East (N. Virginia). Chỉ dùng tài liệu được phép gửi tới AWS. Không có OCR service, chuyển PDF thành ảnh hay dependency xử lý ảnh riêng. `store=false`; reasoning được bỏ khỏi draft và raw-output panel. Chỉ hỗ trợ Gemma 4 31B; không có đường gọi model cũ hoặc fallback tự động. Provider đọc trực tiếp Responses API, không dựng envelope Converse trung gian.
+
+## Profile và danh sách chạy song song
+
+`POST /api/ai/extract-profile` chạy song song `extract_profile_scalars` và `extract_lists`. Lượt profile nhận role catalog mã `r1`, `r2`, …; lượt danh sách nhận skill catalog mã `s1`, `s2`, … cùng role catalog cho kinh nghiệm. Schema công khai giữ nguyên: trường đơn có bằng chứng được điền, trường chưa rõ giữ null; danh sách cung cấp skills/experiences/certificates. Không tự ghi database, không sửa frontend. Current role không tự trở thành preferred role; role mong muốn cần câu nêu rõ nguyện vọng và khớp catalog.
+
+Mỗi lượt sử dụng một forced tool tương ứng, catalog mã ngắn theo request và PDF trước hướng dẫn text. Mỗi skill cần một trích đoạn bằng chứng khớp tên hoặc tên tương đương; gợi ý thiếu bằng chứng phù hợp bị bỏ và có warning, không tự chấp nhận chỉ vì UUID tồn tại. Backend đổi skill key về UUID active và experience role key về đúng tên role trong DB. Role title tiếng Việt/cấp bậc được giữ trong mô tả khi map sang tên nhóm nghề nghiệp chuẩn; không có tương đương thì để null kèm UNMATCHED_CATALOG. Không tạo/sửa bản ghi role. Backend giữ tên công ty trong mô tả và chuẩn hóa chuỗi ngày nguồn theo độ chính xác thật. `SQL` được giữ nếu catalog có mục SQL; không suy diễn PostgreSQL/MySQL/SQL Server từ SQL chung.
+
+## Cấu hình không nhạy cảm
+
+`src/Tindy.Api/appsettings.json` và `appsettings.Development.example.json` khai báo:
+
+```json
+{
+  "Bedrock": {
+    "Enabled": false,
+    "Region": "us-east-1",
+    "ModelId": "google.gemma-4-31b",
+    "TimeoutSeconds": 90
+  }
+}
+```
+
+`Enabled` mặc định tắt. `TimeoutSeconds` cho phép 1–120. Implementation chỉ chấp nhận Gemma 4 31B và dùng các vùng commercial được hỗ trợ (`us-east-1`, `us-east-2`, `us-west-2`, `eu-central-1`). Đổi model không phải cách khắc phục lỗi quyền truy cập. User Secrets/environment có ưu tiên cao hơn appsettings: cập nhật cả ModelId và Region nếu máy vẫn đang ghi đè bằng cấu hình model/vùng khác.
+
+Các giá trị cố định trong code, **không phải config keys**: Gemma dùng `max_output_tokens=8192` mỗi lượt (gồm phần suy luận), `reasoning.effort=high`, một forced function call và `parallel_tool_calls=false`. Prompt giới hạn tool input 4096 tokens; đây là giới hạn riêng, không phải tổng budget gồm reasoning. Giới hạn chung: tối đa 2 calls đồng thời/process và không xếp hàng. API giới hạn 5 request/phút/người dùng. Không retry, repair call hoặc fallback tự động; mỗi request đầy đủ giữ đồng thời hai slot trước khi gọi hai lượt model. Nếu thiếu slot, không lượt nào được khởi chạy và request trả `AI_BUSY`. List-only manual mode vẫn giữ một slot từ cùng bộ giới hạn. Nếu một lượt lỗi, backend hủy/chờ lượt kia rồi trả lỗi gốc, không có HTTP 200 một phần. Deadline tổng của endpoint là 120 giây, gồm đọc multipart/catalog; timeout mỗi lượt vẫn theo `TimeoutSeconds`. Hai lượt gửi cùng PDF/text riêng biệt nên mỗi request đầy đủ có hai lần tính input và chi phí tương ứng. Khi chạy nhiều replica, giới hạn trong bộ nhớ áp dụng riêng từng process, không phải quota phân tán.
+
+Gemma giới hạn tổng request provider ở 3.500.000 byte, gồm PDF base64, text, system prompt và catalog/schema. Provider đo chính xác JSON UTF-8 sau serialize và trả HTTP 413 `AI_PAYLOAD_TOO_LARGE` trước khi gọi mạng nếu quá giới hạn. Giới hạn upload HTTP 4 MiB không bảo đảm file đó vừa request Gemma; không tự cắt/rasterize PDF để né giới hạn. Hai keyword map `propertyNames`/`maxProperties` được bỏ khỏi schema transport vì Mantle từ chối chúng; validator phía server vẫn kiểm tra mọi mã skill/role, trùng khóa, bằng chứng và số lượng.
+
+## API key trong .NET User Secrets
+
+`Tindy.Api.csproj` đã có `UserSecretsId`; không cần `dotnet user-secrets init`. Dùng đúng project API, không đặt key vào appsettings, frontend, playground hoặc Git:
+
+```bash
+dotnet user-secrets set "Bedrock:ApiKey" "<BEDROCK_API_KEY>" --project src/Tindy.Api
+dotnet user-secrets set "Bedrock:Enabled" "true" --project src/Tindy.Api
+dotnet user-secrets set "Bedrock:ModelId" "google.gemma-4-31b" --project src/Tindy.Api
+dotnet user-secrets set "Bedrock:Region" "us-east-1" --project src/Tindy.Api
+dotnet user-secrets set "Bedrock:TimeoutSeconds" "90" --project src/Tindy.Api
+```
+
+`<BEDROCK_API_KEY>` là placeholder, không phải key mẫu dùng được. Không chia sẻ output `user-secrets list`; tránh để key thật trong shell history hoặc bản ghi terminal. User Secrets chỉ dành cho development và không mã hóa trên ổ đĩa. Khi deploy, inject `Bedrock__ApiKey` qua secret store của môi trường; không commit file chứa secret.
+
+Key phải còn hiệu lực và có quyền gọi model/inference profile tương ứng. Không cần cấu hình Access Key/Secret Access Key song song. Bật tính năng không tự tạo request tới AWS, nhưng gọi endpoint extraction sẽ phát sinh Bedrock invocation và có thể tính phí.
+
+API vẫn cần cấu hình database/JWT hiện có vì xác thực tài khoản và đọc Catalog diễn ra trong backend. Xem [DATABASE_SETUP.md](DATABASE_SETUP.md); không có migration mới cho extraction.
+
+## Chạy và kiểm thử
+
+```bash
+dotnet build Tindy.slnx
+dotnet test Tindy.slnx
+dotnet run --project src/Tindy.Api --launch-profile https
+```
+
+Launch profile `https` chạy `https://localhost:7190` và `http://localhost:5217`, nạp User Secrets và phù hợp luồng OAuth hiện tại. Trên máy local có lỗi kết nối IPv6, chạy cùng `DOTNET_SYSTEM_NET_DISABLEIPV6=1`; không cần sửa code production. Dùng JWT của tài khoản active; chưa hoàn thành onboarding vẫn gọi được extraction. Xem ví dụ multipart trong contract API. Không gửi Bedrock key từ client.
+
+Unit/provider tests dùng HTTP giả, không cần AWS key và không được gọi mạng AWS. HTTP/database regression dùng các fixture tương ứng; bộ test tích hợp PostgreSQL hiện tại cần Docker và database disposable, không dùng database chung. Chạy test thành công không chứng minh độ chính xác model thật trên mọi CV.
+
+Chỉ thực hiện live smoke test khi được cho phép gọi AWS. Bộ mẫu đánh giá nên có PDF có text, PDF scan, tiếng Việt/Anh, text-only, README không xác nhận tác giả, dữ liệu mâu thuẫn, thông tin thiếu, phủ định/nguyện vọng học, prompt injection và PDF không đọc được. Ghi nhận cả field sai/thiếu, warning, độ trễ và chi phí; không đưa CV thật hoặc API key vào fixtures/logs.
+
+Kiểm thử PDF có sẵn trong folder bằng manual runner riêng: xem [Local PDF extraction verification](../../tests/Manual/AiListExtraction/README.md). Runner mặc định dùng production list service; thêm `--full-profile` để chạy production combined service (hai model calls), key trong User Secrets và catalog database read-only; không cần sao chép JWT trình duyệt. `--self-test` hoàn toàn offline, `--live` mới gọi AWS. Full-profile mode yêu cầu các kỳ vọng `profile` trong file ngoài repo; không tự retry. Kỳ vọng và báo cáo nằm ngoài repo; không commit PDF thật hoặc raw output.
+
+## Chẩn đoán lỗi
+
+- `AI_UNAVAILABLE`: kiểm tra cờ bật, key còn hạn, region/model và quyền AWS; không xuất key ra log để kiểm tra.
+- `AI_DOCUMENT_REJECTED`: thử PDF không mã hóa, có nội dung đọc được; PDF không phải mọi định dạng đồ họa đều được model xử lý.
+- `AI_BUSY` / `AI_RATE_LIMITED`: chờ rồi chủ động thử lại; không tạo retry loop trên client.
+- `AI_INVALID_OUTPUT`: tool result/schema/reference không hợp lệ hoặc bị cắt ngắn. Backend từ chối toàn draft. Ở Development, xem `ai_diagnostics.stage`, `ai_diagnostics.stop_reason`, `failure_reason`, `validation_reason` và raw tool input. `max_tokens` xác nhận hết token; tăng timeout không giải quyết nguyên nhân đó.
+- `AI_TIMEOUT`: provider hoặc toàn request quá timeout; cancellation hủy/chờ cả hai lượt và giải phóng slot. Không tăng timeout vô hạn.
+
+Development có thể trả raw output lỗi tối đa 128 KiB và metadata trong response `no-store`; Production/Staging không trả các trường đó. Thành công ở Development có header `X-AI-Diagnostics` với tổng token/thời gian/cap và `stages.profile`/`stages.lists`; lỗi chỉ rõ lượt thất bại và raw tool input/model text nếu đọc được. Với provider envelope không phải JSON hợp lệ, chỉ trả diagnostics lỗi parse; không trả nguyên envelope vì không thể tách reasoning an toàn. Không thay cấu trúc `data`.
+
+Chỉ log trace, loại lỗi, thời gian và số token; không log key, nguồn tài liệu, raw provider response hoặc draft. Không lưu draft/file lâu dài hay tự cập nhật profile; người dùng kiểm tra kết quả rồi lưu qua API hiện có.
+
+## Tham chiếu AWS
+
+- [Dùng Bedrock API keys](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys-use.html).
+- [Gemma 4 31B: endpoint, reasoning và payload limit](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-google-gemma-4-31b.html).
+
+Provider/model capabilities có thể thay đổi; kiểm tra lại nguồn chính thức trước khi thay model, region hoặc format request.
+
+## Kiểm chứng sau refactor
+
+Build/test không cần gọi AWS: 558 regression test không cần Docker qua, bao gồm 262 test AI/provider/HTTP. Các test PostgreSQL Testcontainers cần Docker riêng. Máy local dùng `DOTNET_USE_POLLING_FILE_WATCHER=1 DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false` để tránh giới hạn inotify khi tạo nhiều host test.
+
+Cả hai công cụ manual vẫn build được: self-test của reviewer PDF qua; công cụ HTTP qua 71/71 self-test offline. Công cụ HTTP kiểm tra auth/multipart/catalog qua API, còn runner PDF đọc catalog local và kiểm tra riêng danh sách hoặc hai lượt kết hợp. Không gộp chúng vì mục đích khác nhau. Refactor không gọi lại AWS, không gửi CV, không sửa frontend, prompt hoặc kỳ vọng nội dung.
+
+Lần live Gemma trước refactor (commit `6445ea2`) hoàn tất CV thật trong khoảng 35 giây, qua validator và trả 6 skill, 3 experience cùng 4 certificate. Reviewer nội dung chưa đạt: quy tắc AICORE không tìm thấy đúng một mô tả khớp và technologies_to_learn thiếu từ khóa kỳ vọng. Báo cáo không giữ mô tả đầy đủ, nên chưa kết luận được AICORE bị bỏ, viết sai hay nhắc trùng. Đây là kết quả lịch sử, không phải lượt live sau refactor. Kỳ vọng/báo cáo và tài liệu cá nhân nằm ngoài repository.

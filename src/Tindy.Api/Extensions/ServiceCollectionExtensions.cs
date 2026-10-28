@@ -250,6 +250,14 @@ public static class ServiceCollectionExtensions
 
         // Certificate CRUD service (STEP 09).
         services.AddScoped<ICertificateService, CertificateService>();
+        services.AddScoped<IAiListExtractionService, AiListExtractionService>();
+        services.AddScoped<IAiProfileService, AiProfileService>();
+
+        // Project management service (Group B).
+        services.AddScoped<IProjectService, ProjectService>();
+
+        // Project positions & skills service (Group C).
+        services.AddScoped<IProjectPositionService, ProjectPositionService>();
 
         // Project management service (Group B).
         services.AddScoped<IProjectService, ProjectService>();
@@ -285,8 +293,10 @@ public static class ServiceCollectionExtensions
                 partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = 20, Window = TimeSpan.FromMinutes(1),
-                    QueueLimit = 0, AutoReplenishment = true
+                    PermitLimit = 20,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
                 }));
 
             // OAuth ticket exchange: rate-limit invalid/replayed ticket attempts.
@@ -294,8 +304,20 @@ public static class ServiceCollectionExtensions
                 partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = 10, Window = TimeSpan.FromMinutes(1),
-                    QueueLimit = 0, AutoReplenishment = true
+                    PermitLimit = 10,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+
+            options.AddPolicy("ai-extract-profile", context => RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: context.User.FindFirst("sub")?.Value ?? "anonymous",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 5,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
                 }));
 
             // STEP 03: limits are per authenticated user. Single-instance in-memory limits;
@@ -345,24 +367,51 @@ public static class ServiceCollectionExtensions
             // ===================================
             // 2. CUSTOM 429 ERROR RESPONSE
             // ===================================
+
             options.OnRejected = async (context, cancellationToken) =>
             {
                 var httpContext = context.HttpContext;
+
+                // ===================================
+                // RATE LIMITING REQUEST CLASSIFICATION
+                // ===================================
+
+                // Check whether the request targets AI extraction.
+                var isAiExtraction = httpContext.GetEndpoint()?
+                    .Metadata.GetMetadata<EnableRateLimitingAttribute>()?
+                    .PolicyName == "ai-extract-profile";
+
+                // Check whether the request targets media endpoints.
+                var isMediaRequest =
+                    httpContext.Request.Path.StartsWithSegments("/api/media") ||
+                    httpContext.Request.Path.StartsWithSegments("/api/me/profile");
+
 
                 var problem = new ProblemDetails
                 {
                     Status = StatusCodes.Status429TooManyRequests,
                     Title = "Too Many Requests",
-                    Detail = "Too many requests. Please try again later.",
+                    Detail = isAiExtraction
+                        ? "Too many extraction requests. Please try again later."
+                        : isMediaRequest
+                            ? "Too many media requests. Please try again later."
+                            : "Too many requests. Please try again later.",
                     Instance = httpContext.Request.Path.ToString()
                 };
 
-                problem.Extensions["error_code"] =
-                    httpContext.Request.Path.StartsWithSegments("/api/media") || httpContext.Request.Path.StartsWithSegments("/api/me/profile")
-                        ? "MEDIA_RATE_LIMITED" : "AUTH_TOO_MANY_ATTEMPTS";
+                // Assign an error code based on the request category.
+                problem.Extensions["error_code"] = isAiExtraction
+                    ? "AI_RATE_LIMITED"
+                    : isMediaRequest
+                        ? "MEDIA_RATE_LIMITED"
+                        : "AUTH_TOO_MANY_ATTEMPTS";
 
                 problem.Extensions["traceId"] =
                     httpContext.TraceIdentifier;
+
+                // ===================================
+                // WRITE HTTP RESPONSE
+                // ===================================
 
                 httpContext.Response.StatusCode =
                     StatusCodes.Status429TooManyRequests;
@@ -370,14 +419,16 @@ public static class ServiceCollectionExtensions
                 httpContext.Response.ContentType =
                     "application/problem+json";
 
-                await httpContext.Response.WriteAsync(JsonSerializer.Serialize(problem), cancellationToken);
-            };
-        });
+                await httpContext.Response.WriteAsync(
+                    JsonSerializer.Serialize(problem),
+                    cancellationToken);
+                };
+            });
 
 
 
-        return services;
-    }
+            return services;
+        }
 
     // ===================================
     // 7. AUTH ERROR RESPONSE HELPER

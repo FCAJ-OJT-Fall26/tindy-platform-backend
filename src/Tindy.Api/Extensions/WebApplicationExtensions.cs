@@ -36,6 +36,7 @@ public static class WebApplicationExtensions
         // 4. CORS
         // ===================================
         app.UseCors("TindyFrontend");
+        app.UseMiddleware<Tindy.Api.Middleware.AiExtractionDeadlineMiddleware>();
 
         // ===================================
         // 5. AUTHENTICATION (must precede user-partitioned rate limits)
@@ -48,9 +49,12 @@ public static class WebApplicationExtensions
         app.UseRateLimiter();
 
         // ===================================
-        // 7. AUTHORIZATION
+        // 6. AUTHORIZATION
         // ===================================
         app.UseAuthorization();
+
+        // Resolve the authenticated, active account before per-user quotas.
+        app.UseRateLimiter();
 
         // ===================================
         // 5. DEVELOPMENT AUTH TEST

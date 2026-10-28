@@ -9,6 +9,9 @@ using Tindy.Application.Interfaces.Repositories;
 using Tindy.Infrastructure.Repositories;
 using Tindy.Infrastructure.Storage;
 using Tindy.Infrastructure.Media;
+using Tindy.Infrastructure.Ai;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Tindy.Infrastructure.Extensions;
 
@@ -85,6 +88,43 @@ public static class ServicesCollectionExtensions
         // ===================================
         services.AddScoped<IJwtTokenService, JwtTokenService>();
 
+        services.Configure<BedrockOptions>(configuration.GetSection("Bedrock"));
+        services.AddSingleton<BedrockProfileExtractionProvider>(provider =>
+            new BedrockProfileExtractionProvider(
+                new HttpClient(new SocketsHttpHandler
+                {
+                    AllowAutoRedirect = false,
+                    PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+                })
+                { Timeout = Timeout.InfiniteTimeSpan },
+                provider.GetRequiredService<IOptions<BedrockOptions>>(),
+                provider.GetRequiredService<ILogger<BedrockProfileExtractionProvider>>()));
+
+        services.AddSingleton<IAiExtractionBatchProvider>(provider => provider.GetRequiredService<BedrockProfileExtractionProvider>());
+        services.AddSingleton<IAiListExtractionProvider>(provider => provider.GetRequiredService<BedrockProfileExtractionProvider>());
+        // ===================================
+        // AI PROFILE EXTRACTION (AWS BEDROCK)
+        // ===================================
+
+        services.Configure<BedrockOptions>(configuration.GetSection("Bedrock"));
+        services.AddSingleton<BedrockProfileExtractionProvider>(provider =>
+            new BedrockProfileExtractionProvider(
+                new HttpClient(new SocketsHttpHandler
+                {
+                    AllowAutoRedirect = false,
+                    PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+                })
+                { Timeout = Timeout.InfiniteTimeSpan },
+                provider.GetRequiredService<IOptions<BedrockOptions>>(),
+                provider.GetRequiredService<ILogger<BedrockProfileExtractionProvider>>()));
+
+        services.AddSingleton<IAiExtractionBatchProvider>(provider => provider.GetRequiredService<BedrockProfileExtractionProvider>());
+        services.AddSingleton<IAiListExtractionProvider>(provider => provider.GetRequiredService<BedrockProfileExtractionProvider>());
+
+        // ===================================
+        // MEDIA STORAGE & PROCESSING
+        // ===================================
+        
         // STEP 02: storage is resolved only when a media feature requests it.
         services.AddMediaStorage(configuration);
         services.AddMediaProcessing(configuration);
