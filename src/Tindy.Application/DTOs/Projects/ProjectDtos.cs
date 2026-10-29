@@ -9,7 +9,8 @@ public sealed record CreateProjectPositionRequest(
     string Title,
     int RequiredCount,
     string ExperienceLevel,
-    IReadOnlyList<CreateProjectPositionSkillRequest> Skills);
+    IReadOnlyList<CreateProjectPositionSkillRequest> Skills,
+    string? Description = null);
 
 public sealed record CreateProjectRequest(
     string Name,
@@ -29,7 +30,6 @@ public sealed record CreateProjectRequest(
 public sealed record ProjectLeaderSummaryDto(
     Guid UserId,
     string DisplayName,
-    string? Email,
     string? AvatarUrl,
     string? Initials);
 
