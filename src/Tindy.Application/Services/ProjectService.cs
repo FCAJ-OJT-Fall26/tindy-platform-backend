@@ -56,7 +56,7 @@ public sealed class ProjectService : IProjectService
             DifficultyLevel = string.IsNullOrWhiteSpace(request.DifficultyLevel) ? "intermediate" : request.DifficultyLevel.Trim().ToLowerInvariant(),
             ExpectedCommitmentHours = request.ExpectedCommitmentHours,
             Duration = string.IsNullOrWhiteSpace(request.Duration) ? "3 months" : request.Duration.Trim(),
-            InitialTeamSize = Math.Max(1, request.InitialTeamSize),
+            InitialTeamSize = 1,
             MaxTeamCapacity = request.MaxTeamCapacity,
             ColorTheme = string.IsNullOrWhiteSpace(request.ColorTheme) ? "indigo" : request.ColorTheme.Trim(),
             Status = "recruiting",
@@ -85,7 +85,8 @@ public sealed class ProjectService : IProjectService
                 ProjectId = projectId,
                 RoleId = pos.RoleId,
                 Title = pos.Title.Trim(),
-                RequiredCount = Math.Max(1, pos.RequiredCount),
+                Description = pos.Description?.Trim(),
+                RequiredCount = pos.RequiredCount,
                 FilledCount = 0,
                 ExperienceLevel = string.IsNullOrWhiteSpace(pos.ExperienceLevel) ? "intermediate" : pos.ExperienceLevel.Trim().ToLowerInvariant(),
                 Status = "open",
@@ -125,7 +126,6 @@ public sealed class ProjectService : IProjectService
             new ProjectLeaderSummaryDto(
                 created.LeaderId,
                 leaderDisplayName,
-                created.Leader?.PrimaryEmail,
                 leaderAvatar,
                 GetInitials(leaderDisplayName)),
             created.Members.Count(m => m.Status == "active"),
@@ -173,7 +173,6 @@ public sealed class ProjectService : IProjectService
                 new ProjectLeaderSummaryDto(
                     p.LeaderId,
                     leaderDisplayName,
-                    p.Leader?.PrimaryEmail,
                     leaderAvatar,
                     GetInitials(leaderDisplayName)),
                 openPositions,
@@ -232,6 +231,11 @@ public sealed class ProjectService : IProjectService
         if (request.MaxTeamCapacity < currentTeamSize)
         {
             throw new ProjectException(400, "PROJECT_CAPACITY_EXCEEDED", $"Max team capacity ({request.MaxTeamCapacity}) cannot be less than current team size ({currentTeamSize}).");
+        }
+
+        if (request.MaxTeamCapacity < Math.Max(1, project.InitialTeamSize))
+        {
+            throw new ProjectException(400, "PROJECT_CAPACITY_EXCEEDED", "Max team capacity must be at least 1 and cannot be less than the project's initial team size.");
         }
 
         project.Name = request.Name.Trim();
@@ -364,7 +368,6 @@ public sealed class ProjectService : IProjectService
             new ProjectLeaderSummaryDto(
                 project.LeaderId,
                 leaderDisplayName,
-                project.Leader?.PrimaryEmail,
                 leaderAvatar,
                 GetInitials(leaderDisplayName)),
             project.Goals,
@@ -394,9 +397,14 @@ public sealed class ProjectService : IProjectService
             throw new ProjectException(400, "VALIDATION_FAILED", "Expected commitment hours must be between 1 and 40.");
         }
 
-        if (request.MaxTeamCapacity < request.InitialTeamSize)
+        if (request.InitialTeamSize != 1)
         {
-            throw new ProjectException(400, "VALIDATION_FAILED", "Max team capacity must be greater than or equal to initial team size.");
+            throw new ProjectException(400, "VALIDATION_FAILED", "Initial team size must be 1. A new project starts with only its leader.");
+        }
+
+        if (request.MaxTeamCapacity < 1)
+        {
+            throw new ProjectException(400, "VALIDATION_FAILED", "Max team capacity must be at least 1.");
         }
 
         if (request.Positions == null || request.Positions.Count == 0)
@@ -406,13 +414,26 @@ public sealed class ProjectService : IProjectService
 
         foreach (var pos in request.Positions)
         {
-            if (string.IsNullOrWhiteSpace(pos.Title))
+            if (pos is null || string.IsNullOrWhiteSpace(pos.Title) || pos.Title.Trim().Length < 2 || pos.Title.Trim().Length > 100)
             {
-                throw new ProjectException(400, "VALIDATION_FAILED", "Position title is required.");
+                throw new ProjectException(400, "VALIDATION_FAILED", "Position title must be between 2 and 100 characters.");
             }
             if (pos.RequiredCount < 1)
             {
                 throw new ProjectException(400, "VALIDATION_FAILED", "Position required count must be at least 1.");
+            }
+
+            if (pos.Skills != null)
+            {
+                if (pos.Skills.Any(skill => skill is null))
+                {
+                    throw new ProjectException(400, "VALIDATION_FAILED", "Position skills must not contain null entries.");
+                }
+
+                if (pos.Skills.Select(skill => skill.SkillId).Distinct().Count() != pos.Skills.Count)
+                {
+                    throw new ProjectException(400, "VALIDATION_FAILED", "Position skill IDs must be unique within each position.");
+                }
             }
         }
     }

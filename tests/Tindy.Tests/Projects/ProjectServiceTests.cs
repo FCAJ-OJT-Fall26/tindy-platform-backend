@@ -15,7 +15,7 @@ public sealed class ProjectServiceTests
     private static readonly Guid SkillId1 = Guid.Parse("44444444-4444-4444-8444-444444444444");
     private static readonly Guid SkillId2 = Guid.Parse("55555555-5555-4555-8555-555555555555");
 
-    private static CreateProjectRequest CreateValidRequest() => new(
+    internal static CreateProjectRequest CreateValidRequest() => new(
         Name: "AI Support System",
         Tagline: "Smart answers",
         Description: "This is a detailed description of the AI support system with RAG platform.",
@@ -76,11 +76,11 @@ public sealed class ProjectServiceTests
     }
 
     [Fact]
-    public async Task CreateProject_Throws_WhenMaxCapacityLessThanInitial()
+    public async Task CreateProject_Throws_WhenMaxCapacityLessThanOne()
     {
         var repo = new FakeProjectRepository();
         var service = new ProjectService(repo);
-        var req = CreateValidRequest() with { InitialTeamSize = 3, MaxTeamCapacity = 2 };
+        var req = CreateValidRequest() with { MaxTeamCapacity = 0 };
 
         var ex = await Assert.ThrowsAsync<ProjectException>(() => service.CreateProjectAsync(LeaderId, req));
         Assert.Equal("VALIDATION_FAILED", ex.ErrorCode);
@@ -135,8 +135,127 @@ public sealed class ProjectServiceTests
         Assert.Equal(1, result.PositionsCount);
         Assert.Single(repo.Projects);
         var created = repo.Projects[0];
-        Assert.Single(created.Members);
-        Assert.True(created.Members.First().IsLeader);
+        Assert.Equal(1, created.InitialTeamSize);
+        var leader = Assert.Single(created.Members);
+        Assert.True(leader.IsLeader);
+        Assert.Equal(LeaderId, leader.UserId);
+        Assert.Equal(created.ProjectId, leader.ProjectId);
+        Assert.Equal("active", leader.Status);
+        Assert.Equal(1, (await service.GetProjectByIdAsync(created.ProjectId)).CurrentTeamSize);
+    }
+
+    [Theory]
+    [InlineData("  Develop REST APIs using .NET  ", "Develop REST APIs using .NET")]
+    [InlineData(null, null)]
+    [InlineData("   ", "")]
+    public async Task CreateProject_PreservesOptionalPositionDescription(string? description, string? expected)
+    {
+        var repo = new FakeProjectRepository();
+        var service = new ProjectService(repo);
+        var request = CreateValidRequest();
+        var position = request.Positions[0] with { Description = description };
+
+        var created = await service.CreateProjectAsync(LeaderId, request with { Positions = new[] { position } });
+
+        Assert.Equal(expected, Assert.Single(Assert.Single(repo.Projects).Positions).Description);
+        var detail = await service.GetProjectByIdAsync(created.ProjectId);
+        Assert.Equal(expected, Assert.Single(detail.Positions).Description);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(2)]
+    [InlineData(5)]
+    public async Task CreateProject_RejectsInitialTeamSizeOtherThanOne(int initialTeamSize)
+    {
+        var repo = new FakeProjectRepository();
+        var service = new ProjectService(repo);
+
+        var ex = await Assert.ThrowsAsync<ProjectException>(() => service.CreateProjectAsync(LeaderId,
+            CreateValidRequest() with { InitialTeamSize = initialTeamSize }));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal("VALIDATION_FAILED", ex.ErrorCode);
+        Assert.Contains("Initial team size must be 1", ex.Message);
+        Assert.Empty(repo.Projects);
+    }
+
+    [Theory]
+    [InlineData(" ")]
+    [InlineData("A")]
+    [InlineData(101)]
+    public async Task CreateProject_RejectsInvalidPositionTitle(object title)
+    {
+        var repo = new FakeProjectRepository();
+        var service = new ProjectService(repo);
+        var request = CreateValidRequest();
+        var position = request.Positions[0] with { Title = title is int length ? new string('A', length) : (string)title };
+
+        var ex = await Assert.ThrowsAsync<ProjectException>(() => service.CreateProjectAsync(LeaderId,
+            request with { Positions = new[] { position } }));
+
+        Assert.Equal("VALIDATION_FAILED", ex.ErrorCode);
+        Assert.Empty(repo.Projects);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task CreateProject_RejectsInvalidPositionRequiredCount(int requiredCount)
+    {
+        var repo = new FakeProjectRepository();
+        var service = new ProjectService(repo);
+        var request = CreateValidRequest();
+
+        var ex = await Assert.ThrowsAsync<ProjectException>(() => service.CreateProjectAsync(LeaderId,
+            request with { Positions = new[] { request.Positions[0] with { RequiredCount = requiredCount } } }));
+
+        Assert.Equal("VALIDATION_FAILED", ex.ErrorCode);
+        Assert.Empty(repo.Projects);
+    }
+
+    [Fact]
+    public async Task CreateProject_RejectsDuplicateSkillIds_BeforePersisting()
+    {
+        var repo = new FakeProjectRepository();
+        var service = new ProjectService(repo);
+        var request = CreateValidRequest();
+        var position = request.Positions[0] with
+        {
+            Skills = new[] { new CreateProjectPositionSkillRequest(SkillId1, true), new CreateProjectPositionSkillRequest(SkillId1, false) }
+        };
+
+        var ex = await Assert.ThrowsAsync<ProjectException>(() => service.CreateProjectAsync(LeaderId,
+            request with { Positions = new[] { position } }));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal("VALIDATION_FAILED", ex.ErrorCode);
+        Assert.Contains("unique", ex.Message);
+        Assert.Empty(repo.Projects);
+    }
+
+    [Fact]
+    public async Task CurrentTeamSize_UsesActiveMembers_InsteadOfHistoricalInitialTeamSize()
+    {
+        var repo = new FakeProjectRepository();
+        var service = new ProjectService(repo);
+        var created = await service.CreateProjectAsync(LeaderId, CreateValidRequest());
+        var project = Assert.Single(repo.Projects);
+        project.InitialTeamSize = 3;
+        project.Members.Add(new ProjectMember { UserId = StrangerId, Status = "left" });
+
+        Assert.Equal(1, (await service.GetProjectByIdAsync(created.ProjectId)).CurrentTeamSize);
+        Assert.Equal(1, Assert.Single((await service.GetProjectsAsync(new())).Items).CurrentTeamSize);
+        Assert.Equal(1, Assert.Single((await service.GetMyProjectsAsync(LeaderId)).LeadingProjects).CurrentTeamSize);
+        Assert.Equal(3, project.InitialTeamSize);
+    }
+
+    [Fact]
+    public void ProjectLeaderDto_HasOnlyPublicFields()
+    {
+        var properties = typeof(ProjectLeaderSummaryDto).GetProperties().Select(p => p.Name).OrderBy(name => name);
+        Assert.Equal(new[] { "AvatarUrl", "DisplayName", "Initials", "UserId" }, properties);
     }
 
     [Fact]
@@ -232,9 +351,72 @@ public sealed class ProjectServiceTests
         var project = repo.Projects.First(p => p.ProjectId == created.ProjectId);
         Assert.Equal("archived", project.Status);
         Assert.NotNull(project.ArchivedAt);
+        Assert.All(project.Positions, position => Assert.Equal("closed", position.Status));
+        Assert.Single(repo.Projects);
     }
 
-    private sealed class FakeProjectRepository : IProjectRepository
+    [Fact]
+    public async Task DeleteProject_RejectsStranger_WithoutArchivingOrClosingPositions()
+    {
+        var repo = new FakeProjectRepository();
+        var service = new ProjectService(repo);
+        var created = await service.CreateProjectAsync(LeaderId, CreateValidRequest());
+
+        var ex = await Assert.ThrowsAsync<ProjectException>(() => service.DeleteProjectAsync(StrangerId, created.ProjectId));
+
+        Assert.Equal(403, ex.StatusCode);
+        Assert.Equal("PROJECT_ACCESS_DENIED", ex.ErrorCode);
+        var project = Assert.Single(repo.Projects);
+        Assert.Equal("recruiting", project.Status);
+        Assert.Null(project.ArchivedAt);
+        Assert.All(project.Positions, position => Assert.Equal("open", position.Status));
+    }
+
+    [Fact]
+    public async Task ArchivedProject_CannotBeReadUpdatedOrArchivedAgain()
+    {
+        var repo = new FakeProjectRepository();
+        var service = new ProjectService(repo);
+        var created = await service.CreateProjectAsync(LeaderId, CreateValidRequest());
+        await service.DeleteProjectAsync(LeaderId, created.ProjectId);
+        var project = Assert.Single(repo.Projects);
+        var archivedAt = project.ArchivedAt;
+        var request = new UpdateProjectRequest("Changed Name", null, new string('D', 20), "Web", "intermediate", 10, "3 months", 5, null, []);
+
+        foreach (var operation in new Func<Task>[]
+        {
+            () => service.GetProjectByIdAsync(created.ProjectId),
+            () => service.UpdateProjectAsync(LeaderId, created.ProjectId, request),
+            () => service.DeleteProjectAsync(LeaderId, created.ProjectId)
+        })
+        {
+            var ex = await Assert.ThrowsAsync<ProjectException>(operation);
+            Assert.Equal(404, ex.StatusCode);
+            Assert.Equal("PROJECT_NOT_FOUND", ex.ErrorCode);
+        }
+
+        Assert.Equal("AI Support System", project.Name);
+        Assert.Equal(archivedAt, project.ArchivedAt);
+    }
+
+    [Fact]
+    public async Task UpdateProject_RespectsHistoricalInitialCapacityConstraint()
+    {
+        var repo = new FakeProjectRepository();
+        var service = new ProjectService(repo);
+        var created = await service.CreateProjectAsync(LeaderId, CreateValidRequest());
+        var project = Assert.Single(repo.Projects);
+        project.InitialTeamSize = 3;
+        var request = new UpdateProjectRequest("Changed Name", null, new string('D', 20), "Web", "intermediate", 10, "3 months", 2, null, []);
+
+        var ex = await Assert.ThrowsAsync<ProjectException>(() => service.UpdateProjectAsync(LeaderId, created.ProjectId, request));
+
+        Assert.Equal("PROJECT_CAPACITY_EXCEEDED", ex.ErrorCode);
+        Assert.Equal(3, project.InitialTeamSize);
+        Assert.Equal(5, project.MaxTeamCapacity);
+    }
+
+    internal sealed class FakeProjectRepository : IProjectRepository
     {
         public List<Project> Projects { get; } = new();
         public Guid ValidRoleId { get; set; } = RoleId;
@@ -254,6 +436,7 @@ public sealed class ProjectServiceTests
                 {
                     UserId = p.LeaderId,
                     Username = "leader_user",
+                    PrimaryEmail = "private-leader@example.com",
                     Profile = new UserProfile
                     {
                         UserId = p.LeaderId,
@@ -261,6 +444,17 @@ public sealed class ProjectServiceTests
                         AvatarUrl = "https://example.com/avatar.png"
                     }
                 };
+            }
+            if (p != null)
+            {
+                foreach (var position in p.Positions)
+                {
+                    position.Role = new ProfessionalRole { ProfessionalRoleId = position.RoleId, Name = "Backend Developer", IsActive = true };
+                    foreach (var link in position.PositionSkills)
+                    {
+                        link.Skill = new Skill { SkillId = link.SkillId, Name = "Skill " + link.SkillId.ToString()[..4], IsActive = true };
+                    }
+                }
             }
             return Task.FromResult(p);
         }
