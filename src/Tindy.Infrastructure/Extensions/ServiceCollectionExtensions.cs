@@ -12,6 +12,7 @@ using Tindy.Infrastructure.Media;
 using Tindy.Infrastructure.Ai;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Hosting;
 
 namespace Tindy.Infrastructure.Extensions;
 
@@ -23,8 +24,10 @@ public static class ServicesCollectionExtensions
             ?? throw new InvalidOperationException("Connection string 'DefaultConnection' was not found.");
 
 
-        services.AddDbContext<TindyDbContext>(options =>
+        services.AddDbContext<TindyDbContext>((provider, options) =>
         {
+            var developmentSeed = DevelopmentSeedOptions.FromConfiguration(configuration,
+                provider.GetRequiredService<IHostEnvironment>().EnvironmentName);
             // PostgreSQL
             options.UseNpgsql(connectionString);
 
@@ -33,7 +36,7 @@ public static class ServicesCollectionExtensions
             // ===================================
             options.UseSeeding((context, _) =>
             {
-                TindySeedRunner.Seed(context);
+                TindySeedRunner.Seed(context, developmentSeed);
             });
 
             // ===================================
@@ -41,7 +44,7 @@ public static class ServicesCollectionExtensions
             // ===================================
             options.UseAsyncSeeding(async (context, _, cancellationToken) =>
             {
-                await TindySeedRunner.SeedAsync(context, cancellationToken);
+                await TindySeedRunner.SeedAsync(context, cancellationToken, developmentSeed);
             });
         });
 

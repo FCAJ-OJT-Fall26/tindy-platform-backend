@@ -54,3 +54,6 @@ pnpm-debug.log*
 playwright-report/
 test-results/
 coverage/
+
+# Local seed verification artifacts and temporary demo account credentials.
+/.tmp-development-seed/

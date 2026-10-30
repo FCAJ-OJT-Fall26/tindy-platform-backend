@@ -1,4 +1,6 @@
-# DATABASE_SEED — Tindy Backend (Catalog V1)
+# DATABASE_SEED — Tindy Backend (Catalog + Development Demo Data)
+
+> **Cập nhật 2026-10-30:** Catalog đã được mở rộng lên **84 skills / 10 categories / 102 liên kết** (11 professional roles). Có thêm bộ seed Development opt-in **20 users / 50 Projects**, chi tiết và lệnh chạy trong [DEVELOPMENT_DEMO_SEED.md](./DEVELOPMENT_DEMO_SEED.md). Mặc định vẫn chỉ seed Catalog; không tự tạo tài khoản demo trên Production.
 
 > **Phiên bản cập nhật:** Đối chiếu `tindy-backend-platform(20261015-022026).zip`, .NET 10, EF Core 10, PostgreSQL, PowerShell 7.  
 > **Mục tiêu:** Mỗi thành viên team có cùng **System Catalog** sau khi chạy migration + seeding; không tạo kỹ năng tự do từ Onboarding.
@@ -19,11 +21,11 @@
 |---|---|---:|
 | `roles` | `Member` cho RBAC | 1 role mặc định (có thể có thêm role khác ngoài Seeder) |
 | `professional_roles` | Backend Developer, Frontend Developer, AI Engineer, ... | 11 |
-| `skill_categories` | Backend, Frontend, Mobile, Cloud & DevOps, AI, Database, UI/UX | 7 |
-| `skills` | C#, .NET, Java, Docker, AWS, PostgreSQL, React, ... | 49 |
-| `skill_category_skills` | Quan hệ Category ↔ Skill (N:N) | 54 |
+| `skill_categories` | Các nhóm hiện có + Software Testing, Product & Business Analysis, Data Engineering | 10 |
+| `skills` | Các skills hiện có + SQL, EF Core, test tools, data pipelines, messaging, observability, ... | 84 |
+| `skill_category_skills` | Quan hệ Category ↔ Skill (N:N) | 102 |
 
-Đây là **số lượng trong bộ seed**; tổng bản ghi thực tế có thể lớn hơn khi database đã chứa dữ liệu từ trước. `permissions` và `role_permissions` **chưa có Seeder trong bản source được kiểm tra**. Không mặc định seed `users`, `user_profiles`, `user_credentials`, `user_skills`, OAuth identities hoặc Profile Bio.
+Đây là **số lượng trong bộ seed**; tổng bản ghi thực tế có thể lớn hơn khi database đã chứa dữ liệu từ trước. `permissions` và `role_permissions` **chưa có Seeder trong bản source được kiểm tra**. Không mặc định seed User data hoặc OAuth identities. User/Profile/Experience/Certificate/Project demo chỉ được thêm khi bật `DevelopmentSeed:Enabled` với mật khẩu riêng trong môi trường Development.
 
 ## 3. Vị trí source và thứ tự chạy
 
@@ -103,7 +105,7 @@ UNION ALL SELECT 'skills', COUNT(*) FROM skills
 UNION ALL SELECT 'skill_category_skills', COUNT(*) FROM skill_category_skills;
 ```
 
-Với database chưa có Catalog trước đó, kết quả mặc định dự kiến là **11 / 7 / 49 / 54**. Kiểm tra danh sách:
+Với database chưa có Catalog trước đó, kết quả mặc định dự kiến là **11 / 10 / 84 / 102**. Kiểm tra danh sách:
 
 ```sql
 SELECT professional_role_id, name, is_active
