@@ -15,7 +15,7 @@ public class Project
     public int MaxTeamCapacity { get; set; } = 5;
     public string? ColorTheme { get; set; } = "indigo";
     public string Status { get; set; } = "recruiting"; // draft, recruiting, in_progress, completed, archived
-    public int RecruitmentClosingDays { get; set; } = 14;
+    public DateTime RecruitmentClosesAt { get; set; }
     public List<string> Goals { get; set; } = new();
 
     public DateTime CreatedAt { get; set; }
@@ -25,4 +25,6 @@ public class Project
     public User Leader { get; set; } = null!;
     public ICollection<ProjectMember> Members { get; set; } = new List<ProjectMember>();
     public ICollection<ProjectPosition> Positions { get; set; } = new List<ProjectPosition>();
+    public ICollection<DiscoveryProjectInteraction> DiscoveryInteractions { get; set; } = new List<DiscoveryProjectInteraction>();
+    public ICollection<ProjectApplication> Applications { get; set; } = new List<ProjectApplication>();
 }

@@ -13,6 +13,7 @@ public sealed class ProjectMemberConfiguration : IEntityTypeConfiguration<Projec
         builder.HasKey(x => new { x.ProjectId, x.UserId });
         builder.Property(x => x.ProjectId).HasColumnName("project_id");
         builder.Property(x => x.UserId).HasColumnName("user_id");
+        builder.Property(x => x.PositionId).HasColumnName("position_id");
         builder.Property(x => x.RoleTitle).HasColumnName("role_title").HasMaxLength(100).IsRequired();
         builder.Property(x => x.IsLeader).HasColumnName("is_leader").HasDefaultValue(false).IsRequired();
         builder.Property(x => x.JoinedAt).HasColumnName("joined_at").HasColumnType("timestamp with time zone").IsRequired();
@@ -25,5 +26,7 @@ public sealed class ProjectMemberConfiguration : IEntityTypeConfiguration<Projec
             .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
 
         builder.HasIndex(x => x.UserId).HasDatabaseName("ix_project_members_user_id");
+        builder.HasOne(x => x.Position).WithMany().HasForeignKey(x => new { x.PositionId, x.ProjectId })
+            .HasPrincipalKey(p => new { p.PositionId, p.ProjectId }).OnDelete(DeleteBehavior.Restrict);
     }
 }

@@ -96,6 +96,7 @@ public sealed class ProjectPositionServiceTests
         var result = await service.CreatePositionAsync(LeaderId, project.ProjectId, req);
 
         Assert.Equal("Frontend Developer", result.Title);
+        Assert.Equal("React UI development", result.Description);
         Assert.Equal(1, result.RequiredCount);
         Assert.Equal("open", result.Status);
         Assert.Equal(2, project.Positions.Count);
@@ -249,6 +250,108 @@ public sealed class ProjectPositionServiceTests
         await service.RemovePositionSkillAsync(LeaderId, project.ProjectId, position.PositionId, SkillId1);
 
         Assert.Empty(position.PositionSkills);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PositionMutations_RejectStrangersAndArchivedProjects(bool archived)
+    {
+        var (project, position) = CreateTestProject();
+        position.PositionSkills.Add(new ProjectPositionSkill { PositionId = position.PositionId, SkillId = SkillId1, IsRequired = true });
+        if (archived) project.Status = "archived";
+        var service = new ProjectPositionService(new FakeRepo(project));
+        var callerId = archived ? LeaderId : StrangerId;
+
+        foreach (var operation in new Func<Task>[]
+        {
+            () => service.CreatePositionAsync(callerId, project.ProjectId, new CreatePositionRequest(RoleId, "New Position")),
+            () => service.UpdatePositionAsync(callerId, project.ProjectId, position.PositionId, new UpdatePositionRequest("Changed Title", null, null, null, null)),
+            () => service.DeletePositionAsync(callerId, project.ProjectId, position.PositionId),
+            () => service.AddPositionSkillAsync(callerId, project.ProjectId, position.PositionId, new AddPositionSkillRequest(SkillId2)),
+            () => service.RemovePositionSkillAsync(callerId, project.ProjectId, position.PositionId, SkillId1)
+        })
+        {
+            var ex = await Assert.ThrowsAsync<ProjectException>(operation);
+            Assert.Equal(archived ? 404 : 403, ex.StatusCode);
+            Assert.Equal(archived ? "PROJECT_NOT_FOUND" : "FORBIDDEN", ex.ErrorCode);
+        }
+
+        Assert.Same(position, Assert.Single(project.Positions));
+        Assert.Equal("Backend Developer", position.Title);
+        Assert.Equal(SkillId1, Assert.Single(position.PositionSkills).SkillId);
+    }
+
+    [Fact]
+    public async Task AddPositionSkill_UpdatesExistingLink_WithoutDuplicatingIt()
+    {
+        var (project, position) = CreateTestProject();
+        var service = new ProjectPositionService(new FakeRepo(project));
+        await service.AddPositionSkillAsync(LeaderId, project.ProjectId, position.PositionId, new AddPositionSkillRequest(SkillId1));
+
+        var result = await service.AddPositionSkillAsync(LeaderId, project.ProjectId, position.PositionId,
+            new AddPositionSkillRequest(SkillId1, false, "advanced"));
+
+        var link = Assert.Single(position.PositionSkills);
+        Assert.False(result.IsRequired);
+        Assert.False(link.IsRequired);
+        Assert.Equal("advanced", link.MinimumExperienceLevel);
+    }
+
+    [Theory]
+    [InlineData("create", 1)]
+    [InlineData("create", 101)]
+    [InlineData("update", 1)]
+    [InlineData("update", 101)]
+    public async Task PositionTitle_RespectsLengthConstraints(string operation, int length)
+    {
+        var (project, position) = CreateTestProject();
+        var service = new ProjectPositionService(new FakeRepo(project));
+        var title = new string('A', length);
+
+        var ex = await Assert.ThrowsAsync<ProjectException>(() => operation == "create"
+            ? service.CreatePositionAsync(LeaderId, project.ProjectId, new CreatePositionRequest(RoleId, title))
+            : service.UpdatePositionAsync(LeaderId, project.ProjectId, position.PositionId, new UpdatePositionRequest(title, null, null, null, null)));
+
+        Assert.Equal("VALIDATION_FAILED", ex.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task PositionRequiredCount_MustBePositive(int requiredCount)
+    {
+        var (project, position) = CreateTestProject();
+        var service = new ProjectPositionService(new FakeRepo(project));
+
+        var createError = await Assert.ThrowsAsync<ProjectException>(() => service.CreatePositionAsync(LeaderId,
+            project.ProjectId, new CreatePositionRequest(RoleId, "New Position", requiredCount)));
+        var updateError = await Assert.ThrowsAsync<ProjectException>(() => service.UpdatePositionAsync(LeaderId,
+            project.ProjectId, position.PositionId, new UpdatePositionRequest(null, requiredCount, null, null, null)));
+
+        Assert.Equal("VALIDATION_FAILED", createError.ErrorCode);
+        Assert.Equal("VALIDATION_FAILED", updateError.ErrorCode);
+    }
+
+    [Fact]
+    public async Task PositionFromAnotherProject_CannotBeChangedThroughThisProject()
+    {
+        var (project, _) = CreateTestProject();
+        var service = new ProjectPositionService(new FakeRepo(project));
+        var unrelatedPositionId = Guid.NewGuid();
+
+        foreach (var operation in new Func<Task>[]
+        {
+            () => service.UpdatePositionAsync(LeaderId, project.ProjectId, unrelatedPositionId, new UpdatePositionRequest("Changed", null, null, null, null)),
+            () => service.DeletePositionAsync(LeaderId, project.ProjectId, unrelatedPositionId),
+            () => service.AddPositionSkillAsync(LeaderId, project.ProjectId, unrelatedPositionId, new AddPositionSkillRequest(SkillId1)),
+            () => service.RemovePositionSkillAsync(LeaderId, project.ProjectId, unrelatedPositionId, SkillId1)
+        })
+        {
+            var ex = await Assert.ThrowsAsync<ProjectException>(operation);
+            Assert.Equal(404, ex.StatusCode);
+            Assert.Equal("POSITION_NOT_FOUND", ex.ErrorCode);
+        }
     }
 
     private sealed class FakeRepo : IProjectRepository

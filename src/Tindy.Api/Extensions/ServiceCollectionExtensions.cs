@@ -266,6 +266,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAiListExtractionService, AiListExtractionService>();
         services.AddScoped<IAiProfileService, AiProfileService>();
 
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<DiscoveryFeedSessions>();
+        services.AddScoped<DiscoveryService>();
+        services.AddScoped<ProjectApplicationService>();
+
         // Project management service (Group B).
         services.AddScoped<IProjectService, ProjectService>();
 
@@ -291,6 +296,14 @@ public static class ServiceCollectionExtensions
             // HTTP Status Code
             options.RejectionStatusCode =
                 StatusCodes.Status429TooManyRequests;
+
+            // Ordinary per-user burst protection; no reject/withdraw cooldown.
+            options.AddPolicy("project-applications", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.User.FindFirst("sub")?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true
+                }));
 
             // ===================================
             // 1. LOGIN RATE LIMIT POLICY
@@ -419,7 +432,8 @@ public static class ServiceCollectionExtensions
                     ? "AI_RATE_LIMITED"
                     : isMediaRequest
                         ? "MEDIA_RATE_LIMITED"
-                        : "AUTH_TOO_MANY_ATTEMPTS";
+                        : httpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName == "project-applications"
+                            ? "APPLICATION_RATE_LIMITED" : "AUTH_TOO_MANY_ATTEMPTS";
 
                 problem.Extensions["traceId"] =
                     httpContext.TraceIdentifier;
