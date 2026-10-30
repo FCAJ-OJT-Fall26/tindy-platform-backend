@@ -80,6 +80,8 @@ public static class ServicesCollectionExtensions
         // Projects persistence (Group B)
         services.AddScoped<IProjectRepository, ProjectRepository>();
 
+        services.AddScoped<IChatRepository, ChatRepository>();
+
         // Lightweight read-only check for protected business APIs
         services.AddScoped<IOnboardingAccessReader, OnboardingAccessReader>();
 
