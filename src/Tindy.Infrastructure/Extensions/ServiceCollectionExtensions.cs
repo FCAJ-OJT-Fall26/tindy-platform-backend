@@ -79,6 +79,9 @@ public static class ServicesCollectionExtensions
 
         // Projects persistence (Group B)
         services.AddScoped<IProjectRepository, ProjectRepository>();
+        services.AddScoped<IDiscoveryRepository, DiscoveryRepository>();
+        services.AddScoped<IDiscoveryInteractionRepository, DiscoveryInteractionRepository>();
+        services.AddScoped<IProjectApplicationRepository, ProjectApplicationRepository>();
 
         // Lightweight read-only check for protected business APIs
         services.AddScoped<IOnboardingAccessReader, OnboardingAccessReader>();

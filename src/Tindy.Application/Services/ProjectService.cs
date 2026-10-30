@@ -9,10 +9,12 @@ namespace Tindy.Application.Services;
 public sealed class ProjectService : IProjectService
 {
     private readonly IProjectRepository _projectRepository;
+    private readonly TimeProvider _timeProvider;
 
-    public ProjectService(IProjectRepository projectRepository)
+    public ProjectService(IProjectRepository projectRepository, TimeProvider? timeProvider = null)
     {
         _projectRepository = projectRepository;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<CreateProjectResponse> CreateProjectAsync(
@@ -43,7 +45,8 @@ public sealed class ProjectService : IProjectService
         }
 
         var projectId = Guid.NewGuid();
-        var now = DateTime.UtcNow;
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        var cutoff = RecruitmentDeadline.CreateCutoff(request.RecruitmentClosingDate, now);
 
         var project = new Project
         {
@@ -60,7 +63,7 @@ public sealed class ProjectService : IProjectService
             MaxTeamCapacity = request.MaxTeamCapacity,
             ColorTheme = string.IsNullOrWhiteSpace(request.ColorTheme) ? "indigo" : request.ColorTheme.Trim(),
             Status = "recruiting",
-            RecruitmentClosingDays = request.RecruitmentClosingDays > 0 ? request.RecruitmentClosingDays : 14,
+            RecruitmentClosesAt = cutoff,
             Goals = request.Goals?.ToList() ?? new List<string>(),
             CreatedAt = now
         };
@@ -131,7 +134,11 @@ public sealed class ProjectService : IProjectService
             created.Members.Count(m => m.Status == "active"),
             created.MaxTeamCapacity,
             created.Positions.Count,
-            created.CreatedAt);
+            created.CreatedAt,
+            RecruitmentDeadline.ClosingDate(created.RecruitmentClosesAt),
+            created.RecruitmentClosesAt,
+            RecruitmentDeadline.IsOpen(created, now),
+            RecruitmentDeadline.DaysLeft(created.RecruitmentClosesAt, now));
     }
 
     public async Task<PagedProjectsResponse> GetProjectsAsync(
@@ -139,12 +146,13 @@ public sealed class ProjectService : IProjectService
         CancellationToken cancellationToken = default)
     {
         var (items, totalCount) = await _projectRepository.GetPagedProjectsAsync(query, cancellationToken);
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
 
         var list = items.Select(p =>
         {
             var leaderDisplayName = p.Leader?.Profile?.DisplayName ?? p.Leader?.Username ?? "Leader";
             var leaderAvatar = p.Leader?.Profile?.AvatarUrl;
-            var daysLeft = Math.Max(0, p.RecruitmentClosingDays - (int)(DateTime.UtcNow - p.CreatedAt).TotalDays);
+            var daysLeft = RecruitmentDeadline.DaysLeft(p.RecruitmentClosesAt, now);
 
             var openPositions = p.Positions
                 .Where(pos => pos.Status == "open")
@@ -177,7 +185,10 @@ public sealed class ProjectService : IProjectService
                     GetInitials(leaderDisplayName)),
                 openPositions,
                 p.CreatedAt,
-                daysLeft);
+                daysLeft,
+                RecruitmentDeadline.ClosingDate(p.RecruitmentClosesAt),
+                p.RecruitmentClosesAt,
+                RecruitmentDeadline.IsOpen(p, now));
         }).ToList();
 
         var page = Math.Max(1, query.Page);
@@ -238,6 +249,12 @@ public sealed class ProjectService : IProjectService
             throw new ProjectException(400, "PROJECT_CAPACITY_EXCEEDED", "Max team capacity must be at least 1 and cannot be less than the project's initial team size.");
         }
 
+        // Validate before changing the tracked entity. Omitting the date on edit
+        // preserves even a legacy midday cutoff exactly.
+        if (request.RecruitmentClosingDate.HasValue)
+            project.RecruitmentClosesAt = RecruitmentDeadline.CreateCutoff(
+                request.RecruitmentClosingDate, _timeProvider.GetUtcNow().UtcDateTime);
+
         project.Name = request.Name.Trim();
         project.Tagline = request.Tagline?.Trim();
         project.Description = request.Description.Trim();
@@ -274,7 +291,7 @@ public sealed class ProjectService : IProjectService
         }
 
         project.Status = "archived";
-        project.ArchivedAt = DateTime.UtcNow;
+        project.ArchivedAt = _timeProvider.GetUtcNow().UtcDateTime;
 
         foreach (var pos in project.Positions)
         {
@@ -297,7 +314,7 @@ public sealed class ProjectService : IProjectService
             p.Status,
             p.Members.Count(m => m.Status == "active"),
             p.MaxTeamCapacity,
-            0, // Default pending count until applications module
+            p.Applications.Count(a => a.Status == "pending"),
             p.CreatedAt)).ToList();
 
         var joinedDtos = joinedMemberships.Select(m => new MyJoinedProjectDto(
@@ -311,11 +328,12 @@ public sealed class ProjectService : IProjectService
         return new MyProjectsResponse(leadingDtos, joinedDtos);
     }
 
-    private static ProjectDetailDto MapToDetailDto(Project project)
+    private ProjectDetailDto MapToDetailDto(Project project)
     {
         var leaderDisplayName = project.Leader?.Profile?.DisplayName ?? project.Leader?.Username ?? "Leader";
         var leaderAvatar = project.Leader?.Profile?.AvatarUrl;
-        var daysLeft = Math.Max(0, project.RecruitmentClosingDays - (int)(DateTime.UtcNow - project.CreatedAt).TotalDays);
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        var daysLeft = RecruitmentDeadline.DaysLeft(project.RecruitmentClosesAt, now);
 
         var teamMembers = project.Members
             .Where(m => m.Status == "active")
@@ -372,7 +390,10 @@ public sealed class ProjectService : IProjectService
                 GetInitials(leaderDisplayName)),
             project.Goals,
             teamMembers,
-            positions);
+            positions,
+            RecruitmentDeadline.ClosingDate(project.RecruitmentClosesAt),
+            project.RecruitmentClosesAt,
+            RecruitmentDeadline.IsOpen(project, now));
     }
 
     private static void ValidateCreateRequest(CreateProjectRequest request)

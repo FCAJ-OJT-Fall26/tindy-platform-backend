@@ -44,11 +44,6 @@ public static class WebApplicationExtensions
         app.UseAuthentication();
 
         // ===================================
-        // 6. RATE LIMITING
-        // ===================================
-        app.UseRateLimiter();
-
-        // ===================================
         // 6. AUTHORIZATION
         // ===================================
         app.UseAuthorization();
