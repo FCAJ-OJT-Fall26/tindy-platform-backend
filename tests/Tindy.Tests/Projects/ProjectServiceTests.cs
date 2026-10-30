@@ -26,7 +26,6 @@ public sealed class ProjectServiceTests
         InitialTeamSize: 1,
         MaxTeamCapacity: 5,
         ColorTheme: "indigo",
-        RecruitmentClosingDays: 14,
         Goals: new[] { "Goal 1", "Goal 2" },
         Positions: new[]
         {

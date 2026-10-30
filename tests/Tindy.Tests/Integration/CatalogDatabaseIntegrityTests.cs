@@ -52,7 +52,9 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
             "user_credentials", "external_auth_accounts", "professional_roles", "skill_categories",
             "skills", "skill_category_skills", "user_skills", "user_onboarding_steps",
             "profile_experiences", "profile_experience_skills", "user_certificates",
-            "oauth_login_tickets", "oauth_link_transactions", "media_assets", "user_certificate_attachments"
+            "oauth_login_tickets", "oauth_link_transactions", "media_assets", "user_certificate_attachments",
+            "projects", "project_members", "project_positions", "position_skills",
+            "discovery_project_interactions", "project_applications"
         };
         Assert.True(expected.ToHashSet().SetEquals(tables),
             $"Expected {expected.Length} business tables. Actual: {string.Join(", ", tables.OrderBy(x => x))}");

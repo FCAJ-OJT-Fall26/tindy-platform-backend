@@ -123,6 +123,8 @@ public sealed class ProjectPositionService : IProjectPositionService
             {
                 throw new ProjectException(400, "VALIDATION_FAILED", "Required count must be at least 1.");
             }
+            if (request.RequiredCount.Value < position.FilledCount)
+                throw new ProjectException(409, "POSITION_CAPACITY_EXCEEDED", "Required count cannot be below filled count.");
             position.RequiredCount = request.RequiredCount.Value;
         }
 

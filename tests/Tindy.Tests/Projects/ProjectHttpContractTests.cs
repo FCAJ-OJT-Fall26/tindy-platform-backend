@@ -156,6 +156,90 @@ public sealed class ProjectHttpContractTests
         return document.RootElement.GetProperty("data").Clone();
     }
 
+    [Fact]
+    public async Task DeadlineContract_RoundTripsDateAndUtcCutoff_AndPreservesOmittedEdit()
+    {
+        using var factory = new ProjectApiFactory();
+        using var leader = factory.CreateHttpsClient(authenticated: true);
+        using var anonymous = factory.CreateHttpsClient();
+        var date = new DateOnly(2026, 11, 12);
+        using var created = await leader.PostAsJsonAsync("/api/projects",
+            ProjectServiceTests.CreateValidRequest() with { RecruitmentClosingDate = date }, JsonOptions);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var data = await ReadDataAsync(created);
+        var id = data.GetProperty("project_id").GetGuid();
+        AssertDeadline(data, "2026-11-12", "2026-11-12T17:00:00Z", true);
+
+        using var detail = await anonymous.GetAsync($"/api/projects/{id}");
+        AssertDeadline(await ReadDataAsync(detail), "2026-11-12", "2026-11-12T17:00:00Z", true);
+        using var list = await anonymous.GetAsync("/api/projects");
+        AssertDeadline((await ReadDataAsync(list)).GetProperty("items")[0], "2026-11-12", "2026-11-12T17:00:00Z", true);
+
+        using var omittedEdit = await leader.PutAsJsonAsync($"/api/projects/{id}", RecruitmentDeadlineTests.EditRequest(), JsonOptions);
+        Assert.Equal(HttpStatusCode.OK, omittedEdit.StatusCode);
+        AssertDeadline(await ReadDataAsync(omittedEdit), "2026-11-12", "2026-11-12T17:00:00Z", true);
+
+        factory.Clock.UtcNow = DateTimeOffset.Parse("2026-11-12T17:00:00Z");
+        using var expired = await anonymous.GetAsync($"/api/projects/{id}");
+        var expiredData = await ReadDataAsync(expired);
+        AssertDeadline(expiredData, "2026-11-12", "2026-11-12T17:00:00Z", false);
+        Assert.Equal("recruiting", expiredData.GetProperty("status").GetString());
+
+        using var extended = await leader.PutAsJsonAsync($"/api/projects/{id}",
+            RecruitmentDeadlineTests.EditRequest(new DateOnly(2026, 11, 14)), JsonOptions);
+        Assert.Equal(HttpStatusCode.OK, extended.StatusCode);
+        AssertDeadline(await ReadDataAsync(extended), "2026-11-14", "2026-11-14T17:00:00Z", true);
+    }
+
+    [Theory]
+    [InlineData("2026-11-12T00:00:00")]
+    [InlineData("12/11/2026")]
+    [InlineData("2026-02-30")]
+    [InlineData("2026-10-30")]
+    [InlineData("9999-12-31")]
+    public async Task InvalidClosingDate_CreateAndEdit_ReturnProblemDetails(string invalid)
+    {
+        using var factory = new ProjectApiFactory();
+        using var leader = factory.CreateHttpsClient(authenticated: true);
+        var payload = JsonSerializer.SerializeToNode(ProjectServiceTests.CreateValidRequest(), JsonOptions)!;
+        payload["recruitment_closing_date"] = invalid;
+        using var create = await leader.PostAsJsonAsync("/api/projects", payload);
+        Assert.Equal(HttpStatusCode.BadRequest, create.StatusCode);
+        Assert.Equal("VALIDATION_FAILED", (await create.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error_code").GetString());
+        Assert.Empty(factory.Repository.Projects);
+
+        using var validCreate = await leader.PostAsJsonAsync("/api/projects", ProjectServiceTests.CreateValidRequest(), JsonOptions);
+        var id = (await ReadDataAsync(validCreate)).GetProperty("project_id").GetGuid();
+        var originalCutoff = Assert.Single(factory.Repository.Projects).RecruitmentClosesAt;
+        var edit = JsonSerializer.SerializeToNode(RecruitmentDeadlineTests.EditRequest(), JsonOptions)!;
+        edit["recruitment_closing_date"] = invalid;
+        using var update = await leader.PutAsJsonAsync($"/api/projects/{id}", edit);
+        Assert.Equal(HttpStatusCode.BadRequest, update.StatusCode);
+        Assert.Equal("VALIDATION_FAILED", (await update.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error_code").GetString());
+        Assert.Equal(originalCutoff, Assert.Single(factory.Repository.Projects).RecruitmentClosesAt);
+    }
+
+    [Fact]
+    public async Task LegacyCreatePayload_StillDefaultsTo14CalendarDays()
+    {
+        using var factory = new ProjectApiFactory();
+        using var leader = factory.CreateHttpsClient(authenticated: true);
+        var payload = JsonSerializer.SerializeToNode(ProjectServiceTests.CreateValidRequest(), JsonOptions)!;
+        payload["recruitment_closing_days"] = 14;
+        using var response = await leader.PostAsJsonAsync("/api/projects", payload);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        AssertDeadline(await ReadDataAsync(response), "2026-11-13", "2026-11-13T17:00:00Z", true);
+    }
+
+    private static void AssertDeadline(JsonElement data, string date, string utc, bool open)
+    {
+        Assert.Equal(date, data.GetProperty("recruitment_closing_date").GetString());
+        Assert.Equal(DateTimeOffset.Parse(utc), data.GetProperty("recruitment_closes_at").GetDateTimeOffset());
+        Assert.Equal(open, data.GetProperty("is_recruitment_open").GetBoolean());
+        Assert.True(data.GetProperty("closing_days_left").GetInt32() >= 0);
+        Assert.False(data.TryGetProperty("recruitment_closing_days", out _));
+    }
+
     private static void AssertPublicLeader(JsonElement leader)
     {
         Assert.Equal(new[] { "avatar_url", "display_name", "initials", "user_id" },
@@ -171,6 +255,7 @@ public sealed class ProjectHttpContractTests
         private readonly string _jwtKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
         public ProjectServiceTests.FakeProjectRepository Repository { get; } = new();
         public OnboardingAccessStatus Status { get; set; } = OnboardingAccessStatus.Completed;
+        public ProjectTestClock Clock { get; } = new(RecruitmentDeadlineTests.Utc("2026-10-30T05:00:00Z"));
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -197,6 +282,8 @@ public sealed class ProjectHttpContractTests
                 services.RemoveAll<IOnboardingAccessReader>();
                 services.AddSingleton<IProjectRepository>(Repository);
                 services.AddSingleton<IOnboardingAccessReader>(this);
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton<TimeProvider>(Clock);
             });
         }
 

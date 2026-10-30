@@ -23,9 +23,9 @@ public sealed record CreateProjectRequest(
     int InitialTeamSize,
     int MaxTeamCapacity,
     string? ColorTheme,
-    int RecruitmentClosingDays,
     IReadOnlyList<string> Goals,
-    IReadOnlyList<CreateProjectPositionRequest> Positions);
+    IReadOnlyList<CreateProjectPositionRequest> Positions,
+    DateOnly? RecruitmentClosingDate = null);
 
 public sealed record ProjectLeaderSummaryDto(
     Guid UserId,
@@ -43,7 +43,11 @@ public sealed record CreateProjectResponse(
     int CurrentTeamSize,
     int MaxTeamCapacity,
     int PositionsCount,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    DateOnly RecruitmentClosingDate,
+    DateTime RecruitmentClosesAt,
+    bool IsRecruitmentOpen,
+    int ClosingDaysLeft);
 
 public sealed record OpenPositionSummaryDto(
     Guid PositionId,
@@ -69,7 +73,10 @@ public sealed record ProjectSummaryDto(
     ProjectLeaderSummaryDto Leader,
     IReadOnlyList<OpenPositionSummaryDto> OpenPositions,
     DateTime CreatedAt,
-    int? ClosingDaysLeft);
+    int? ClosingDaysLeft,
+    DateOnly RecruitmentClosingDate,
+    DateTime RecruitmentClosesAt,
+    bool IsRecruitmentOpen);
 
 public sealed record PaginationMeta(
     int CurrentPage,
@@ -128,7 +135,10 @@ public sealed record ProjectDetailDto(
     ProjectLeaderSummaryDto Leader,
     IReadOnlyList<string> Goals,
     IReadOnlyList<ProjectTeamMemberDto> TeamMembers,
-    IReadOnlyList<ProjectPositionDto> Positions);
+    IReadOnlyList<ProjectPositionDto> Positions,
+    DateOnly RecruitmentClosingDate,
+    DateTime RecruitmentClosesAt,
+    bool IsRecruitmentOpen);
 
 public sealed record UpdateProjectRequest(
     string Name,
@@ -140,7 +150,8 @@ public sealed record UpdateProjectRequest(
     string Duration,
     int MaxTeamCapacity,
     string? ColorTheme,
-    IReadOnlyList<string> Goals);
+    IReadOnlyList<string> Goals,
+    DateOnly? RecruitmentClosingDate = null);
 
 public sealed record MyLeadingProjectDto(
     Guid ProjectId,
