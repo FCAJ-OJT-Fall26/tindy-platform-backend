@@ -86,6 +86,8 @@ public static class ServicesCollectionExtensions
         services.AddScoped<IDiscoveryInteractionRepository, DiscoveryInteractionRepository>();
         services.AddScoped<IProjectApplicationRepository, ProjectApplicationRepository>();
 
+        services.AddScoped<IChatRepository, ChatRepository>();
+
         // Lightweight read-only check for protected business APIs
         services.AddScoped<IOnboardingAccessReader, OnboardingAccessReader>();
 

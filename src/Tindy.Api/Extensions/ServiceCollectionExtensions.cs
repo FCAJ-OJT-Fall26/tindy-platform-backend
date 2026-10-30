@@ -32,6 +32,8 @@ public static class ServiceCollectionExtensions
                     JsonNamingPolicy.SnakeCaseLower;
             });
 
+        services.AddSignalR();
+
 
         services.Configure<ApiBehaviorOptions>(options =>
         {
@@ -175,6 +177,17 @@ public static class ServiceCollectionExtensions
                 // ===================================
                 options.Events = new JwtBearerEvents
                 {
+                    OnMessageReceived = context =>
+                    {
+                        var accessToken = context.Request.Query["access_token"];
+                        if (!string.IsNullOrWhiteSpace(accessToken) &&
+                            context.HttpContext.Request.Path.StartsWithSegments("/hubs/chat"))
+                        {
+                            context.Token = accessToken;
+                        }
+
+                        return Task.CompletedTask;
+                    },
                     OnChallenge = async context =>
                     {
                         context.HandleResponse();
@@ -263,6 +276,8 @@ public static class ServiceCollectionExtensions
 
         // Project positions & skills service (Group C).
         services.AddScoped<IProjectPositionService, ProjectPositionService>();
+
+        services.AddScoped<IChatService, ChatService>();
 
         // Project management service (Group B).
         services.AddScoped<IProjectService, ProjectService>();

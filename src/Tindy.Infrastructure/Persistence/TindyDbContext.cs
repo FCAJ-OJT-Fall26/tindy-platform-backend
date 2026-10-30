@@ -56,6 +56,9 @@ public class TindyDbContext : DbContext
 
     public DbSet<OAuthLoginTicket> OAuthLoginTickets => Set<OAuthLoginTicket>();
     public DbSet<OAuthLinkTransaction> OAuthLinkTransactions => Set<OAuthLinkTransaction>();
+    public DbSet<Conversation> Conversations => Set<Conversation>();
+    public DbSet<ConversationParticipant> ConversationParticipants => Set<ConversationParticipant>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
 
 
     public DbSet<ProfessionalRole> ProfessionalRoles

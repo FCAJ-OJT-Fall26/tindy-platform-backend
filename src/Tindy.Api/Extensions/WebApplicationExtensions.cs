@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Tindy.Api.Authorization;
+using Tindy.Api.Hubs;
 
 namespace Tindy.Api.Extensions;
 
@@ -104,6 +105,7 @@ public static class WebApplicationExtensions
         // 6. MAP CONTROLLERS
         // ===================================
         app.MapControllers();
+        app.MapHub<ChatHub>("/hubs/chat");
 
         return app;
     }
