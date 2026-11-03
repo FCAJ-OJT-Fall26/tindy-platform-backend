@@ -21,13 +21,16 @@ public sealed class ChatService : IChatService
     public async Task<IReadOnlyList<ChatConversationDto>> GetConversationsAsync(Guid userId, CancellationToken ct = default)
     {
         var conversations = await _repository.GetConversationsForUserAsync(userId, ct);
-        return await Task.WhenAll(conversations.Select(async c =>
+        var result = new List<ChatConversationDto>(conversations.Count);
+        foreach (var c in conversations)
         {
-            var other = c.Participants.First(p => p.UserId != userId).User;
+            var otherParticipant = c.Participants.FirstOrDefault(p => p.UserId != userId);
+            if (otherParticipant?.User is null) continue;
             var unreadCount = await _repository.GetUnreadCountAsync(c.ConversationId, userId, ct);
             var firstUnreadAt = unreadCount > 0 ? await _repository.GetFirstUnreadAtAsync(c.ConversationId, userId, ct) : null;
-            return new ChatConversationDto(c.ConversationId, ToParticipant(other), c.LastMessageAt, unreadCount, firstUnreadAt);
-        }));
+            result.Add(new ChatConversationDto(c.ConversationId, ToParticipant(otherParticipant.User), c.LastMessageAt, unreadCount, firstUnreadAt));
+        }
+        return result;
     }
 
     public async Task<ChatConversationDto> CreateDirectConversationAsync(Guid userId, CreateDirectConversationRequest request, CancellationToken ct = default)
@@ -79,9 +82,12 @@ public sealed class ChatService : IChatService
     public async Task MarkReadAsync(Guid userId, Guid conversationId, CancellationToken ct = default)
     {
         var conversation = await RequireConversation(userId, conversationId, ct);
-        var participant = conversation.Participants.First(p => p.UserId == userId);
-        await _repository.MarkReadAsync(participant, ct);
-        await _repository.SaveChangesAsync(ct);
+        var participant = conversation.Participants.FirstOrDefault(p => p.UserId == userId);
+        if (participant != null)
+        {
+            await _repository.MarkReadAsync(participant, ct);
+            await _repository.SaveChangesAsync(ct);
+        }
     }
 
     private async Task<Conversation> RequireConversation(Guid userId, Guid conversationId, CancellationToken ct) =>
