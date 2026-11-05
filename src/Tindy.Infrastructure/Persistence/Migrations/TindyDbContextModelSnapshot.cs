@@ -23,6 +23,36 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Tindy.Application.Entities.ChatBlock", b =>
+                {
+                    b.Property<Guid>("BlockerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("blocker_id");
+
+                    b.Property<Guid>("BlockedId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("blocked_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("PairKey")
+                        .IsRequired()
+                        .HasMaxLength(65)
+                        .HasColumnType("character varying(65)")
+                        .HasColumnName("pair_key");
+
+                    b.HasKey("BlockerId", "BlockedId");
+
+                    b.HasIndex("PairKey");
+
+                    b.ToTable("chat_blocks", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_chat_blocks_parties", "blocker_id <> blocked_id");
+                        });
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.ChatMessage", b =>
                 {
                     b.Property<Guid>("MessageId")
@@ -39,6 +69,22 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("ClientMessageId")
                         .HasColumnType("uuid")
                         .HasColumnName("client_message_id");
+
+                    b.Property<string>("ContextPositionTitle")
+                        .HasColumnType("text")
+                        .HasColumnName("context_position_title");
+
+                    b.Property<string>("ContextInputKey")
+                        .HasColumnType("text")
+                        .HasColumnName("context_input_key");
+
+                    b.Property<Guid?>("ContextProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("context_project_id");
+
+                    b.Property<string>("ContextProjectName")
+                        .HasColumnType("text")
+                        .HasColumnName("context_project_name");
 
                     b.Property<Guid>("ConversationId")
                         .HasColumnType("uuid")
@@ -72,6 +118,124 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.ToTable("chat_messages", (string)null);
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.ChatRequest", b =>
+                {
+                    b.Property<Guid>("RequestId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<Guid?>("ApplicationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("application_id");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("body");
+
+                    b.Property<Guid>("ClientRequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_request_id");
+
+                    b.Property<Guid?>("ConversationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conversation_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("EndReason")
+                        .HasColumnType("text")
+                        .HasColumnName("end_reason");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("InputKey")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("input_key");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("PairKey")
+                        .IsRequired()
+                        .HasMaxLength(65)
+                        .HasColumnType("character varying(65)")
+                        .HasColumnName("pair_key");
+
+                    b.Property<Guid?>("PositionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("position_id");
+
+                    b.Property<string>("PositionTitle")
+                        .HasColumnType("text")
+                        .HasColumnName("position_title");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("project_id");
+
+                    b.Property<string>("ProjectName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("project_name");
+
+                    b.Property<Guid>("RecipientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("recipient_id");
+
+                    b.Property<DateTime?>("RespondedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("responded_at");
+
+                    b.Property<Guid>("SenderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("sender_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.HasKey("RequestId");
+
+                    b.HasIndex("ApplicationId");
+
+                    b.HasIndex("PairKey")
+                        .IsUnique()
+                        .HasFilter("status = 'pending'");
+
+                    b.HasIndex("PositionId");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("RecipientId", "CreatedAt");
+
+                    b.HasIndex("SenderId", "ClientRequestId")
+                        .IsUnique();
+
+                    b.HasIndex("SenderId", "CreatedAt");
+
+                    b.ToTable("chat_requests", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_chat_requests_body", "char_length(body) BETWEEN 1 AND 500");
+
+                            t.HasCheckConstraint("ck_chat_requests_parties", "sender_id <> recipient_id");
+
+                            t.HasCheckConstraint("ck_chat_requests_status", "status IN ('pending','accepted','rejected','cancelled','expired')");
+                        });
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.Conversation", b =>
                 {
                     b.Property<Guid>("ConversationId")
@@ -79,9 +243,19 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("conversation_id");
 
+                    b.Property<string>("ConsentSource")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("consent_source");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<string>("DirectKey")
+                        .HasMaxLength(65)
+                        .HasColumnType("character varying(65)")
+                        .HasColumnName("direct_key");
 
                     b.Property<DateTime?>("LastMessageAt")
                         .HasColumnType("timestamp with time zone")
@@ -109,6 +283,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
                     b.HasKey("ConversationId");
 
+                    b.HasIndex("DirectKey")
+                        .IsUnique()
+                        .HasFilter("type = 'direct' AND status = 'active'");
+
                     b.HasIndex("LastMessageAt")
                         .HasDatabaseName("ix_conversations_last_message_at");
 
@@ -132,6 +310,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("LastReadAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_read_at");
+
+                    b.Property<Guid?>("LastReadMessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("last_read_message_id");
 
                     b.HasKey("ConversationId", "UserId");
 

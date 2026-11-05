@@ -10,6 +10,10 @@ public sealed class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMess
     {
         builder.ToTable("chat_messages");
         builder.HasKey(x => x.MessageId);
+        builder.Property(x => x.ContextInputKey).HasColumnName("context_input_key");
+        builder.Property(x => x.ContextProjectId).HasColumnName("context_project_id");
+        builder.Property(x => x.ContextProjectName).HasColumnName("context_project_name");
+        builder.Property(x => x.ContextPositionTitle).HasColumnName("context_position_title");
         builder.Property(x => x.MessageId).HasColumnName("message_id");
         builder.Property(x => x.ConversationId).HasColumnName("conversation_id").IsRequired();
         builder.Property(x => x.SenderId).HasColumnName("sender_id").IsRequired();

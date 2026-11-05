@@ -36,8 +36,8 @@ public sealed class ChatController : ControllerBase
     }
 
     [HttpGet("conversations/{conversationId:guid}/messages")]
-    public async Task<IActionResult> GetMessages(Guid conversationId, [FromQuery] DateTime? before, [FromQuery] int limit = 50, CancellationToken ct = default) =>
-        Ok(new { success = true, message = "Messages retrieved successfully.", data = await _chatService.GetMessagesAsync(CurrentUserId, conversationId, before, limit, ct) });
+    public async Task<IActionResult> GetMessages(Guid conversationId, [FromQuery] DateTime? before, [FromQuery(Name = "before_message_id")] Guid? beforeMessageId, [FromQuery] int limit = 50, CancellationToken ct = default) =>
+        Ok(new { success = true, message = "Messages retrieved successfully.", data = await _chatService.GetMessagesAsync(CurrentUserId, conversationId, before, beforeMessageId, limit, ct) });
 
     [HttpPost("conversations/{conversationId:guid}/messages")]
     public async Task<IActionResult> SendMessage(Guid conversationId, [FromBody] SendChatMessageRequest request, CancellationToken ct)
@@ -47,9 +47,9 @@ public sealed class ChatController : ControllerBase
     }
 
     [HttpPost("conversations/{conversationId:guid}/read")]
-    public async Task<IActionResult> MarkRead(Guid conversationId, CancellationToken ct)
+    public async Task<IActionResult> MarkRead(Guid conversationId, [FromBody] MarkChatReadRequest request, CancellationToken ct)
     {
-        await _chatService.MarkReadAsync(CurrentUserId, conversationId, ct);
+        await _chatService.MarkReadAsync(CurrentUserId, conversationId, request.LastReadMessageId, ct);
         return Ok(new { success = true, message = "Conversation marked as read.", data = new { conversation_id = conversationId, read = true } });
     }
 }

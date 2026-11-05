@@ -13,6 +13,7 @@ public sealed class ConversationParticipantConfiguration : IEntityTypeConfigurat
         builder.Property(x => x.ConversationId).HasColumnName("conversation_id");
         builder.Property(x => x.UserId).HasColumnName("user_id");
         builder.Property(x => x.JoinedAt).HasColumnName("joined_at").IsRequired();
+        builder.Property(x => x.LastReadMessageId).HasColumnName("last_read_message_id");
         builder.Property(x => x.LastReadAt).HasColumnName("last_read_at");
         builder.HasOne(x => x.Conversation).WithMany(x => x.Participants).HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);

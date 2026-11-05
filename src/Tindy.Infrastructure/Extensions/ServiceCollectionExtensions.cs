@@ -91,6 +91,8 @@ public static class ServicesCollectionExtensions
         services.AddScoped<IProjectApplicationRepository, ProjectApplicationRepository>();
 
         services.AddScoped<IChatRepository, ChatRepository>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddScoped<IChatRequests, ChatRequests>();
 
         // Lightweight read-only check for protected business APIs
         services.AddScoped<IOnboardingAccessReader, OnboardingAccessReader>();

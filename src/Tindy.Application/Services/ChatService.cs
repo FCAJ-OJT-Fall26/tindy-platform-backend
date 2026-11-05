@@ -9,7 +9,8 @@ namespace Tindy.Application.Services;
 public sealed class ChatService : IChatService
 {
     private readonly IChatRepository _repository;
-    public ChatService(IChatRepository repository) => _repository = repository;
+    private readonly IChatNotifier _notifier;
+    public ChatService(IChatRepository repository, IChatNotifier notifier) { _repository = repository; _notifier = notifier; }
 
     public async Task<IReadOnlyList<ChatUserDto>> SearchUsersAsync(Guid currentUserId, string query, CancellationToken ct = default)
     {
@@ -27,8 +28,9 @@ public sealed class ChatService : IChatService
             var otherParticipant = c.Participants.FirstOrDefault(p => p.UserId != userId);
             if (otherParticipant?.User is null) continue;
             var unreadCount = await _repository.GetUnreadCountAsync(c.ConversationId, userId, ct);
-            var firstUnreadAt = unreadCount > 0 ? await _repository.GetFirstUnreadAtAsync(c.ConversationId, userId, ct) : null;
-            result.Add(new ChatConversationDto(c.ConversationId, ToParticipant(otherParticipant.User), c.LastMessageAt, unreadCount, firstUnreadAt));
+            var firstUnreadAt = unreadCount > 0 ? await _repository.GetFirstUnreadMessageAsync(c.ConversationId, userId, ct) : null;
+            var blocks = await _repository.BlockStateAsync(userId, otherParticipant.UserId, ct);
+            result.Add(new ChatConversationDto(c.ConversationId, ToParticipant(otherParticipant.User), c.LastMessageAt, unreadCount, firstUnreadAt?.CreatedAt, firstUnreadAt?.MessageId, blocks.IsBlocked, blocks.BlockedByMe));
         }
         return result;
     }
@@ -37,26 +39,20 @@ public sealed class ChatService : IChatService
     {
         if (request.UserId == userId) throw new ConflictException("You cannot start a conversation with yourself.");
         var target = await _repository.GetActiveUserAsync(request.UserId, ct) ?? throw new NotFoundException("User not found.");
-        var existing = await _repository.FindDirectConversationAsync(userId, request.UserId, ct);
-        if (existing is not null) return new ChatConversationDto(existing.ConversationId, ToParticipant(target), existing.LastMessageAt, 0, null);
-
-        var now = DateTime.UtcNow;
-        var conversation = new Conversation { ConversationId = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
-        conversation.Participants.Add(new ConversationParticipant { ConversationId = conversation.ConversationId, UserId = userId, JoinedAt = now });
-        conversation.Participants.Add(new ConversationParticipant { ConversationId = conversation.ConversationId, UserId = target.UserId, JoinedAt = now });
-        await _repository.AddConversationAsync(conversation, ct);
-        await _repository.SaveChangesAsync(ct);
-        return new ChatConversationDto(conversation.ConversationId, ToParticipant(target), null, 0, null);
+        var conversation = await _repository.GetOrCreateDirectAsync(userId, request.UserId, ct);
+        var unread = await _repository.GetUnreadCountAsync(conversation.ConversationId, userId, ct);
+        var first = unread > 0 ? await _repository.GetFirstUnreadMessageAsync(conversation.ConversationId, userId, ct) : null;
+        return new ChatConversationDto(conversation.ConversationId, ToParticipant(target), conversation.LastMessageAt, unread, first?.CreatedAt, first?.MessageId);
     }
 
-    public async Task<ChatMessagesPage> GetMessagesAsync(Guid userId, Guid conversationId, DateTime? before, int limit, CancellationToken ct = default)
+    public async Task<ChatMessagesPage> GetMessagesAsync(Guid userId, Guid conversationId, DateTime? before, Guid? beforeMessageId, int limit, CancellationToken ct = default)
     {
         await RequireConversation(userId, conversationId, ct);
         limit = Math.Clamp(limit, 1, 100);
-        var rows = await _repository.GetMessagesAsync(conversationId, before, limit, ct);
+        var rows = await _repository.GetMessagesAsync(conversationId, before, beforeMessageId, limit, ct);
         var hasMore = rows.Count > limit;
         var items = rows.Take(limit).Reverse().Select(ToMessage).ToArray();
-        return new ChatMessagesPage(items, hasMore, items.Length == 0 ? null : items[0].CreatedAt);
+        return new ChatMessagesPage(items, hasMore, items.Length == 0 ? null : items[0].CreatedAt, items.Length == 0 ? null : items[0].MessageId);
     }
 
     public async Task<ChatMessageDto> SendMessageAsync(Guid userId, Guid conversationId, SendChatMessageRequest request, CancellationToken ct = default)
@@ -67,26 +63,29 @@ public sealed class ChatService : IChatService
         if (body.Length > 4000) throw new BusinessRuleException("Message cannot exceed 4000 characters.");
         if (request.ClientMessageId.HasValue)
         {
-            var existing = await _repository.GetMessagesAsync(conversationId, null, 1000, ct);
-            var duplicate = existing.FirstOrDefault(x => x.SenderId == userId && x.ClientMessageId == request.ClientMessageId);
-            if (duplicate is not null) return ToMessage(duplicate);
+            var duplicate = await _repository.FindClientMessageAsync(userId, request.ClientMessageId.Value, ct);
+            if (duplicate != null)
+            {
+                if (duplicate.ConversationId != conversationId || duplicate.Body != body || duplicate.ContextInputKey != null) throw new ConflictException("Client message ID was already used.");
+                return ToMessage(duplicate);
+            }
         }
         var message = new ChatMessage { MessageId = Guid.NewGuid(), ConversationId = conversationId, SenderId = userId, Body = body, ClientMessageId = request.ClientMessageId, CreatedAt = DateTime.UtcNow };
-        conversation.LastMessageAt = message.CreatedAt;
-        conversation.UpdatedAt = message.CreatedAt;
-        await _repository.AddMessageAsync(message, ct);
-        await _repository.SaveChangesAsync(ct);
-        return ToMessage(message);
+        message = await _repository.SaveMessageAsync(conversation, message, ct);
+        var dto = ToMessage(message);
+        await _notifier.MessageCreatedAsync(conversation.Participants.Select(p => p.UserId), dto, ct);
+        return dto;
     }
 
-    public async Task MarkReadAsync(Guid userId, Guid conversationId, CancellationToken ct = default)
+    public async Task MarkReadAsync(Guid userId, Guid conversationId, Guid lastReadMessageId, CancellationToken ct = default)
     {
         var conversation = await RequireConversation(userId, conversationId, ct);
         var participant = conversation.Participants.FirstOrDefault(p => p.UserId == userId);
         if (participant != null)
         {
-            await _repository.MarkReadAsync(participant, ct);
-            await _repository.SaveChangesAsync(ct);
+            var message = await _repository.FindMessageAsync(conversationId, lastReadMessageId, ct) ?? throw new NotFoundException("Message not found.");
+            await _repository.MarkReadAsync(participant, message, ct);
+            await _notifier.ReadAsync(conversation.Participants.Select(p => p.UserId), conversationId, ct);
         }
     }
 
@@ -95,5 +94,5 @@ public sealed class ChatService : IChatService
 
     private static ChatUserDto ToUser(User user) => new(user.UserId, user.Profile?.DisplayName ?? user.Username ?? "User", user.Username, user.Profile?.AvatarUrl);
     private static ChatParticipantDto ToParticipant(User user) => new(user.UserId, user.Profile?.DisplayName ?? user.Username ?? "User", user.Username, user.Profile?.AvatarUrl);
-    private static ChatMessageDto ToMessage(ChatMessage message) => new(message.MessageId, message.ConversationId, message.SenderId, message.Body, message.CreatedAt, message.ClientMessageId);
+    private static ChatMessageDto ToMessage(ChatMessage message) => new(message.MessageId, message.ConversationId, message.SenderId, message.Body, message.CreatedAt, message.ClientMessageId, message.ContextProjectId, message.ContextProjectName, message.ContextPositionTitle);
 }
