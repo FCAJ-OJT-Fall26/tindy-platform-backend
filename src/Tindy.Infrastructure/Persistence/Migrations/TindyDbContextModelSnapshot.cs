@@ -83,6 +83,11 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("DirectKey")
+                        .HasMaxLength(65)
+                        .HasColumnType("character varying(65)")
+                        .HasColumnName("direct_key");
+
                     b.Property<DateTime?>("LastMessageAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_message_at");
@@ -109,6 +114,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
                     b.HasKey("ConversationId");
 
+                    b.HasIndex("DirectKey")
+                        .IsUnique()
+                        .HasFilter("type = 'direct' AND status = 'active'");
+
                     b.HasIndex("LastMessageAt")
                         .HasDatabaseName("ix_conversations_last_message_at");
 
@@ -132,6 +141,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("LastReadAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_read_at");
+
+                    b.Property<Guid?>("LastReadMessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("last_read_message_id");
 
                     b.HasKey("ConversationId", "UserId");
 

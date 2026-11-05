@@ -33,6 +33,7 @@ public static class ServiceCollectionExtensions
             });
 
         services.AddSignalR();
+        services.AddScoped<IChatNotifier, Tindy.Api.Hubs.ChatNotifier>();
 
 
         services.Configure<ApiBehaviorOptions>(options =>

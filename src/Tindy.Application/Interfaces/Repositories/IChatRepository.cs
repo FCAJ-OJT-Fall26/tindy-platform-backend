@@ -11,9 +11,13 @@ public interface IChatRepository
     Task<User?> GetActiveUserAsync(Guid userId, CancellationToken ct = default);
     Task AddConversationAsync(Conversation conversation, CancellationToken ct = default);
     Task AddMessageAsync(ChatMessage message, CancellationToken ct = default);
-    Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(Guid conversationId, DateTime? before, int limit, CancellationToken ct = default);
+    Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(Guid conversationId, DateTime? before, Guid? beforeMessageId, int limit, CancellationToken ct = default);
     Task<int> GetUnreadCountAsync(Guid conversationId, Guid userId, CancellationToken ct = default);
-    Task<DateTime?> GetFirstUnreadAtAsync(Guid conversationId, Guid userId, CancellationToken ct = default);
-    Task MarkReadAsync(ConversationParticipant participant, CancellationToken ct = default);
+    Task<ChatMessage?> GetFirstUnreadMessageAsync(Guid conversationId, Guid userId, CancellationToken ct = default);
+    Task MarkReadAsync(ConversationParticipant participant, ChatMessage message, CancellationToken ct = default);
+ Task<ChatMessage?> FindMessageAsync(Guid conversationId, Guid messageId, CancellationToken ct);
+ Task<ChatMessage?> FindClientMessageAsync(Guid senderId, Guid clientMessageId, CancellationToken ct);
+ Task<Conversation> GetOrCreateDirectAsync(Guid userId, Guid targetId, CancellationToken ct);
+ Task<ChatMessage> SaveMessageAsync(Conversation conversation, ChatMessage message, CancellationToken ct);
     Task SaveChangesAsync(CancellationToken ct = default);
 }
