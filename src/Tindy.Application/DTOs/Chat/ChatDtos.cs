@@ -5,6 +5,6 @@ public sealed record CreateDirectConversationRequest(Guid UserId);
 public sealed record MarkChatReadRequest(Guid LastReadMessageId);
 public sealed record SendChatMessageRequest(string Body, Guid? ClientMessageId = null);
 public sealed record ChatParticipantDto(Guid UserId, string DisplayName, string? Username, string? AvatarUrl);
-public sealed record ChatConversationDto(Guid ConversationId, ChatParticipantDto OtherParticipant, DateTime? LastMessageAt, int UnreadCount, DateTime? FirstUnreadAt, Guid? FirstUnreadMessageId);
-public sealed record ChatMessageDto(Guid MessageId, Guid ConversationId, Guid SenderId, string Body, DateTime CreatedAt, Guid? ClientMessageId);
+public sealed record ChatConversationDto(Guid ConversationId, ChatParticipantDto OtherParticipant, DateTime? LastMessageAt, int UnreadCount, DateTime? FirstUnreadAt, Guid? FirstUnreadMessageId, bool IsBlocked = false, bool BlockedByMe = false);
+public sealed record ChatMessageDto(Guid MessageId, Guid ConversationId, Guid SenderId, string Body, DateTime CreatedAt, Guid? ClientMessageId, Guid? ContextProjectId = null, string? ContextProjectName = null, string? ContextPositionTitle = null);
 public sealed record ChatMessagesPage(IReadOnlyList<ChatMessageDto> Items, bool HasMore, DateTime? NextBefore, Guid? NextBeforeMessageId);

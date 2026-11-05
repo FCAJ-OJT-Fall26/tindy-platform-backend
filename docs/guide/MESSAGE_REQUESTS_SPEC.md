@@ -1,8 +1,8 @@
 # Đặc tả yêu cầu trò chuyện — V1
 
-Ngày: 05/11/2026. Trạng thái: đã chốt quy tắc sản phẩm, sẵn sàng thiết kế kỹ thuật và triển khai; chưa phải chức năng đã có trong mã.
+Ngày: 05/11/2026. Trạng thái: quy tắc sản phẩm đã chốt; đã triển khai backend, migration, giao diện và kiểm thử; chưa áp dụng migration vào database đang dùng.
 
-Tài liệu này ghi lại các quyết định đã thống nhất, luồng sử dụng và tiêu chí nghiệm thu. Hợp đồng chat hiện có nằm ở [CHAT_API.md](../api/CHAT_API.md). Chưa thay đổi API, database hoặc giao diện trong bước đặc tả này.
+Tài liệu này ghi lại các quyết định đã thống nhất, luồng sử dụng và tiêu chí nghiệm thu. Hợp đồng chat hiện có nằm ở [CHAT_API.md](../api/CHAT_API.md). Hợp đồng triển khai yêu cầu trò chuyện nằm ở [CHAT_REQUESTS_API.md](../api/CHAT_REQUESTS_API.md). Áp dụng migration vào môi trường đang dùng là một bước riêng.
 
 ## 1. Các quyết định đã chốt
 

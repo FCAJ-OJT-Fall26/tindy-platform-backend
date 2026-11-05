@@ -5,6 +5,10 @@ public sealed class ChatMessage
     public Guid MessageId { get; set; }
     public Guid ConversationId { get; set; }
     public Guid SenderId { get; set; }
+    public string? ContextInputKey { get; set; }
+    public Guid? ContextProjectId { get; set; }
+    public string? ContextProjectName { get; set; }
+    public string? ContextPositionTitle { get; set; }
     public string Body { get; set; } = null!;
     public Guid? ClientMessageId { get; set; }
     public DateTime CreatedAt { get; set; }

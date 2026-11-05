@@ -14,8 +14,20 @@ namespace Tindy.Tests.Projects;
 public sealed class ChatHttpTests(TindyApiFactory factory) : IClassFixture<TindyApiFactory>
 {
     private static string Room(Guid id) => $"/api/chat/conversations/{id}";
-    private static async Task<Guid> Create(HttpClient client, Guid target) =>
-        (await RecruitmentHttp.Data(await client.PostAsJsonAsync("/api/chat/conversations/direct", new { user_id = target }))).GetProperty("conversation_id").GetGuid();
+    private async Task<Guid> Create(HttpClient client, Guid target)
+    {
+        var options = await RecruitmentHttp.Data(await client.GetAsync("/api/chat/request-contexts?user_id=" + target));
+        var option = options.EnumerateArray().First();
+        var result = await RecruitmentHttp.Data(await client.PostAsJsonAsync("/api/chat/requests", new { user_id = target, project_id = option.GetProperty("project_id").GetGuid(), position_id = option.GetProperty("position_id").ValueKind == JsonValueKind.Null ? (Guid?)null : option.GetProperty("position_id").GetGuid(), body = "Opening", client_request_id = Guid.NewGuid() }));
+        var request = result.GetProperty("request");
+        using var recipient = RecruitmentHttp.Client(factory, request.GetProperty("recipient_id").GetGuid());
+        var accepted = await RecruitmentHttp.Data(await recipient.PostAsync("/api/chat/requests/" + request.GetProperty("request_id").GetGuid() + "/accept", null));
+        var room = accepted.GetProperty("conversation_id").GetGuid();
+        // These regression tests isolate message delivery/pagination; request opening is covered separately.
+        using var scope = factory.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<TindyDbContext>().ChatMessages.Where(m => m.ConversationId == room && m.Body == "Opening").ExecuteDeleteAsync();
+        return room;
+    }
     private static async Task<JsonElement> Send(HttpClient client, Guid room, Guid? key = null) =>
         await RecruitmentHttp.Data(await client.PostAsJsonAsync(Room(room) + "/messages", new { body = "Hello", client_message_id = key ?? Guid.NewGuid() }));
     [Fact]
@@ -66,6 +78,33 @@ public sealed class ChatHttpTests(TindyApiFactory factory) : IClassFixture<Tindy
         Assert.Equal(HttpStatusCode.NotFound, (await outsider.PostAsJsonAsync(Room(room) + "/messages", new { body = "Forbidden" })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await b.PostAsJsonAsync(Room(room) + "/read", new { last_read_message_id = Guid.NewGuid() })).StatusCode);
     }
+    [Fact]
+    public async Task HubCannotBypassConsentOrBlock()
+    {
+        var data = await TeammateTestData.Seed(factory);
+        using var a = RecruitmentHttp.Client(factory, data.Leader); using var b = RecruitmentHttp.Client(factory, data.Applicant);
+        var room = Guid.NewGuid();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<TindyDbContext>();
+            db.Conversations.Add(new Conversation { ConversationId = room, DirectKey = Tindy.Infrastructure.Repositories.ChatRequests.Pair(data.Leader, data.Applicant), CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+                Participants = [new() { UserId = data.Leader, JoinedAt = DateTime.UtcNow }, new() { UserId = data.Applicant, JoinedAt = DateTime.UtcNow }] });
+            await db.SaveChangesAsync();
+        }
+        using var socket = await Connect(a);
+        async Task Denied(string id)
+        {
+            var payload = JsonSerializer.Serialize(new { type = 1, invocationId = id, target = "SendMessage", arguments = new object[] { room, "Must not be saved", Guid.NewGuid() } }) + "\u001e";
+            await socket.SendAsync(Encoding.UTF8.GetBytes(payload), WebSocketMessageType.Text, true, CancellationToken.None);
+            for (var i = 0; i < 20; i++) { var response = await Receive(socket); if (response.Contains("\"invocationId\":\"" + id + "\"")) { Assert.Contains("\"error\":", response); return; } }
+            throw new Exception("Hub invocation was not completed");
+        }
+        await Denied("unaccepted");
+        using (var scope = factory.Services.CreateScope()) await scope.ServiceProvider.GetRequiredService<TindyDbContext>().Conversations.Where(x => x.ConversationId == room).ExecuteUpdateAsync(s => s.SetProperty(x => x.ConsentSource, "legacy"));
+        Assert.True((await b.PutAsync("/api/chat/blocks/" + data.Leader, null)).IsSuccessStatusCode);
+        await Denied("blocked");
+        using (var scope = factory.Services.CreateScope()) Assert.False(await scope.ServiceProvider.GetRequiredService<TindyDbContext>().ChatMessages.AnyAsync(x => x.ConversationId == room));
+    }
     private async Task<WebSocket> Connect(HttpClient client)
     {
         var ws = factory.Server.CreateWebSocketClient();
@@ -81,17 +120,22 @@ public sealed class ChatHttpTests(TindyApiFactory factory) : IClassFixture<Tindy
         var result = await socket.ReceiveAsync(buffer, timeout.Token);
         return Encoding.UTF8.GetString(buffer, 0, result.Count);
     }
+    private static async Task<string> ReceiveMessage(WebSocket socket)
+    {
+        for (var i = 0; i < 20; i++) { var payload = await Receive(socket); if (payload.Contains("message.created")) return payload; }
+        throw new Exception("No message event received");
+    }
     [Fact]
     public async Task RestAndHubNotifyAllParticipantConnections_WithoutJoiningRoom_AndAfterReconnect()
     {
         var data = await TeammateTestData.Seed(factory);
         using var a = RecruitmentHttp.Client(factory, data.Leader); using var b = RecruitmentHttp.Client(factory, data.Applicant);
         using var other = RecruitmentHttp.Client(factory, data.Outsider);
-        using var recipient = await Connect(b); using var secondTab = await Connect(b); using var stranger = await Connect(other);
         var room = await Create(a, data.Applicant);
+        using var recipient = await Connect(b); using var secondTab = await Connect(b); using var stranger = await Connect(other);
         await Send(a, room);
-        Assert.Contains("message.created", await Receive(recipient));
-        Assert.Contains("message.created", await Receive(secondTab));
+        Assert.Contains("message.created", await ReceiveMessage(recipient));
+        Assert.Contains("message.created", await ReceiveMessage(secondTab));
         using var sender = await Connect(a);
         var invocation = JsonSerializer.Serialize(new { type = 1, invocationId = "1", target = "SendMessage", arguments = new object[] { room, "Via hub", Guid.NewGuid() } }) + "\u001e";
         await sender.SendAsync(Encoding.UTF8.GetBytes(invocation), WebSocketMessageType.Text, true, CancellationToken.None);
@@ -100,7 +144,7 @@ public sealed class ChatHttpTests(TindyApiFactory factory) : IClassFixture<Tindy
         await Send(a, room);
         using var reconnected = await Connect(b);
         await Send(a, room);
-        Assert.Contains("message.created", await Receive(reconnected));
+        Assert.Contains("message.created", await ReceiveMessage(reconnected));
         var history = await RecruitmentHttp.Data(await b.GetAsync(Room(room) + "/messages"));
         Assert.Equal(4, history.GetProperty("items").GetArrayLength());
         using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));

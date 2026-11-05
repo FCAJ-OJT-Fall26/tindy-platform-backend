@@ -29,7 +29,8 @@ public sealed class ChatService : IChatService
             if (otherParticipant?.User is null) continue;
             var unreadCount = await _repository.GetUnreadCountAsync(c.ConversationId, userId, ct);
             var firstUnreadAt = unreadCount > 0 ? await _repository.GetFirstUnreadMessageAsync(c.ConversationId, userId, ct) : null;
-            result.Add(new ChatConversationDto(c.ConversationId, ToParticipant(otherParticipant.User), c.LastMessageAt, unreadCount, firstUnreadAt?.CreatedAt, firstUnreadAt?.MessageId));
+            var blocks = await _repository.BlockStateAsync(userId, otherParticipant.UserId, ct);
+            result.Add(new ChatConversationDto(c.ConversationId, ToParticipant(otherParticipant.User), c.LastMessageAt, unreadCount, firstUnreadAt?.CreatedAt, firstUnreadAt?.MessageId, blocks.IsBlocked, blocks.BlockedByMe));
         }
         return result;
     }
@@ -65,7 +66,7 @@ public sealed class ChatService : IChatService
             var duplicate = await _repository.FindClientMessageAsync(userId, request.ClientMessageId.Value, ct);
             if (duplicate != null)
             {
-                if (duplicate.ConversationId != conversationId || duplicate.Body != body) throw new ConflictException("Client message ID was already used.");
+                if (duplicate.ConversationId != conversationId || duplicate.Body != body || duplicate.ContextInputKey != null) throw new ConflictException("Client message ID was already used.");
                 return ToMessage(duplicate);
             }
         }
@@ -93,5 +94,5 @@ public sealed class ChatService : IChatService
 
     private static ChatUserDto ToUser(User user) => new(user.UserId, user.Profile?.DisplayName ?? user.Username ?? "User", user.Username, user.Profile?.AvatarUrl);
     private static ChatParticipantDto ToParticipant(User user) => new(user.UserId, user.Profile?.DisplayName ?? user.Username ?? "User", user.Username, user.Profile?.AvatarUrl);
-    private static ChatMessageDto ToMessage(ChatMessage message) => new(message.MessageId, message.ConversationId, message.SenderId, message.Body, message.CreatedAt, message.ClientMessageId);
+    private static ChatMessageDto ToMessage(ChatMessage message) => new(message.MessageId, message.ConversationId, message.SenderId, message.Body, message.CreatedAt, message.ClientMessageId, message.ContextProjectId, message.ContextProjectName, message.ContextPositionTitle);
 }

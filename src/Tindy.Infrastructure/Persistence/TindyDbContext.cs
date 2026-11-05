@@ -62,6 +62,8 @@ public class TindyDbContext : DbContext
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ConversationParticipant> ConversationParticipants => Set<ConversationParticipant>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatRequest> ChatRequests => Set<ChatRequest>();
+    public DbSet<ChatBlock> ChatBlocks => Set<ChatBlock>();
 
 
     public DbSet<ProfessionalRole> ProfessionalRoles

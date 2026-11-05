@@ -31,11 +31,11 @@ public sealed class ChatRepository : IChatRepository
 
     public Task<Conversation?> GetConversationForUserAsync(Guid conversationId, Guid userId, CancellationToken ct = default) =>
         _db.Conversations.Include(x => x.Participants).ThenInclude(x => x.User).ThenInclude(x => x.Profile)
-            .FirstOrDefaultAsync(x => x.ConversationId == conversationId && x.Status == "active" && x.Participants.Any(p => p.UserId == userId), ct);
+            .FirstOrDefaultAsync(x => x.ConversationId == conversationId && x.Status == "active" && x.ConsentSource != null && x.Participants.Any(p => p.UserId == userId), ct);
 
     public async Task<IReadOnlyList<Conversation>> GetConversationsForUserAsync(Guid userId, CancellationToken ct = default) =>
         await _db.Conversations.AsNoTracking().Include(x => x.Participants).ThenInclude(x => x.User).ThenInclude(x => x.Profile)
-            .Where(x => x.Status == "active" && x.Participants.Any(p => p.UserId == userId))
+            .Where(x => x.Status == "active" && x.ConsentSource != null && x.Participants.Any(p => p.UserId == userId))
             .OrderByDescending(x => x.LastMessageAt ?? x.CreatedAt).ToListAsync(ct);
 
     public async Task AddConversationAsync(Conversation conversation, CancellationToken ct = default) => await _db.Conversations.AddAsync(conversation, ct);
@@ -69,22 +69,29 @@ public sealed class ChatRepository : IChatRepository
     }
     public async Task<Conversation> GetOrCreateDirectAsync(Guid userId, Guid targetId, CancellationToken ct)
     {
-        var pair = new[] { userId.ToString("N"), targetId.ToString("N") }.OrderBy(x => x, StringComparer.Ordinal);
-        var key = string.Join(":", pair);
-        await using var tx = await _db.Database.BeginTransactionAsync(ct);
-        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
-        var existing = await FindDirectConversationAsync(userId, targetId, ct);
-        if (existing != null) { await tx.CommitAsync(ct); return existing; }
-        var now = DateTime.UtcNow;
-        var conversation = new Conversation { ConversationId = Guid.NewGuid(), DirectKey = key, CreatedAt = now, UpdatedAt = now };
-        conversation.Participants.Add(new() { UserId = userId, JoinedAt = now });
-        conversation.Participants.Add(new() { UserId = targetId, JoinedAt = now });
-        _db.Conversations.Add(conversation); await _db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
-        return conversation;
+        var key = ChatRequests.Pair(userId, targetId);
+        var room = await _db.Conversations.Include(x => x.Participants).ThenInclude(x => x.User).ThenInclude(x => x.Profile)
+            .SingleOrDefaultAsync(x => x.DirectKey == key && x.Status == "active" && x.ConsentSource != null, ct);
+        if (room == null) throw new Tindy.Application.Exceptions.ChatRequestException(403, "CHAT_REQUEST_REQUIRED", "Send a chat request before messaging this person.");
+        return room;
     }
+    public async Task<(bool IsBlocked, bool BlockedByMe)> BlockStateAsync(Guid userId, Guid otherId, CancellationToken ct)
+    {
+        var key = ChatRequests.Pair(userId, otherId);
+        var rows = await _db.ChatBlocks.AsNoTracking().Where(x => x.PairKey == key).Select(x => x.BlockerId).ToArrayAsync(ct);
+        return (rows.Length > 0, rows.Contains(userId));
+    }
+
     public async Task<ChatMessage> SaveMessageAsync(Conversation conversation, ChatMessage message, CancellationToken ct)
     {
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        var parties = conversation.Participants.Select(x => x.UserId).ToArray();
+        var pairKey = ChatRequests.Pair(parties[0], parties[1]);
+        await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({pairKey}, 0))", ct);
+        if (!await _db.Conversations.AnyAsync(x => x.ConversationId == conversation.ConversationId && x.ConsentSource != null, ct))
+            throw new Tindy.Application.Exceptions.ChatRequestException(403, "CHAT_REQUEST_REQUIRED", "Chat has not been accepted.");
+        if (await _db.ChatBlocks.AnyAsync(x => x.PairKey == pairKey, ct) || await _db.Users.CountAsync(x => parties.Contains(x.UserId) && x.Status == "active" && x.DeletedAt == null && x.IsOnboardingCompleted, ct) != 2)
+            throw new Tindy.Application.Exceptions.ChatRequestException(403, "CHAT_CONTACT_UNAVAILABLE", "This contact is unavailable.");
         if (message.ClientMessageId.HasValue)
         {
             var key = $"{message.SenderId:N}:{message.ClientMessageId:N}";
@@ -92,7 +99,7 @@ public sealed class ChatRepository : IChatRepository
             var existing = await FindClientMessageAsync(message.SenderId, message.ClientMessageId.Value, ct);
             if (existing != null)
             {
-                if (existing.ConversationId != message.ConversationId || existing.Body != message.Body) throw new Tindy.Application.Exceptions.ConflictException("Client message ID was already used.");
+                if (existing.ConversationId != message.ConversationId || existing.Body != message.Body || existing.ContextInputKey != null) throw new Tindy.Application.Exceptions.ConflictException("Client message ID was already used.");
                 await tx.CommitAsync(ct); return existing;
             }
         }

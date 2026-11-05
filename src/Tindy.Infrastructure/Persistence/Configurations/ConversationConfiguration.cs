@@ -10,6 +10,7 @@ public sealed class ConversationConfiguration : IEntityTypeConfiguration<Convers
     {
         builder.ToTable("conversations");
         builder.HasKey(x => x.ConversationId);
+        builder.Property(x => x.ConsentSource).HasColumnName("consent_source").HasMaxLength(20);
         builder.Property(x => x.DirectKey).HasColumnName("direct_key").HasMaxLength(65);
         builder.HasIndex(x => x.DirectKey).IsUnique().HasFilter("type = 'direct' AND status = 'active'");
         builder.Property(x => x.ConversationId).HasColumnName("conversation_id");

@@ -34,6 +34,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
             MediaRequestException media => media.StatusCode,
 
             ProjectException project => project.StatusCode,
+            ChatRequestException chat => chat.StatusCode,
 
             InvalidCredentialsException =>
                 StatusCodes.Status401Unauthorized,
@@ -54,6 +55,10 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 StatusCodes.Status500InternalServerError
         };
 
+        if (exception is ChatRequestException { RetryAt: { } retryAt })
+        {
+            httpContext.Response.Headers["Retry-After"] = Math.Max(1, (int)Math.Ceiling((retryAt - DateTime.UtcNow).TotalSeconds)).ToString();
+        }
         // 2. Logging
         if (statusCode >= 500)
         {
@@ -104,6 +109,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 Instance = httpContext.Request.Path
             };
 
+        if (exception is ChatRequestException { RetryAt: { } retry }) problemDetails.Extensions["retry_at"] = retry;
         problemDetails.Extensions["error_code"] =
             exception switch
             {
@@ -111,6 +117,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 MediaRequestException media => media.ErrorCode,
 
                 ProjectException project => project.ErrorCode,
+                ChatRequestException chat => chat.ErrorCode,
 
                 ProfileValidationException =>
                     "VALIDATION_FAILED",
