@@ -54,7 +54,10 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
             "profile_experiences", "profile_experience_skills", "user_certificates",
             "oauth_login_tickets", "oauth_link_transactions", "media_assets", "user_certificate_attachments",
             "projects", "project_members", "project_positions", "position_skills",
-            "discovery_project_interactions", "project_applications"
+            "discovery_project_interactions", "project_applications",
+            // Keep the exact table set current with the feature migrations.
+            "conversations", "conversation_participants", "chat_messages",
+            "project_invitations", "teammate_discovery_interactions", "notifications"
         };
         Assert.True(expected.ToHashSet().SetEquals(tables),
             $"Expected {expected.Length} business tables. Actual: {string.Join(", ", tables.OrderBy(x => x))}");
@@ -63,7 +66,7 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
             SELECT table_name || '.' || column_name
             FROM information_schema.columns
             WHERE table_schema = 'public'
-              AND ((table_name='user_profiles' AND column_name IN ('preferred_role_id','preferred_role'))
+              AND ((table_name='user_profiles' AND column_name IN ('preferred_role_id','preferred_role','open_to_team_invitations'))
                 OR (table_name='skills' AND column_name='is_active'))
             """;
         var columns = new List<string>();
@@ -72,6 +75,7 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
             while (await reader.ReadAsync()) columns.Add(reader.GetString(0));
         }
         Assert.Contains("user_profiles.preferred_role_id", columns);
+        Assert.Contains("user_profiles.open_to_team_invitations", columns);
         Assert.Contains("skills.is_active", columns);
         Assert.DoesNotContain("user_profiles.preferred_role", columns);
 

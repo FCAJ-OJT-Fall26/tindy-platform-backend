@@ -85,7 +85,9 @@ public static class DevelopmentDataSeeder
                 Location = new[] { "Hồ Chí Minh, Việt Nam", "Hà Nội, Việt Nam", "Đà Nẵng, Việt Nam", "Cần Thơ, Việt Nam" }[(ordinal - 1) % 4],
                 CurrentRole = persona.Role, PreferredRoleId = roles[CatalogSeedData.Normalize(persona.Role)],
                 AvailableHoursPerWeek = new[] { 5, 8, 10, 12, 15, 20, 25 }[(ordinal - 1) % 7],
-                AvatarSource = "default", CreatedAt = createdAt,
+                // Synthetic Development accounts are available for teammate discovery.
+                // Ordinary user profiles keep the default opt-out; existing seed users are never overwritten.
+                OpenToTeamInvitations = true, AvatarSource = "default", CreatedAt = createdAt,
                 ProfessionalInterests = "Ứng dụng cộng đồng, mã nguồn mở và sản phẩm cho sinh viên.",
                 LearningGoals = "Rèn luyện làm việc nhóm, phát triển sản phẩm và kiểm thử tự động.",
                 PreviousProjectsAndContribution = "Đã tham gia hai dự án thực hành tại Tindy Demo Lab; chi tiết trong Experiences.",

@@ -15,16 +15,27 @@ public sealed class ProjectApplicationRepository(TindyDbContext db, TimeProvider
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await ProjectWriteLock.AcquireAsync(db, projectId, ct);
+        await ProjectInvitationPendingState.LockAsync(db, projectId, userId, ct);
         var now = clock.GetUtcNow().UtcDateTime;
+        await ProjectInvitationPendingState.NormalizeAsync(db, projectId, userId, now, ct);
+        // Business conflicts must not roll back the elapsed Invitation normalization.
+        ProjectException? admissionError = null;
         if (await db.ProjectApplications.AnyAsync(a => a.ProjectId == projectId && a.ApplicantId == userId && a.Status == "pending", ct))
-            throw PendingConflict();
+            admissionError = PendingConflict();
+        else if (await ProjectInvitationPendingState.HasPendingAsync(db, projectId, userId, now, ct))
+            admissionError = new ProjectException(409, "INVITATION_ALREADY_PENDING", "A pending invitation already exists for this member and project.");
         // Shared eligibility is evaluated again under the project lock. Rejected
         // and withdrawn history is deliberately absent from this predicate.
-        if (!await DiscoveryEligibility.ForMember(db.Projects, userId, now).AnyAsync(p => p.ProjectId == projectId, ct))
-            throw new ProjectException(409, "PROJECT_NOT_ELIGIBLE", "Project is not eligible for a new application.");
-        if (!await db.ProjectPositions.AnyAsync(p => p.ProjectId == projectId && p.PositionId == request.PositionId &&
+        else if (!await DiscoveryEligibility.ForMember(db.Projects, userId, now).AnyAsync(p => p.ProjectId == projectId, ct))
+            admissionError = new ProjectException(409, "PROJECT_NOT_ELIGIBLE", "Project is not eligible for a new application.");
+        else if (!await db.ProjectPositions.AnyAsync(p => p.ProjectId == projectId && p.PositionId == request.PositionId &&
             p.Status == "open" && p.FilledCount < p.RequiredCount, ct))
-            throw new ProjectException(409, "POSITION_UNAVAILABLE", "Selected position is not open or has no remaining slots.");
+            admissionError = new ProjectException(409, "POSITION_UNAVAILABLE", "Selected position is not open or has no remaining slots.");
+        if (admissionError != null)
+        {
+            await transaction.CommitAsync(ct);
+            throw admissionError;
+        }
         var application = new ProjectApplication
         {
             ApplicationId = Guid.NewGuid(), ProjectId = projectId, PositionId = request.PositionId,
@@ -33,7 +44,11 @@ public sealed class ProjectApplicationRepository(TindyDbContext db, TimeProvider
         db.ProjectApplications.Add(application);
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException e) when (e.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "ux_project_applications_pending" })
-        { throw PendingConflict(); }
+        {
+            db.Entry(application).State = EntityState.Detached;
+            await transaction.CommitAsync(ct);
+            throw PendingConflict();
+        }
         await transaction.CommitAsync(ct);
         return Map(application);
     }

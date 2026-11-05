@@ -88,6 +88,7 @@ public sealed class DevelopmentSeedingTests : IClassFixture<TindyApiFactory>
         Assert.All(users, user =>
         {
             Assert.True(user.IsOnboardingCompleted);
+            Assert.True(user.Profile!.OpenToTeamInvitations);
             Assert.Equal(7, user.OnboardingSteps.Count);
             Assert.Single(user.UserRoles);
             Assert.NotNull(user.Profile!.PreferredRoleId);
@@ -153,8 +154,33 @@ public sealed class DevelopmentSeedingTests : IClassFixture<TindyApiFactory>
         Assert.Equal(50, seen.Count);
         Assert.True(scores.Count > 1);
 
+        // The real Development seed is immediately usable by the normal teammate API.
+        using var leaderLogin = await client.PostAsJsonAsync("/api/auth/login", new { identifier = "demo01@tindy.test", password = Password });
+        Assert.Equal(HttpStatusCode.OK, leaderLogin.StatusCode);
+        using var leaderAuth = JsonDocument.Parse(await leaderLogin.Content.ReadAsStringAsync());
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            leaderAuth.RootElement.GetProperty("data").GetProperty("access_token").GetString());
+        var leaderId = users[0].UserId;
+        var recruitingProject = projects.First(project => project.LeaderId == leaderId);
+        var positionId = recruitingProject.Positions.First().PositionId;
+        using var teammates = await Data(await client.GetAsync(
+            $"/api/projects/{recruitingProject.ProjectId}/positions/{positionId}/candidates?limit=20"));
+        Assert.Equal("teammates-v1", teammates.RootElement.GetProperty("feed_version").GetString());
+        var candidates = teammates.RootElement.GetProperty("items").EnumerateArray().ToArray();
+        Assert.Equal(19, candidates.Length);
+        Assert.DoesNotContain(candidates, card => card.GetProperty("candidate").GetProperty("user_id").GetGuid() == leaderId);
+        Assert.Contains(candidates, card => card.GetProperty("candidate").GetProperty("user_id").GetGuid() == users[^1].UserId);
+        Assert.All(candidates, card =>
+        {
+            Assert.Equal("rule-v1", card.GetProperty("matching").GetProperty("algorithm_version").GetString());
+            Assert.Equal(positionId, card.GetProperty("matching").GetProperty("best_position").GetProperty("position_id").GetGuid());
+            Assert.False(card.GetProperty("candidate").TryGetProperty("email", out _));
+        });
+        Assert.False(await db.UserProfiles.Where(user => user.UserId == originalId).Select(user => user.OpenToTeamInvitations).SingleAsync());
+
         var editedUser = users[^1];
         editedUser.Profile!.DisplayName = "Edited by tester";
+        editedUser.Profile.OpenToTeamInvitations = false;
         var changedHash = new PasswordHasher().HashPassword("ChangedByTester!2026");
         editedUser.Credential!.PasswordHash = changedHash;
         var editedProject = projects[0];
@@ -175,6 +201,7 @@ public sealed class DevelopmentSeedingTests : IClassFixture<TindyApiFactory>
         Assert.Equal(40, await db.ProfileExperiences.CountAsync());
         Assert.Equal(30, await db.UserCertificates.CountAsync());
         Assert.Equal("Edited by tester", await db.UserProfiles.Where(user => user.UserId == editedUser.UserId).Select(user => user.DisplayName).SingleAsync());
+        Assert.False(await db.UserProfiles.Where(user => user.UserId == editedUser.UserId).Select(user => user.OpenToTeamInvitations).SingleAsync());
         Assert.Equal(changedHash, await db.UserCredentials.Where(user => user.UserId == editedUser.UserId).Select(user => user.PasswordHash).SingleAsync());
         Assert.Equal("archived", await db.Projects.Where(project => project.ProjectId == editedProject.ProjectId).Select(project => project.Status).SingleAsync());
         Assert.Equal(originalCutoff, await db.Projects.Where(project => project.ProjectId == editedProject.ProjectId).Select(project => project.RecruitmentClosesAt).SingleAsync());

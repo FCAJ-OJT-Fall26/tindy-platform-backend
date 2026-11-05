@@ -108,10 +108,12 @@ public sealed class OAuthHttpContractTests
         var response = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         Assert.Equal(allowed, response.Headers.Contains("Access-Control-Allow-Origin"));
-        Assert.False(response.Headers.Contains("Access-Control-Allow-Credentials"));
+        // The existing policy permits credentials only for explicitly allowed origins.
+        Assert.Equal(allowed, response.Headers.Contains("Access-Control-Allow-Credentials"));
         if (allowed)
         {
             Assert.Equal(origin, response.Headers.GetValues("Access-Control-Allow-Origin").Single());
+            Assert.Equal("true", response.Headers.GetValues("Access-Control-Allow-Credentials").Single());
             Assert.Contains("authorization", string.Join(",", response.Headers.GetValues("Access-Control-Allow-Headers")), StringComparison.OrdinalIgnoreCase);
         }
     }

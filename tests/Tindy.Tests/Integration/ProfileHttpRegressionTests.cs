@@ -44,6 +44,11 @@ public sealed class ProfileHttpRegressionTests : IClassFixture<TindyApiFactory>
         Assert.Equal(HttpStatusCode.OK, selfResponse.StatusCode);
         using var self = await ReadJsonAsync(selfResponse);
         var ownerId = self.RootElement.GetProperty("data").GetProperty("user_id").GetGuid();
+        Assert.False(self.RootElement.GetProperty("data").GetProperty("open_to_team_invitations").GetBoolean());
+        using var consent = await ReadJsonAsync(await owner.PatchAsJsonAsync("/api/me/profile", new { open_to_team_invitations = true }));
+        Assert.True(consent.RootElement.GetProperty("data").GetProperty("open_to_team_invitations").GetBoolean());
+        using var visible = await ReadJsonAsync(await another.GetAsync($"/api/users/{ownerId}/profile"));
+        Assert.False(visible.RootElement.GetProperty("data").TryGetProperty("open_to_team_invitations", out _));
         Assert.Equal(0, self.RootElement.GetProperty("data").GetProperty("experiences_count").GetInt32());
         Assert.Equal(0, self.RootElement.GetProperty("data").GetProperty("certificates_count").GetInt32());
 

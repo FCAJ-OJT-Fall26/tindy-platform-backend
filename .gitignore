@@ -55,5 +55,9 @@ playwright-report/
 test-results/
 coverage/
 
+# Local temporary test outputs, caches, scripts and baseline copies.
+.tmp
+.tmp-*
+
 # Local seed verification artifacts and temporary demo account credentials.
 /.tmp-development-seed/

@@ -243,8 +243,9 @@ public sealed class ProjectRepository : IProjectRepository
         await LockEditableProjectAsync(position.ProjectId, cancellationToken);
         if (await _context.ProjectMembers.AnyAsync(m => m.PositionId == position.PositionId, cancellationToken) ||
             await _context.ProjectApplications.AnyAsync(a => a.PositionId == position.PositionId, cancellationToken) ||
+            await _context.ProjectInvitations.AnyAsync(i => i.PositionId == position.PositionId, cancellationToken) ||
             await _context.ProjectPositions.AnyAsync(p => p.PositionId == position.PositionId && p.FilledCount > 0, cancellationToken))
-            throw new ProjectException(409, "POSITION_IN_USE", "A position with members or application history cannot be deleted. Close it instead.");
+            throw new ProjectException(409, "POSITION_IN_USE", "A position with members, application or invitation history cannot be deleted. Close it instead.");
         _context.ProjectPositions.Remove(position);
         await _context.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
