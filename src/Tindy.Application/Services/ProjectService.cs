@@ -349,7 +349,8 @@ public sealed class ProjectService : IProjectService
                     m.User?.Profile?.AvatarUrl,
                     GetInitials(memberName),
                     m.IsLeader,
-                    m.JoinedAt);
+                    m.JoinedAt,
+                    m.PositionId);
             }).ToList();
 
         var positions = project.Positions.Select(pos => new ProjectPositionDto(

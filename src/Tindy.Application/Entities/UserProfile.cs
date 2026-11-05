@@ -4,6 +4,7 @@ public class UserProfile
 {
     public Guid UserId { get; set; }
     public string DisplayName { get; set; } = null!;
+    public bool OpenToTeamInvitations { get; set; }
     public string? PhoneNumber { get; set; }
     public string? Headline { get; set; }
     public string? Bio { get; set; }

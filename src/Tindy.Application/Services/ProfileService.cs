@@ -68,6 +68,8 @@ public sealed class ProfileService : IProfileService
             }
 
             // Only supplied fields may be changed; null clears optional fields.
+            if (request.OpenToTeamInvitations.IsSpecified)
+                profile.OpenToTeamInvitations = request.OpenToTeamInvitations.Value;
             if (request.DisplayName.IsSpecified) profile.DisplayName = request.DisplayName.Value!;
             if (request.University.IsSpecified) profile.University = request.University.Value!;
             if (request.PhoneNumber.IsSpecified) profile.PhoneNumber = request.PhoneNumber.Value;

@@ -63,6 +63,11 @@ IDs):
 
 ## Public responses and authorization
 
+Project Detail includes nullable `position_id` on every `data.team_members` item,
+from the existing membership record. The leader can have `position_id: null`.
+All existing member fields remain available. See
+[Notifications V1 and active member positions](NOTIFICATIONS_V1.md) for examples.
+
 POST creation, GET list, GET detail and PUT update expose only these Leader fields:
 
 ```json

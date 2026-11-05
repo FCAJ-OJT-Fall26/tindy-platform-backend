@@ -20,6 +20,8 @@ public class UserProfileConfiguration
         });
 
         builder.HasKey(x => x.UserId);
+        builder.Property(x => x.OpenToTeamInvitations).HasColumnName("open_to_team_invitations")
+            .HasDefaultValue(false).IsRequired();
 
         builder.Property(x => x.UserId)
             .HasColumnName("user_id");

@@ -44,6 +44,7 @@ Khối `finally` xóa hai biến môi trường trong phiên PowerShell sau khi 
 
 - Catalog sau seed: 84 skills, 10 nhóm skills; 35 skills và 3 nhóm được bổ sung so với catalog trước đó.
 - 20 tài khoản, có profile, skills, preferred role, availability và hoàn tất Onboarding.
+- Các tài khoản demo tạo mới bật sẵn `open_to_team_invitations` để kiểm thử Find Teammates bằng dữ liệu Backend. Tài khoản thật vẫn mặc định tắt; chạy seed lại không ghi đè lựa chọn của tài khoản đã có.
 - 40 Experiences (hai cho mỗi người) và 30 Certificates dạng metadata demo; không có file chứng chỉ đính kèm.
 - 50 Projects, 150 Positions. Mỗi Project ban đầu có một Leader, capacity 7 và ba Positions, mỗi Position có hai slots.
 - Sáu tài khoản đầu dẫn dắt các Projects. Tất cả vẫn mang RBAC Member, không có quyền Admin; Leader có thể Apply vào Project của Leader khác.

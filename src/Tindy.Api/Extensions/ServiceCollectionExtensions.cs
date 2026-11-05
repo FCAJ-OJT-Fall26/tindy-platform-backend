@@ -269,6 +269,11 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<DiscoveryFeedSessions>();
+        services.AddSingleton<TeammateDiscoveryFeedSessions>();
+        services.AddScoped<TeammateDiscoveryService>();
+        services.AddScoped<TeammateDiscoveryInteractionService>();
+        services.AddScoped<ProjectInvitationService>();
+        services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<DiscoveryService>();
         services.AddScoped<ProjectApplicationService>();
 
@@ -300,6 +305,13 @@ public static class ServiceCollectionExtensions
 
             // Ordinary per-user burst protection; no reject/withdraw cooldown.
             options.AddPolicy("project-applications", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.User.FindFirst("sub")?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true
+                }));
+
+            options.AddPolicy("project-invitations", context => RateLimitPartition.GetFixedWindowLimiter(
                 context.User.FindFirst("sub")?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 _ => new FixedWindowRateLimiterOptions
                 {
@@ -434,7 +446,9 @@ public static class ServiceCollectionExtensions
                     : isMediaRequest
                         ? "MEDIA_RATE_LIMITED"
                         : httpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName == "project-applications"
-                            ? "APPLICATION_RATE_LIMITED" : "AUTH_TOO_MANY_ATTEMPTS";
+                            ? "APPLICATION_RATE_LIMITED"
+                            : httpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName == "project-invitations"
+                                ? "INVITATION_RATE_LIMITED" : "AUTH_TOO_MANY_ATTEMPTS";
 
                 problem.Extensions["traceId"] =
                     httpContext.TraceIdentifier;

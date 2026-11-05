@@ -13,6 +13,7 @@ public readonly record struct OptionalField<T>(bool IsSpecified, T? Value)
 
 public sealed record UpdateProfileRequest
 {
+    public OptionalField<bool> OpenToTeamInvitations { get; init; }
     public OptionalField<string?> DisplayName { get; init; }
     public OptionalField<string?> University { get; init; }
     public OptionalField<string?> PhoneNumber { get; init; }
@@ -44,7 +45,7 @@ public static class ProfilePatchParser
         "location", "current_role", "preferred_role_id", "available_hours_per_week",
         "professional_interests", "learning_goals", "previous_projects_and_contribution",
         "technologies_to_learn", "github_url", "linkedin_url", "personal_website_url",
-        "resume_url", "public_email", "skill_ids"
+        "resume_url", "public_email", "skill_ids", "open_to_team_invitations"
     };
 
     public static UpdateProfileRequest Parse(JsonElement json)
@@ -141,8 +142,21 @@ public static class ProfilePatchParser
             return OptionalField<IReadOnlyList<Guid>?>.Specified(ids);
         }
 
+        OptionalField<bool> InvitationOptIn()
+        {
+            const string name = "open_to_team_invitations";
+            if (!properties.TryGetValue(name, out var value)) return default;
+            if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                errors[name] = ["The field must be a boolean."];
+                return default;
+            }
+            return OptionalField<bool>.Specified(value.GetBoolean());
+        }
+
         var request = new UpdateProfileRequest
         {
+            OpenToTeamInvitations = InvitationOptIn(),
             DisplayName = Text("display_name", 100, required: true),
             University = Text("university", 255, required: true),
             PhoneNumber = Text("phone_number", 20),

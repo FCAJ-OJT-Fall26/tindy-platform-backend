@@ -18,6 +18,12 @@ namespace Tindy.Tests.Profile;
 /// </summary>
 public sealed class ProfileSecurityRegressionTests
 {
+    [Fact]
+    public void InvitationConsent_IsOnlyPartOfOwnerContract()
+    {
+        Assert.NotNull(typeof(MyProfileResponse).GetProperty("OpenToTeamInvitations"));
+        Assert.Null(typeof(MemberProfileResponse).GetProperty("OpenToTeamInvitations"));
+    }
     public static IEnumerable<object[]> ProtectedControllers =>
     [
         [typeof(MyProfileController)],

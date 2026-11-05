@@ -35,6 +35,29 @@ public sealed class ProfilePartialUpdateTests
     }
 
     [Theory]
+    [InlineData("{\"open_to_team_invitations\":null}")]
+    [InlineData("{\"open_to_team_invitations\":\"true\"}")]
+    [InlineData("{\"open_to_team_invitations\":1}")]
+    [InlineData("{\"open_to_team_invitations\":true,\"open_to_team_invitations\":false}")]
+    public void InvitationOptIn_RejectsNonBooleanAndDuplicate(string json) =>
+        Assert.Throws<ProfileValidationException>(() => Parse(json));
+
+    [Fact]
+    public async Task InvitationOptIn_RequiresExplicitConsent_AndOmissionPreservesIt()
+    {
+        var repo = new FakeRepository();
+        var service = new ProfileService(repo);
+        Assert.False(repo.User.Profile!.OpenToTeamInvitations);
+        await service.UpdateMyProfileAsync(UserId, Parse("""{"open_to_team_invitations":true}"""));
+        Assert.True(repo.User.Profile.OpenToTeamInvitations);
+        await service.UpdateMyProfileAsync(UserId, Parse("""{"bio":"unchanged consent"}"""));
+        Assert.True(repo.User.Profile.OpenToTeamInvitations);
+        await service.UpdateMyProfileAsync(UserId, Parse("""{"open_to_team_invitations":false}"""));
+        Assert.False(repo.User.Profile.OpenToTeamInvitations);
+        Assert.Null(typeof(MemberProfileResponse).GetProperty("OpenToTeamInvitations"));
+    }
+
+    [Theory]
     [InlineData("{}")]
     [InlineData("null")]
     [InlineData("[]")]

@@ -97,7 +97,8 @@ public sealed record ProjectTeamMemberDto(
     string? AvatarUrl,
     string? Initials,
     bool IsLeader,
-    DateTime JoinedAt);
+    DateTime JoinedAt,
+    Guid? PositionId = null);
 
 public sealed record PositionSkillDto(
     Guid SkillId,

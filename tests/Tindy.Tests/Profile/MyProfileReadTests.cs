@@ -37,6 +37,7 @@ public sealed class MyProfileReadTests
         Assert.Equal("Backend Developer", actual.PreferredRole?.Name);
         Assert.Equal(SkillId, Assert.Single(actual.Skills).SkillId);
         Assert.Equal(2, actual.ExperiencesCount);
+        Assert.False(actual.OpenToTeamInvitations);
         Assert.Equal(1, actual.CertificatesCount);
     }
 

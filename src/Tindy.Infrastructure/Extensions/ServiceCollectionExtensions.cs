@@ -83,6 +83,10 @@ public static class ServicesCollectionExtensions
         // Projects persistence (Group B)
         services.AddScoped<IProjectRepository, ProjectRepository>();
         services.AddScoped<IDiscoveryRepository, DiscoveryRepository>();
+        services.AddScoped<ITeammateDiscoveryRepository, TeammateDiscoveryRepository>();
+        services.AddScoped<ITeammateDiscoveryInteractionRepository, TeammateDiscoveryInteractionRepository>();
+        services.AddScoped<IProjectInvitationRepository, ProjectInvitationRepository>();
+        services.AddScoped<INotificationRepository, NotificationRepository>();
         services.AddScoped<IDiscoveryInteractionRepository, DiscoveryInteractionRepository>();
         services.AddScoped<IProjectApplicationRepository, ProjectApplicationRepository>();
 
