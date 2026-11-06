@@ -9,6 +9,7 @@ public sealed class ChatMessage
     public Guid? ContextProjectId { get; set; }
     public string? ContextProjectName { get; set; }
     public string? ContextPositionTitle { get; set; }
+    public string MessageType { get; set; } = "text";
     public string Body { get; set; } = null!;
     public Guid? ClientMessageId { get; set; }
     public DateTime CreatedAt { get; set; }

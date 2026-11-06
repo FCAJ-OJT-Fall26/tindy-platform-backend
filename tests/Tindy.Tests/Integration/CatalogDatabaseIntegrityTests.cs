@@ -56,7 +56,7 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
             "projects", "project_members", "project_positions", "position_skills",
             "discovery_project_interactions", "project_applications",
             // Keep the exact table set current with the feature migrations.
-            "conversations", "conversation_participants", "chat_messages",
+            "conversations", "conversation_participants", "chat_messages", "chat_requests", "chat_blocks", "chat_request_events",
             "project_invitations", "teammate_discovery_interactions", "notifications"
         };
         Assert.True(expected.ToHashSet().SetEquals(tables),
@@ -67,7 +67,10 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
             FROM information_schema.columns
             WHERE table_schema = 'public'
               AND ((table_name='user_profiles' AND column_name IN ('preferred_role_id','preferred_role','open_to_team_invitations'))
-                OR (table_name='skills' AND column_name='is_active'))
+                OR (table_name='skills' AND column_name='is_active')
+                OR (table_name='conversations' AND column_name='project_id')
+                OR (table_name='conversation_participants' AND column_name='left_at')
+                OR (table_name='chat_messages' AND column_name='message_type'))
             """;
         var columns = new List<string>();
         await using (var reader = await command.ExecuteReaderAsync())
@@ -77,6 +80,9 @@ public sealed class CatalogDatabaseIntegrityTests : IClassFixture<TindyApiFactor
         Assert.Contains("user_profiles.preferred_role_id", columns);
         Assert.Contains("user_profiles.open_to_team_invitations", columns);
         Assert.Contains("skills.is_active", columns);
+        Assert.Contains("conversations.project_id", columns);
+        Assert.Contains("conversation_participants.left_at", columns);
+        Assert.Contains("chat_messages.message_type", columns);
         Assert.DoesNotContain("user_profiles.preferred_role", columns);
 
         command.CommandText = """

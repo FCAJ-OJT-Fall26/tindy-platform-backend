@@ -50,7 +50,8 @@ public sealed class ChatRequestHttpTests(TindyApiFactory factory) : IClassFixtur
         // The winning sender's identical retry has one stable request ID.
         var retry = await Data(await a.PostAsJsonAsync(Path, first)); Assert.Equal(Id(one), Id(retry));
         await Mutate(async db => Assert.Single(await db.ChatRequests.Where(x => x.ProjectId == d.Project).ToListAsync()));
-        Assert.Empty((await Data(await a.GetAsync("/api/chat/conversations"))).EnumerateArray());
+        // Pending consent must not create a DIRECT room; the leader already has a project group.
+        Assert.DoesNotContain((await Data(await a.GetAsync("/api/chat/conversations"))).EnumerateArray(), c => c.GetProperty("type").GetString() == "direct");
     }
     [Fact]
     public async Task RejectionAndCancellationAllowImmediateRetry_WithoutQuotaRefund()

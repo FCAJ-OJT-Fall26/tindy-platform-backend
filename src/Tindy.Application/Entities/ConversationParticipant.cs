@@ -4,6 +4,7 @@ public sealed class ConversationParticipant
 {
     public Guid ConversationId { get; set; }
     public Guid UserId { get; set; }
+    public DateTime? LeftAt { get; set; }
     public DateTime JoinedAt { get; set; }
     public Guid? LastReadMessageId { get; set; }
     public DateTime? LastReadAt { get; set; }
