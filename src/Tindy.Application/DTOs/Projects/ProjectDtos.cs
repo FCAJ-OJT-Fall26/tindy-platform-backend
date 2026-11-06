@@ -25,7 +25,8 @@ public sealed record CreateProjectRequest(
     string? ColorTheme,
     IReadOnlyList<string> Goals,
     IReadOnlyList<CreateProjectPositionRequest> Positions,
-    DateOnly? RecruitmentClosingDate = null);
+    DateOnly? RecruitmentClosingDate = null,
+    string? GithubUrl = null);
 
 public sealed record ProjectLeaderSummaryDto(
     Guid UserId,
@@ -47,7 +48,8 @@ public sealed record CreateProjectResponse(
     DateOnly RecruitmentClosingDate,
     DateTime RecruitmentClosesAt,
     bool IsRecruitmentOpen,
-    int ClosingDaysLeft);
+    int ClosingDaysLeft,
+    string? GithubUrl = null);
 
 public sealed record OpenPositionSummaryDto(
     Guid PositionId,
@@ -76,7 +78,8 @@ public sealed record ProjectSummaryDto(
     int? ClosingDaysLeft,
     DateOnly RecruitmentClosingDate,
     DateTime RecruitmentClosesAt,
-    bool IsRecruitmentOpen);
+    bool IsRecruitmentOpen,
+    string? GithubUrl = null);
 
 public sealed record PaginationMeta(
     int CurrentPage,
@@ -139,7 +142,8 @@ public sealed record ProjectDetailDto(
     IReadOnlyList<ProjectPositionDto> Positions,
     DateOnly RecruitmentClosingDate,
     DateTime RecruitmentClosesAt,
-    bool IsRecruitmentOpen);
+    bool IsRecruitmentOpen,
+    string? GithubUrl = null);
 
 public sealed record UpdateProjectRequest(
     string Name,
@@ -152,7 +156,8 @@ public sealed record UpdateProjectRequest(
     int MaxTeamCapacity,
     string? ColorTheme,
     IReadOnlyList<string> Goals,
-    DateOnly? RecruitmentClosingDate = null);
+    DateOnly? RecruitmentClosingDate = null,
+    string? GithubUrl = null);
 
 public sealed record MyLeadingProjectDto(
     Guid ProjectId,

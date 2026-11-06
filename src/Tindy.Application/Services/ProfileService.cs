@@ -12,6 +12,17 @@ public sealed class ProfileService : IProfileService
 
     public ProfileService(IProfileRepository profileRepository) => _profileRepository = profileRepository;
 
+    public Task<MemberSearchResponse> SearchMembersAsync(string? query, int page = 1, int pageSize = 10, CancellationToken cancellationToken = default)
+    {
+        var text = query?.Trim() ?? "";
+        if (text.Length > 100 || page < 1 || page > 1000 || pageSize < 1 || pageSize > 20)
+            throw new ProfileValidationException(new Dictionary<string, string[]> {
+                ["search"] = ["Search must be at most 100 characters, page 1–1000 and page_size 1–20."] });
+        // Do not turn an empty or one-character query into a directory of all users.
+        if (text.Length < 2) return Task.FromResult(new MemberSearchResponse([], page, pageSize, false));
+        return _profileRepository.SearchMembersAsync(text, page, pageSize, cancellationToken);
+    }
+
     public async Task<MyProfileResponse> GetMyProfileAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         if (userId == Guid.Empty)

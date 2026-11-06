@@ -87,6 +87,7 @@ public sealed class DevelopmentSeedingTests : IClassFixture<TindyApiFactory>
         Assert.Equal(20, users.Count);
         Assert.All(users, user =>
         {
+            Assert.Equal(DevelopmentDataSeeder.DemoGithubUrl, user.Profile!.GithubUrl);
             Assert.True(user.IsOnboardingCompleted);
             Assert.True(user.Profile!.OpenToTeamInvitations);
             Assert.Equal(7, user.OnboardingSteps.Count);
@@ -113,6 +114,7 @@ public sealed class DevelopmentSeedingTests : IClassFixture<TindyApiFactory>
         Assert.Equal(6, projects.Select(project => project.LeaderId).Distinct().Count());
         Assert.All(projects, project =>
         {
+            Assert.Equal(DevelopmentDataSeeder.DemoGithubUrl, project.GithubUrl);
             Assert.Equal("recruiting", project.Status);
             Assert.True(project.RecruitmentClosesAt > DateTime.UtcNow);
             var member = Assert.Single(project.Members);
@@ -184,6 +186,10 @@ public sealed class DevelopmentSeedingTests : IClassFixture<TindyApiFactory>
         var changedHash = new PasswordHasher().HashPassword("ChangedByTester!2026");
         editedUser.Credential!.PasswordHash = changedHash;
         var editedProject = projects[0];
+        editedUser.Profile!.GithubUrl = "https://github.com/custom-demo/profile";
+        editedProject.GithubUrl = "https://github.com/custom-demo/project";
+        users[1].Profile!.GithubUrl = null;
+        projects[1].GithubUrl = null;
         editedProject.Status = "archived";
         editedProject.ArchivedAt = DateTime.UtcNow;
         editedProject.RecruitmentClosesAt = DateTime.UtcNow.AddDays(-3);
@@ -195,6 +201,12 @@ public sealed class DevelopmentSeedingTests : IClassFixture<TindyApiFactory>
         TindySeedRunner.Seed(db, Options("AnotherSeedPassword!2026"));
         await TindySeedRunner.SeedAsync(db, development: Options());
         db.ChangeTracker.Clear();
+        Assert.Equal("https://github.com/custom-demo/profile", await db.UserProfiles.Where(p => p.UserId == editedUser.UserId).Select(p => p.GithubUrl).SingleAsync());
+        Assert.Equal("https://github.com/custom-demo/project", await db.Projects.Where(p => p.ProjectId == editedProject.ProjectId).Select(p => p.GithubUrl).SingleAsync());
+        Assert.Equal(DevelopmentDataSeeder.DemoGithubUrl, await db.UserProfiles.Where(p => p.UserId == users[1].UserId).Select(p => p.GithubUrl).SingleAsync());
+        Assert.Equal(DevelopmentDataSeeder.DemoGithubUrl, await db.Projects.Where(p => p.ProjectId == projects[1].ProjectId).Select(p => p.GithubUrl).SingleAsync());
+        Assert.Null(await db.UserProfiles.Where(p => p.UserId == originalId).Select(p => p.GithubUrl).SingleAsync());
+        Assert.Null(await db.Projects.Where(p => p.ProjectId == originalProjectId).Select(p => p.GithubUrl).SingleAsync());
         Assert.Equal(21, await db.Users.CountAsync());
         Assert.Equal(51, await db.Projects.CountAsync());
         Assert.Equal(150, await db.ProjectPositions.CountAsync());

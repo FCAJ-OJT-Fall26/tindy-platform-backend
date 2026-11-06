@@ -219,6 +219,8 @@ public sealed class ProfilePartialUpdateTests
 
     private sealed class FakeRepository : IProfileRepository
     {
+        public Task<MemberSearchResponse> SearchMembersAsync(string query, int page, int pageSize, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public User User { get; private set; } = CreateUser();
         public bool AddedSkillsAreActive { get; set; } = true;
         public bool CurrentRoleIsActive { get; set; } = true;

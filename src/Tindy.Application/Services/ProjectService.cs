@@ -53,6 +53,7 @@ public sealed class ProjectService : IProjectService
             ProjectId = projectId,
             LeaderId = currentUserId,
             Name = request.Name.Trim(),
+            GithubUrl = NormalizeGithubUrl(request.GithubUrl),
             Tagline = request.Tagline?.Trim(),
             Description = request.Description.Trim(),
             Category = request.Category.Trim(),
@@ -138,7 +139,7 @@ public sealed class ProjectService : IProjectService
             RecruitmentDeadline.ClosingDate(created.RecruitmentClosesAt),
             created.RecruitmentClosesAt,
             RecruitmentDeadline.IsOpen(created, now),
-            RecruitmentDeadline.DaysLeft(created.RecruitmentClosesAt, now));
+            RecruitmentDeadline.DaysLeft(created.RecruitmentClosesAt, now), created.GithubUrl);
     }
 
     public async Task<PagedProjectsResponse> GetProjectsAsync(
@@ -188,7 +189,7 @@ public sealed class ProjectService : IProjectService
                 daysLeft,
                 RecruitmentDeadline.ClosingDate(p.RecruitmentClosesAt),
                 p.RecruitmentClosesAt,
-                RecruitmentDeadline.IsOpen(p, now));
+                RecruitmentDeadline.IsOpen(p, now), p.GithubUrl);
         }).ToList();
 
         var page = Math.Max(1, query.Page);
@@ -256,6 +257,7 @@ public sealed class ProjectService : IProjectService
                 request.RecruitmentClosingDate, _timeProvider.GetUtcNow().UtcDateTime);
 
         project.Name = request.Name.Trim();
+        project.GithubUrl = NormalizeGithubUrl(request.GithubUrl);
         project.Tagline = request.Tagline?.Trim();
         project.Description = request.Description.Trim();
         project.Category = request.Category.Trim();
@@ -394,11 +396,12 @@ public sealed class ProjectService : IProjectService
             positions,
             RecruitmentDeadline.ClosingDate(project.RecruitmentClosesAt),
             project.RecruitmentClosesAt,
-            RecruitmentDeadline.IsOpen(project, now));
+            RecruitmentDeadline.IsOpen(project, now), project.GithubUrl);
     }
 
     private static void ValidateCreateRequest(CreateProjectRequest request)
     {
+        NormalizeGithubUrl(request.GithubUrl);
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length < 3 || request.Name.Trim().Length > 150)
         {
             throw new ProjectException(400, "VALIDATION_FAILED", "Project name must be between 3 and 150 characters.");
@@ -462,6 +465,7 @@ public sealed class ProjectService : IProjectService
 
     private static void ValidateUpdateRequest(UpdateProjectRequest request)
     {
+        NormalizeGithubUrl(request.GithubUrl);
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length < 3 || request.Name.Trim().Length > 150)
         {
             throw new ProjectException(400, "VALIDATION_FAILED", "Project name must be between 3 and 150 characters.");
@@ -481,6 +485,20 @@ public sealed class ProjectService : IProjectService
         {
             throw new ProjectException(400, "VALIDATION_FAILED", "Expected commitment hours must be between 1 and 40.");
         }
+    }
+
+    private static string? NormalizeGithubUrl(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var url = value.Trim();
+        if (url.Length > 1000 || url.Any(char.IsWhiteSpace) || url.Contains('\\') ||
+            !Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != "https" ||
+            !uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) ||
+            !uri.IsDefaultPort || !string.IsNullOrEmpty(uri.UserInfo) ||
+            !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment) ||
+            !System.Text.RegularExpressions.Regex.IsMatch(uri.AbsolutePath, @"^/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?/?$"))
+            throw new ProjectException(400, "VALIDATION_FAILED", "GitHub URL must be an HTTPS github.com repository or organization link (at most 1000 characters).");
+        return url;
     }
 
     private static string GetInitials(string text)

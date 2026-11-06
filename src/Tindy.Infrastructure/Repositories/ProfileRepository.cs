@@ -12,6 +12,21 @@ public sealed class ProfileRepository : IProfileRepository
 
     public ProfileRepository(TindyDbContext context) => _context = context;
 
+    public async Task<MemberSearchResponse> SearchMembersAsync(string query, int page, int pageSize, CancellationToken cancellationToken = default)
+    {
+        var pattern = "%" + query.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
+        var items = await _context.Users.AsNoTracking()
+            .Where(user => user.Status == "active" && user.DeletedAt == null && user.IsOnboardingCompleted && user.Profile != null)
+            .Where(user => EF.Functions.ILike(user.Profile!.DisplayName, pattern, "\\") ||
+                (user.Username != null && EF.Functions.ILike(user.Username, pattern, "\\")))
+            .OrderBy(user => user.Profile!.DisplayName).ThenBy(user => user.UserId)
+            .Skip((page - 1) * pageSize).Take(pageSize + 1)
+            .Select(user => new MemberSearchItem(user.UserId, user.Username, user.Profile!.DisplayName,
+                user.Profile.University, user.Profile.Headline))
+            .ToListAsync(cancellationToken);
+        return new MemberSearchResponse(items.Take(pageSize).ToArray(), page, pageSize, items.Count > pageSize);
+    }
+
     public Task<MyProfileResponse?> GetMyProfileAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         // Project only the permitted fields. Never Include Credentials, OAuth accounts or roles.
