@@ -31,6 +31,65 @@ public sealed class ProjectHttpContractTests
     };
 
     [Theory]
+    [InlineData(null)]
+    [InlineData("   ")]
+    [InlineData("  https://github.com/FCAJ-OJT-Fall26  ")]
+    [InlineData("https://github.com/FCAJ-OJT-Fall26/tindy-platform")]
+    public async Task GithubLink_RoundTripsThroughCreateListDetailUpdateAndClear(string? value)
+    {
+        using var factory = new ProjectApiFactory();
+        using var client = factory.CreateHttpsClient(authenticated: true);
+        var request = ProjectServiceTests.CreateValidRequest() with { GithubUrl = value };
+        using var created = await client.PostAsJsonAsync("/api/projects", request, JsonOptions);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var data = await ReadDataAsync(created);
+        var expected = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        Assert.Equal(expected, data.GetProperty("github_url").GetString());
+        var id = data.GetProperty("project_id").GetGuid();
+        using var detail = await client.GetAsync($"/api/projects/{id}");
+        Assert.Equal(expected, (await ReadDataAsync(detail)).GetProperty("github_url").GetString());
+        using var list = await client.GetAsync("/api/projects");
+        Assert.Equal(expected, (await ReadDataAsync(list)).GetProperty("items")[0].GetProperty("github_url").GetString());
+        var update = new UpdateProjectRequest(request.Name, request.Tagline, request.Description, request.Category,
+            request.DifficultyLevel, request.ExpectedCommitmentHours, request.Duration, request.MaxTeamCapacity,
+            request.ColorTheme, request.Goals, GithubUrl: "https://github.com/FCAJ-OJT-Fall26/new-repo");
+        using var updated = await client.PutAsJsonAsync($"/api/projects/{id}", update, JsonOptions);
+        Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
+        Assert.Equal(update.GithubUrl, (await ReadDataAsync(updated)).GetProperty("github_url").GetString());
+        using var cleared = await client.PutAsJsonAsync($"/api/projects/{id}", update with { GithubUrl = " " }, JsonOptions);
+        Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
+        Assert.Null((await ReadDataAsync(cleared)).GetProperty("github_url").GetString());
+    }
+
+    [Theory]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("http://github.com/team/repo")]
+    [InlineData("https://github.com.evil.test/team/repo")]
+    [InlineData("https://user:pass@github.com/team/repo")]
+    [InlineData("https://github.com/team/repo?token=secret")]
+    [InlineData("https://github.com/team/repo#readme")]
+    [InlineData("https://github.com/")]
+    [InlineData("https://github.com/team/repo/issues")]
+    [InlineData("https://github.com/team/my repo")]
+    public async Task InvalidGithubLink_IsRejectedBeforeCreateOrUpdate(string value)
+    {
+        using var factory = new ProjectApiFactory();
+        using var client = factory.CreateHttpsClient(authenticated: true);
+        var request = ProjectServiceTests.CreateValidRequest();
+        using var rejected = await client.PostAsJsonAsync("/api/projects", request with { GithubUrl = value }, JsonOptions);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Empty(factory.Repository.Projects);
+        using var created = await client.PostAsJsonAsync("/api/projects", request, JsonOptions);
+        var id = (await ReadDataAsync(created)).GetProperty("project_id").GetGuid();
+        var update = new UpdateProjectRequest("Changed name", request.Tagline, request.Description, request.Category,
+            request.DifficultyLevel, request.ExpectedCommitmentHours, request.Duration, request.MaxTeamCapacity,
+            request.ColorTheme, request.Goals, GithubUrl: value);
+        using var invalidUpdate = await client.PutAsJsonAsync($"/api/projects/{id}", update, JsonOptions);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidUpdate.StatusCode);
+        Assert.Equal(request.Name, Assert.Single(factory.Repository.Projects).Name);
+    }
+
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public async Task ProjectResponses_KeepPublicLeaderFields_AndOptionalPositionDescription(bool withDescription)

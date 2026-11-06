@@ -5,6 +5,7 @@ public class Project
     public Guid ProjectId { get; set; }
     public Guid LeaderId { get; set; }
     public string Name { get; set; } = null!;
+    public string? GithubUrl { get; set; }
     public string? Tagline { get; set; }
     public string Description { get; set; } = null!;
     public string Category { get; set; } = null!;

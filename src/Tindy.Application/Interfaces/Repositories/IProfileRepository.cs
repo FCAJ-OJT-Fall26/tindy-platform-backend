@@ -5,6 +5,7 @@ namespace Tindy.Application.Interfaces.Repositories;
 
 public interface IProfileRepository
 {
+    Task<MemberSearchResponse> SearchMembersAsync(string query, int page, int pageSize, CancellationToken cancellationToken = default);
     Task<MyProfileResponse?> GetMyProfileAsync(Guid userId, CancellationToken cancellationToken = default);
 
     Task<MemberProfileResponse?> GetMemberProfileAsync(Guid userId, CancellationToken cancellationToken = default);

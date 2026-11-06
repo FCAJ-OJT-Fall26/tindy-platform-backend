@@ -9,6 +9,7 @@ namespace Tindy.Infrastructure.Persistence.Seeding;
 /// <summary>Opt-in synthetic development data. Invoke through the EF migration seed lock.</summary>
 public static class DevelopmentDataSeeder
 {
+    public const string DemoGithubUrl = "https://github.com/FCAJ-OJT-Fall26";
     public const int UserCount = 20;
     public const int ProjectCount = 50;
 
@@ -24,7 +25,20 @@ public static class DevelopmentDataSeeder
             .Select(user => user.UserId).ToListAsync(cancellationToken);
         var existingProjects = await context.Set<Project>().AsNoTracking().Where(project => projectIds.Contains(project.ProjectId))
             .Select(project => project.ProjectId).ToListAsync(cancellationToken);
-        if (existingUsers.Count == UserCount && existingProjects.Count == ProjectCount) return;
+        // Backfill only missing links on deterministic demo IDs; preserve user edits.
+        var profilesWithoutGithub = await context.Set<UserProfile>()
+            .Where(profile => userIds.Contains(profile.UserId) && (profile.GithubUrl == null || profile.GithubUrl == ""))
+            .ToListAsync(cancellationToken);
+        foreach (var profile in profilesWithoutGithub) profile.GithubUrl = DemoGithubUrl;
+        var projectsWithoutGithub = await context.Set<Project>()
+            .Where(project => projectIds.Contains(project.ProjectId) && (project.GithubUrl == null || project.GithubUrl == ""))
+            .ToListAsync(cancellationToken);
+        foreach (var project in projectsWithoutGithub) project.GithubUrl = DemoGithubUrl;
+        if (existingUsers.Count == UserCount && existingProjects.Count == ProjectCount)
+        {
+            await context.SaveChangesAsync(cancellationToken);
+            return;
+        }
 
         // Do not adopt/reset another account that happens to use a reserved demo name/email.
         var usernames = Enumerable.Range(1, UserCount).Select(DevelopmentSeedData.Username).ToArray();
@@ -46,7 +60,7 @@ public static class DevelopmentDataSeeder
         var hasher = new PasswordHasher();
 
         // One SaveChanges transaction covers every new user/profile/experience/certificate/project graph.
-        // Existing roots are skipped, including edited profiles, changed passwords and archived Projects.
+        // Existing roots keep their edits; only the missing GitHub links above are backfilled.
         foreach (var ordinal in Enumerable.Range(1, UserCount))
         {
             if (existingUserIds.Contains(DevelopmentSeedData.Id(1, ordinal))) continue;
@@ -91,6 +105,7 @@ public static class DevelopmentDataSeeder
                 ProfessionalInterests = "Ứng dụng cộng đồng, mã nguồn mở và sản phẩm cho sinh viên.",
                 LearningGoals = "Rèn luyện làm việc nhóm, phát triển sản phẩm và kiểm thử tự động.",
                 PreviousProjectsAndContribution = "Đã tham gia hai dự án thực hành tại Tindy Demo Lab; chi tiết trong Experiences.",
+                GithubUrl = DemoGithubUrl,
                 TechnologiesToLearn = "Docker, CI/CD và thiết kế hệ thống.",
                 UserSkills = persona.Skills.Select(name => new UserSkill { UserId = id, SkillId = skills[CatalogSeedData.Normalize(name)] }).ToList()
             },
@@ -134,6 +149,7 @@ public static class DevelopmentDataSeeder
         var project = new Project
         {
             ProjectId = id, LeaderId = leaderId, Name = title + " [Demo]",
+            GithubUrl = DemoGithubUrl,
             Tagline = $"Cùng xây dựng {title} từ ý tưởng đến MVP.",
             Description = $"Dự án demo {title} thuộc lĩnh vực {track.Category}, dành cho đội sinh viên thực hành sản phẩm thực tế. " +
                 $"Nhóm tìm thành viên sử dụng {string.Join(", ", track.Required.Concat(track.Optional))}. " +

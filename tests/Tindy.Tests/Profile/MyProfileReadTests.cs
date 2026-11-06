@@ -150,6 +150,8 @@ public sealed class MyProfileReadTests
 
     private sealed class FakeProfileRepository(MyProfileResponse? profile) : IProfileRepository
     {
+        public Task<MemberSearchResponse> SearchMembersAsync(string query, int page, int pageSize, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Guid? LastUserId { get; private set; }
         public CancellationToken LastCancellationToken { get; private set; }
 

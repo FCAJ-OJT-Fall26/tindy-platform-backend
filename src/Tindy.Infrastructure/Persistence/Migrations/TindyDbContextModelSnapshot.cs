@@ -885,6 +885,11 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasDefaultValue(10)
                         .HasColumnName("expected_commitment_hours");
 
+                    b.Property<string>("GithubUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("github_url");
+
                     b.PrimitiveCollection<string>("Goals")
                         .IsRequired()
                         .HasColumnType("jsonb")

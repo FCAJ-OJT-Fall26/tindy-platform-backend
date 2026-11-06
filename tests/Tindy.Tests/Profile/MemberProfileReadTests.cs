@@ -224,6 +224,8 @@ public sealed class MemberProfileReadTests
 
     private sealed class FakeProfileRepository(MemberProfileResponse? response) : IProfileRepository
     {
+        public Task<MemberSearchResponse> SearchMembersAsync(string query, int page, int pageSize, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Guid? LastRequestedUserId { get; private set; }
         public CancellationToken LastCancellationToken { get; private set; }
 

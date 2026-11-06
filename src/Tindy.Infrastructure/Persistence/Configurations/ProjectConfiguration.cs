@@ -18,6 +18,7 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
         builder.Property(x => x.ProjectId).HasColumnName("project_id").ValueGeneratedNever();
         builder.Property(x => x.LeaderId).HasColumnName("leader_id").IsRequired();
         builder.Property(x => x.Name).HasColumnName("name").HasMaxLength(150).IsRequired();
+        builder.Property(x => x.GithubUrl).HasColumnName("github_url").HasMaxLength(1000);
         builder.Property(x => x.Tagline).HasColumnName("tagline").HasMaxLength(255);
         builder.Property(x => x.Description).HasColumnName("description").HasColumnType("text").IsRequired();
         builder.Property(x => x.Category).HasColumnName("category").HasMaxLength(100).IsRequired();

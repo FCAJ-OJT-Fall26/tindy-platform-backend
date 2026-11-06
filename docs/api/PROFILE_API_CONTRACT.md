@@ -320,3 +320,9 @@ Endpoint dùng **JSON object partial update** với `Content-Type: application/j
 **[STEP01 defaults cần review]:** Experience `description <=5000`, optional profile text `<=5000` khi PATCH, tối đa 20 skills/experience, `skill_ids` là required array (cho phép `[]`) trong Experience POST/PUT, `DELETE=204`, collection chưa phân trang, sort mặc định, empty PATCH bị từ chối. Đây là mặc định cụ thể để code không phải đoán. Nếu nhóm muốn đổi, cập nhật contract trước STEP 02 và ghi commit docs tương ứng.
 
 **Tình trạng runtime:** Chưa apply migration, chưa thử PostgreSQL instance của người dùng; không suy ra trạng thái database chạy từ source ZIP.
+
+## Member search
+
+`GET /api/users?q={name-or-username}&page=1&page_size=10` uses the existing authenticated, active, completed-onboarding policy. It searches display name or username by case-insensitive literal substring; SQL wildcard characters are escaped. Trimmed queries shorter than 2 characters return an empty result. Maximum query length is 100, page is 1–1000 and page_size is 1–20; invalid values return 400.
+
+Response data: `{items:[{user_id,username,display_name,university,headline}],page,page_size,has_more}`. Results include only active, nondeleted, onboarded accounts with profiles, ordered by display name then user ID. Invitation opt-in does not control profile lookup. No email, phone, credentials or auth-provider information is returned. Open a result through the existing `GET /api/users/{user_id}/profile` endpoint. No schema migration is needed for member search.

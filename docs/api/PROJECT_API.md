@@ -208,3 +208,11 @@ up/down, rollback guard, profile-history preservation and repository cutoff sort
 It uses the existing Testcontainers helper by default, or the existing
 `TINDY_TEST_POSTGRES` loopback-only test-cluster setting. Each test creates and
 deletes its own random database. It does not migrate the configured application DB.
+
+## GitHub project link
+
+Create and update accept optional nullable `github_url` (maximum 1000 characters). Use an absolute HTTPS URL on `github.com` with an owner/organization path or owner/repository path, for example `https://github.com/FCAJ-OJT-Fall26`. Credentials, custom ports, query strings, fragments and whitespace inside the URL are rejected with HTTP 400 `VALIDATION_FAILED`. Leading and trailing whitespace is trimmed.
+
+Create, list, detail and update responses include `github_url` (null when absent). Empty, whitespace, null or omitted values store null; PUT replaces this optional field, so callers preserving a link must include its current value. This stores a link only and does not create or sync GitHub repositories.
+
+Migration `Project_AddGithubUrl` adds the nullable project column. The opt-in Development seed sets this link on new demo profiles and projects, and backfills only missing links for the deterministic demo IDs on rerun. Existing nonempty links and non-demo data are preserved.
