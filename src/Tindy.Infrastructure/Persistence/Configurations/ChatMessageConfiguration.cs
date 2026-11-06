@@ -17,6 +17,7 @@ public sealed class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMess
         builder.Property(x => x.MessageId).HasColumnName("message_id");
         builder.Property(x => x.ConversationId).HasColumnName("conversation_id").IsRequired();
         builder.Property(x => x.SenderId).HasColumnName("sender_id").IsRequired();
+        builder.Property(x => x.MessageType).HasColumnName("message_type").HasMaxLength(20).HasDefaultValue("text");
         builder.Property(x => x.Body).HasColumnName("body").HasColumnType("text").HasMaxLength(4000).IsRequired();
         builder.Property(x => x.ClientMessageId).HasColumnName("client_message_id");
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();

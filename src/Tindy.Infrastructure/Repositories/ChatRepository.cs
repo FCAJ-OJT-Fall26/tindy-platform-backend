@@ -25,34 +25,40 @@ public sealed class ChatRepository : IChatRepository
         _db.Users.Include(x => x.Profile).FirstOrDefaultAsync(x => x.UserId == userId && x.Status == "active" && x.DeletedAt == null, ct);
 
     public Task<Conversation?> FindDirectConversationAsync(Guid firstUserId, Guid secondUserId, CancellationToken ct = default) =>
-        _db.Conversations.Include(x => x.Participants).ThenInclude(x => x.User).ThenInclude(x => x.Profile)
+        _db.Conversations.Include(x => x.Project).ThenInclude(x => x!.Members).Include(x => x.Participants).ThenInclude(x => x.User).ThenInclude(x => x.Profile)
             .FirstOrDefaultAsync(x => x.Type == "direct" && x.Status == "active" && x.Participants.Count == 2 &&
                 x.Participants.Any(p => p.UserId == firstUserId) && x.Participants.Any(p => p.UserId == secondUserId), ct);
 
     public Task<Conversation?> GetConversationForUserAsync(Guid conversationId, Guid userId, CancellationToken ct = default) =>
-        _db.Conversations.Include(x => x.Participants).ThenInclude(x => x.User).ThenInclude(x => x.Profile)
+        _db.Conversations.Include(x => x.Project).ThenInclude(x => x!.Members).Include(x => x.Participants).ThenInclude(x => x.User).ThenInclude(x => x.Profile)
             .FirstOrDefaultAsync(x => x.ConversationId == conversationId && x.Status == "active" && x.ConsentSource != null && x.Participants.Any(p => p.UserId == userId), ct);
 
-    public async Task<IReadOnlyList<Conversation>> GetConversationsForUserAsync(Guid userId, CancellationToken ct = default) =>
-        await _db.Conversations.AsNoTracking().Include(x => x.Participants).ThenInclude(x => x.User).ThenInclude(x => x.Profile)
+    public async Task<IReadOnlyList<Conversation>> GetConversationsForUserAsync(Guid userId, CancellationToken ct = default)
+    {
+        // Covers projects seeded/imported after the migration as well.
+        var missing = await _db.ProjectMembers.Where(m => m.UserId == userId && m.Status == "active" &&
+            !_db.Conversations.Any(c => c.ProjectId == m.ProjectId)).Select(m => m.ProjectId).ToArrayAsync(ct);
+        foreach (var projectId in missing) await GetProjectConversationAsync(userId, projectId, ct);
+        return await _db.Conversations.AsNoTracking().Include(x => x.Project).ThenInclude(x => x!.Members).Include(x => x.Participants).ThenInclude(x => x.User).ThenInclude(x => x.Profile)
             .Where(x => x.Status == "active" && x.ConsentSource != null && x.Participants.Any(p => p.UserId == userId))
-            .OrderByDescending(x => x.LastMessageAt ?? x.CreatedAt).ToListAsync(ct);
+            .ToListAsync(ct);
+    }
 
     public async Task AddConversationAsync(Conversation conversation, CancellationToken ct = default) => await _db.Conversations.AddAsync(conversation, ct);
     public async Task AddMessageAsync(ChatMessage message, CancellationToken ct = default) => await _db.ChatMessages.AddAsync(message, ct);
 
-    public async Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(Guid conversationId, DateTime? before, Guid? beforeMessageId, int limit, CancellationToken ct = default) =>
-        await _db.ChatMessages.AsNoTracking().Where(x => x.ConversationId == conversationId && x.DeletedAt == null && (!before.HasValue || (x.CreatedAt < before.Value || (beforeMessageId.HasValue && x.CreatedAt == before.Value && x.MessageId.CompareTo(beforeMessageId.Value) < 0))))
+    public async Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(Guid conversationId, Guid userId, DateTime? before, Guid? beforeMessageId, int limit, CancellationToken ct = default) =>
+        await VisibleMessages(conversationId, userId).Where(x => x.DeletedAt == null && (!before.HasValue || (x.CreatedAt < before.Value || (beforeMessageId.HasValue && x.CreatedAt == before.Value && x.MessageId.CompareTo(beforeMessageId.Value) < 0))))
             .OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.MessageId).Take(limit + 1).ToListAsync(ct);
 
     public Task<int> GetUnreadCountAsync(Guid conversationId, Guid userId, CancellationToken ct = default) =>
-        _db.ChatMessages.CountAsync(x => x.ConversationId == conversationId && x.SenderId != userId && x.DeletedAt == null &&
+        VisibleMessages(conversationId, userId).CountAsync(x => x.SenderId != userId && x.DeletedAt == null &&
             !_db.ConversationParticipants.Any(p => p.ConversationId == conversationId && p.UserId == userId && p.LastReadAt != null && (p.LastReadAt > x.CreatedAt || (p.LastReadAt == x.CreatedAt && (p.LastReadMessageId == null || p.LastReadMessageId.Value.CompareTo(x.MessageId) >= 0)))), ct);
 
     public async Task<ChatMessage?> GetFirstUnreadMessageAsync(Guid conversationId, Guid userId, CancellationToken ct = default)
     {
-        return await _db.ChatMessages.AsNoTracking()
-            .Where(x => x.ConversationId == conversationId && x.SenderId != userId && x.DeletedAt == null &&
+        return await VisibleMessages(conversationId, userId)
+            .Where(x => x.SenderId != userId && x.DeletedAt == null &&
                 !_db.ConversationParticipants.Any(p => p.ConversationId == conversationId && p.UserId == userId && p.LastReadAt != null &&
                     (p.LastReadAt > x.CreatedAt || (p.LastReadAt == x.CreatedAt && (p.LastReadMessageId == null || p.LastReadMessageId.Value.CompareTo(x.MessageId) >= 0)))))
             .OrderBy(x => x.CreatedAt).ThenBy(x => x.MessageId).FirstOrDefaultAsync(ct);
@@ -70,7 +76,7 @@ public sealed class ChatRepository : IChatRepository
     public async Task<Conversation> GetOrCreateDirectAsync(Guid userId, Guid targetId, CancellationToken ct)
     {
         var key = ChatRequests.Pair(userId, targetId);
-        var room = await _db.Conversations.Include(x => x.Participants).ThenInclude(x => x.User).ThenInclude(x => x.Profile)
+        var room = await _db.Conversations.Include(x => x.Project).ThenInclude(x => x!.Members).Include(x => x.Participants).ThenInclude(x => x.User).ThenInclude(x => x.Profile)
             .SingleOrDefaultAsync(x => x.DirectKey == key && x.Status == "active" && x.ConsentSource != null, ct);
         if (room == null) throw new Tindy.Application.Exceptions.ChatRequestException(403, "CHAT_REQUEST_REQUIRED", "Send a chat request before messaging this person.");
         return room;
@@ -84,6 +90,7 @@ public sealed class ChatRepository : IChatRepository
 
     public async Task<ChatMessage> SaveMessageAsync(Conversation conversation, ChatMessage message, CancellationToken ct)
     {
+        if (conversation.Type == "project") return await SaveProjectMessageAsync(conversation, message, ct);
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         var parties = conversation.Participants.Select(x => x.UserId).ToArray();
         var pairKey = ChatRequests.Pair(parties[0], parties[1]);
@@ -108,5 +115,82 @@ public sealed class ChatRepository : IChatRepository
             .ExecuteUpdateAsync(s => s.SetProperty(c => c.LastMessageAt, message.CreatedAt).SetProperty(c => c.UpdatedAt, message.CreatedAt), ct);
         await tx.CommitAsync(ct); return message;
     }
+
+    private IQueryable<ChatMessage> VisibleMessages(Guid conversationId, Guid userId) =>
+        _db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversationId &&
+            _db.ConversationParticipants.Any(p => p.ConversationId == conversationId && p.UserId == userId && (p.LeftAt == null || m.CreatedAt <= p.LeftAt)));
+
+    public async Task<Conversation> GetProjectConversationAsync(Guid userId, Guid projectId, CancellationToken ct)
+    {
+        // Synchronizes older/test-created projects too, serialized with all membership writes.
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        await ProjectWriteLock.AcquireAsync(_db, projectId, ct);
+        if (!await _db.ProjectMembers.AnyAsync(m => m.ProjectId == projectId && m.UserId == userId, ct))
+            throw new Tindy.Application.Exceptions.NotFoundException("Project conversation not found.");
+        await ProjectChatSync.SyncAsync(_db, projectId, DateTime.UtcNow, ct);
+        await tx.CommitAsync(ct);
+        var roomId = await _db.Conversations.Where(x => x.ProjectId == projectId).Select(x => x.ConversationId).SingleAsync(ct);
+        return await GetConversationForUserAsync(roomId, userId, ct) ?? throw new Tindy.Application.Exceptions.NotFoundException("Conversation not found.");
+    }
+
+    public async Task<IReadOnlyList<Guid>> ChangeProjectMembershipAsync(Guid actorId, Guid projectId, Guid memberId, CancellationToken ct)
+    {
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        await ProjectWriteLock.AcquireAsync(_db, projectId, ct);
+        var project = await _db.Projects.SingleAsync(x => x.ProjectId == projectId, ct);
+        if (project.LeaderId != actorId && actorId != memberId)
+            throw new Tindy.Application.Exceptions.ChatRequestException(403, "PROJECT_ACTION_FORBIDDEN", "Only the project leader can remove another member.");
+        if (memberId == project.LeaderId)
+            throw new Tindy.Application.Exceptions.ConflictException("The project leader cannot leave or be removed.");
+        var member = await _db.ProjectMembers.SingleOrDefaultAsync(x => x.ProjectId == projectId && x.UserId == memberId, ct)
+            ?? throw new Tindy.Application.Exceptions.NotFoundException("Project member not found.");
+        if (member.Status != "active") { await tx.CommitAsync(ct); return Array.Empty<Guid>(); }
+        await ProjectChatSync.SyncAsync(_db, projectId, DateTime.UtcNow, ct);
+        // Position accounting uses the same project/position order as recruitment.
+        if (member.PositionId.HasValue)
+        {
+            var position = await _db.ProjectPositions.FromSqlInterpolated($"SELECT * FROM project_positions WHERE position_id = {member.PositionId.Value} AND project_id = {projectId} FOR UPDATE").SingleAsync(ct);
+            position.FilledCount = Math.Max(0, position.FilledCount - 1);
+            if (position.Status == "filled" && project.Status == "recruiting" && project.ArchivedAt == null) position.Status = "open";
+            position.UpdatedAt = DateTime.UtcNow;
+        }
+        member.Status = actorId == memberId ? "left" : "removed";
+        await _db.SaveChangesAsync(ct);
+        await ProjectChatSync.SyncAsync(_db, projectId, DateTime.UtcNow, ct);
+        var users = await _db.ConversationParticipants.Where(p => p.Conversation.ProjectId == projectId).Select(p => p.UserId).ToArrayAsync(ct);
+        await tx.CommitAsync(ct);
+        return users;
+    }
+
+    private async Task<ChatMessage> SaveProjectMessageAsync(Conversation conversation, ChatMessage message, CancellationToken ct)
+    {
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        await ProjectWriteLock.AcquireAsync(_db, conversation.ProjectId!.Value, ct);
+        if (!await _db.ProjectMembers.AnyAsync(m => m.ProjectId == conversation.ProjectId && m.UserId == message.SenderId && m.Status == "active", ct) ||
+            !await _db.ConversationParticipants.AnyAsync(p => p.ConversationId == conversation.ConversationId && p.UserId == message.SenderId && p.LeftAt == null, ct) ||
+            !await _db.Users.AnyAsync(u => u.UserId == message.SenderId && u.Status == "active" && u.DeletedAt == null && u.IsOnboardingCompleted, ct))
+            throw new Tindy.Application.Exceptions.ChatRequestException(403, "PROJECT_CHAT_READ_ONLY", "You can only read messages sent before you left this project.");
+        if (message.ClientMessageId.HasValue)
+        {
+            var key = $"{message.SenderId:N}:{message.ClientMessageId:N}";
+            await _db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
+            var existing = await FindClientMessageAsync(message.SenderId, message.ClientMessageId.Value, ct);
+            if (existing != null)
+            {
+                if (existing.ConversationId != message.ConversationId || existing.Body != message.Body || existing.ContextInputKey != null)
+                    throw new Tindy.Application.Exceptions.ConflictException("Client message ID was already used.");
+                await tx.CommitAsync(ct); return existing;
+            }
+        }
+        // Assign after acquiring the membership lock so departure is an exact visibility boundary.
+        message.CreatedAt = DateTime.UtcNow;
+        _db.ChatMessages.Add(message);
+        await _db.SaveChangesAsync(ct);
+        await _db.Conversations.Where(x => x.ConversationId == conversation.ConversationId)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.LastMessageAt, message.CreatedAt).SetProperty(x => x.UpdatedAt, message.CreatedAt), ct);
+        await tx.CommitAsync(ct);
+        return message;
+    }
+
     public Task SaveChangesAsync(CancellationToken ct = default) => _db.SaveChangesAsync(ct);
 }

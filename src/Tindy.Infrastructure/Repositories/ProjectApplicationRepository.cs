@@ -1,3 +1,4 @@
+using Tindy.Application.Interfaces.Services;
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -9,7 +10,7 @@ using Tindy.Infrastructure.Persistence;
 
 namespace Tindy.Infrastructure.Repositories;
 
-public sealed class ProjectApplicationRepository(TindyDbContext db, TimeProvider clock) : IProjectApplicationRepository
+public sealed class ProjectApplicationRepository(TindyDbContext db, TimeProvider clock, IChatNotifier? chatNotifier = null) : IProjectApplicationRepository
 {
     public async Task<ProjectApplicationDto> CreateAsync(Guid userId, Guid projectId, CreateProjectApplicationRequest request, CancellationToken ct = default)
     {
@@ -118,7 +119,10 @@ public sealed class ProjectApplicationRepository(TindyDbContext db, TimeProvider
         application.ReviewedAt = application.UpdatedAt = clock.GetUtcNow().UtcDateTime;
         application.ReviewedBy = leaderId;
         await db.SaveChangesAsync(ct);
+        if (accept) await ProjectChatSync.SyncAsync(db, projectId, clock.GetUtcNow().UtcDateTime, ct);
         await transaction.CommitAsync(ct);
+        if (accept && chatNotifier != null)
+            await chatNotifier.RequestsChangedAsync(await db.ProjectMembers.Where(m => m.ProjectId == projectId).Select(m => m.UserId).ToArrayAsync(ct), ct);
         return Map(application);
     }
 

@@ -70,13 +70,13 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("client_message_id");
 
-                    b.Property<string>("ContextPositionTitle")
-                        .HasColumnType("text")
-                        .HasColumnName("context_position_title");
-
                     b.Property<string>("ContextInputKey")
                         .HasColumnType("text")
                         .HasColumnName("context_input_key");
+
+                    b.Property<string>("ContextPositionTitle")
+                        .HasColumnType("text")
+                        .HasColumnName("context_position_title");
 
                     b.Property<Guid?>("ContextProjectId")
                         .HasColumnType("uuid")
@@ -101,6 +101,14 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("EditedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("edited_at");
+
+                    b.Property<string>("MessageType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("text")
+                        .HasColumnName("message_type");
 
                     b.Property<Guid>("SenderId")
                         .HasColumnType("uuid")
@@ -261,6 +269,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_message_at");
 
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("project_id");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -290,6 +302,9 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.HasIndex("LastMessageAt")
                         .HasDatabaseName("ix_conversations_last_message_at");
 
+                    b.HasIndex("ProjectId")
+                        .IsUnique();
+
                     b.ToTable("conversations", (string)null);
                 });
 
@@ -314,6 +329,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("LastReadMessageId")
                         .HasColumnType("uuid")
                         .HasColumnName("last_read_message_id");
+
+                    b.Property<DateTime?>("LeftAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("left_at");
 
                     b.HasKey("ConversationId", "UserId");
 
@@ -2027,6 +2046,16 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("Conversation");
 
                     b.Navigation("Sender");
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.Conversation", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Project");
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.ConversationParticipant", b =>

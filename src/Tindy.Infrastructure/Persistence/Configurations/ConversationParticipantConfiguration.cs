@@ -12,6 +12,7 @@ public sealed class ConversationParticipantConfiguration : IEntityTypeConfigurat
         builder.HasKey(x => new { x.ConversationId, x.UserId });
         builder.Property(x => x.ConversationId).HasColumnName("conversation_id");
         builder.Property(x => x.UserId).HasColumnName("user_id");
+        builder.Property(x => x.LeftAt).HasColumnName("left_at");
         builder.Property(x => x.JoinedAt).HasColumnName("joined_at").IsRequired();
         builder.Property(x => x.LastReadMessageId).HasColumnName("last_read_message_id");
         builder.Property(x => x.LastReadAt).HasColumnName("last_read_at");

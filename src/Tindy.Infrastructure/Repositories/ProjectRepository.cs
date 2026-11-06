@@ -44,8 +44,11 @@ public sealed class ProjectRepository : IProjectRepository
 
     public async Task<Project> CreateAsync(Project project, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
         _context.Projects.Add(project);
         await _context.SaveChangesAsync(cancellationToken);
+        await ProjectChatSync.SyncAsync(_context, project.ProjectId, _clock.GetUtcNow().UtcDateTime, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return project;
     }
 

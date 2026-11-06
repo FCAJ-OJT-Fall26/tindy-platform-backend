@@ -242,7 +242,7 @@ public sealed class ChatRequests(TindyDbContext db, IChatNotifier notifier, Time
         if (string.IsNullOrEmpty(body) || body.Length > 500 || input.ClientMessageId == Guid.Empty)
             throw Error(400, "VALIDATION_FAILED", "A message of 1–500 characters and message ID are required.");
         await using var tx = await db.Database.BeginTransactionAsync(ct);
-        var room = await db.Conversations.Include(x => x.Participants).SingleOrDefaultAsync(x => x.ConversationId == conversationId && x.Status == "active" && x.ConsentSource != null && x.Participants.Any(p => p.UserId == user), ct)
+        var room = await db.Conversations.Include(x => x.Participants).SingleOrDefaultAsync(x => x.ConversationId == conversationId && x.Type == "direct" && x.Status == "active" && x.ConsentSource != null && x.Participants.Any(p => p.UserId == user), ct)
             ?? throw Error(404, "CHAT_REQUEST_NOT_FOUND", "Conversation not found.");
         var other = room.Participants.Single(x => x.UserId != user).UserId;
         await Lock(Pair(user, other), ct);

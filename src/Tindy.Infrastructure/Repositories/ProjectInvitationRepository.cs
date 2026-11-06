@@ -1,3 +1,4 @@
+using Tindy.Application.Interfaces.Services;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -9,7 +10,7 @@ using Tindy.Infrastructure.Persistence;
 
 namespace Tindy.Infrastructure.Repositories;
 
-public sealed class ProjectInvitationRepository(TindyDbContext db, TimeProvider clock) : IProjectInvitationRepository
+public sealed class ProjectInvitationRepository(TindyDbContext db, TimeProvider clock, IChatNotifier? chatNotifier = null) : IProjectInvitationRepository
 {
     public async Task<ProjectInvitationWriteResult> SendAsync(Guid leaderId, Guid projectId, CreateProjectInvitationRequest request, CancellationToken ct)
     {
@@ -118,7 +119,10 @@ public sealed class ProjectInvitationRepository(TindyDbContext db, TimeProvider 
             .Select(p => p.Title).SingleAsync(ct);
         await AddNotificationAsync(invitation, "invitation_" + invitation.Status, recipientId, userId, project.Name, positionTitle, now, ct);
         await db.SaveChangesAsync(ct);
+        if (action == "accept") await ProjectChatSync.SyncAsync(db, projectId, now, ct);
         await transaction.CommitAsync(ct);
+        if (action == "accept" && chatNotifier != null)
+            await chatNotifier.RequestsChangedAsync(await db.ProjectMembers.Where(m => m.ProjectId == projectId).Select(m => m.UserId).ToArrayAsync(ct), ct);
         return new(Map(invitation, now));
     }
 

@@ -20,6 +20,24 @@ public sealed class ChatController : ControllerBase
             ? id
             : throw new InvalidCredentialsException();
 
+    [HttpGet("projects/{projectId:guid}")]
+    public async Task<IActionResult> ProjectConversation(Guid projectId, CancellationToken ct) =>
+        Ok(new { success = true, message = "Project conversation retrieved.", data = await _chatService.GetProjectConversationAsync(CurrentUserId, projectId, ct) });
+
+    [HttpPost("projects/{projectId:guid}/leave")]
+    public async Task<IActionResult> LeaveProject(Guid projectId, CancellationToken ct)
+    {
+        await _chatService.ChangeProjectMembershipAsync(CurrentUserId, projectId, CurrentUserId, ct);
+        return Ok(new { success = true, message = "You left the project.", data = new { left = true } });
+    }
+
+    [HttpDelete("projects/{projectId:guid}/members/{memberId:guid}")]
+    public async Task<IActionResult> RemoveMember(Guid projectId, Guid memberId, CancellationToken ct)
+    {
+        await _chatService.ChangeProjectMembershipAsync(CurrentUserId, projectId, memberId, ct);
+        return Ok(new { success = true, message = "Member removed from project.", data = new { removed = true } });
+    }
+
     [HttpGet("users")]
     public async Task<IActionResult> SearchUsers([FromQuery] string? q, CancellationToken ct) =>
         Ok(new { success = true, message = "Users retrieved successfully.", data = await _chatService.SearchUsersAsync(CurrentUserId, q ?? string.Empty, ct) });

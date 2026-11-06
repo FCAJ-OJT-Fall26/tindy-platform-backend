@@ -3,6 +3,8 @@ namespace Tindy.Application.Entities;
 public sealed class Conversation
 {
     public Guid ConversationId { get; set; }
+    public Guid? ProjectId { get; set; }
+    public Project? Project { get; set; }
     public string? ConsentSource { get; set; }
     public string? DirectKey { get; set; }
     public string Type { get; set; } = "direct";
