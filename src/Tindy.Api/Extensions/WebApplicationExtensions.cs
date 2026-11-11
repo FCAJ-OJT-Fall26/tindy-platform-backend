@@ -24,9 +24,12 @@ public static class WebApplicationExtensions
         }
 
         // ===================================
-        // 2. HTTPS REDIRECTION
+        // 2. PUBLIC REQUEST ORIGIN
         // ===================================
-        app.UseHttpsRedirection();
+        if (app.Configuration.GetValue<bool>("CloudFrontProxy:Enabled"))
+            app.UseCloudFrontProxy();
+        else
+            app.UseHttpsRedirection();
 
         // ===================================
         // 3. ROUTING

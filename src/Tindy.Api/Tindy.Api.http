@@ -5,6 +5,14 @@
 GET {{Tindy.Api_HostAddress}}/api/health
 Accept: application/json
 
+### Liveness (200 when the API responds)
+GET {{Tindy.Api_HostAddress}}/api/health/live
+Accept: application/json
+
+### Readiness (200 when PostgreSQL responds, 503 otherwise)
+GET {{Tindy.Api_HostAddress}}/api/health/ready
+Accept: application/json
+
 ### Register a local account
 POST {{Tindy.Api_HostAddress}}/api/auth/register
 Content-Type: application/json

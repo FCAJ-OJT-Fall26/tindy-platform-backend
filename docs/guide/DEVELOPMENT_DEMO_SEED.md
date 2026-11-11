@@ -41,29 +41,29 @@ The opt-in dataset extends the existing `Persistence/Seeding` pipeline. It inser
 
 Configure the normal Development connection using User Secrets as before. `DevelopmentSeed` defaults to disabled. Enabling it outside Development fails immediately. A separate development-only password is required (12 characters minimum, 72 UTF-8 bytes maximum, uppercase/lowercase/digit/symbol); no default password is committed.
 
-PowerShell 7, repository root:
+In PowerShell 7, run the local helper from the repository root. It reads the Development connection and password from the usual configuration sources.
 
 ```powershell
-dotnet build
-$env:DevelopmentSeed__Enabled = 'true'
-$env:DevelopmentSeed__Password = Read-Host 'Password for local demo accounts' -MaskInput
-try {
-    dotnet ef database update `
-        --project ./src/Tindy.Infrastructure `
-        --startup-project ./src/Tindy.Api `
-        --no-build `
-        -- --environment Development
-} finally {
-    Remove-Item Env:DevelopmentSeed__Enabled -ErrorAction SilentlyContinue
-    Remove-Item Env:DevelopmentSeed__Password -ErrorAction SilentlyContinue
-}
+.\scripts\update-local-demo.ps1
 ```
+
+The helper enables demo seeding for that run and applies EF migrations only to a loopback PostgreSQL connection. See the [quickstart](SEED_DEMO_QUICKSTART.md) for one-time password setup.
 
 Both EF `UseSeeding` and `UseAsyncSeeding` invoke the same optional dataset after the existing Catalog seeders. EF database update invokes seeding even when there are no pending migrations. Keep the explicit flags limited to the seed command rather than leaving them enabled for ordinary application startup.
 
 The dataset uses stable dedicated IDs. Re-running inserts missing root aggregates only. It does not restore deleted child rows, reset edited profiles/passwords, reopen archived Projects, extend old deadlines, or erase test Applications. Reserved demo username/email collisions with unrelated accounts fail rather than adopting those accounts. New development aggregates are saved in a single transaction; a failed graph insert rolls back all new demo users and Projects.
 
 No database drop/reset is needed. Catalog additions are normal shared seed data; user and Project demo data requires opt-in. Existing default seed callers still seed only the Catalog.
+
+## Fresh demo database command
+
+After the separate migration task succeeds, run the following command from the published application directory or pass `seed-demo --fresh` as the container command:
+
+```text
+dotnet Tindy.Api.dll seed-demo --fresh
+```
+
+Provide `ConnectionStrings__DefaultConnection` and `DemoSeed__Password` through the task's secret configuration. The command checks migration history against the release, locks the user and project tables during the transaction, and seeds the catalog and demo dataset. A complete demo dataset is a no-op on retry. Other databases with user or project data are rejected. Invoke the command only for Fresh. The Restore workflow skips it.
 
 ## Verify / use
 

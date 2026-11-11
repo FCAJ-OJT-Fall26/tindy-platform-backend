@@ -6,12 +6,18 @@ using Tindy.Infrastructure.Services;
 
 namespace Tindy.Infrastructure.Persistence.Seeding;
 
-/// <summary>Opt-in synthetic development data. Invoke through the EF migration seed lock.</summary>
+/// <summary>Opt-in synthetic demo data. Callers must serialize seed runs.</summary>
 public static class DevelopmentDataSeeder
 {
     public const string DemoGithubUrl = "https://github.com/FCAJ-OJT-Fall26";
     public const int UserCount = 20;
     public const int ProjectCount = 50;
+    private static readonly Guid[] DemoUserIds = Enumerable.Range(1, UserCount).Select(i => DevelopmentSeedData.Id(1, i)).ToArray();
+    private static readonly Guid[] DemoProjectIds = Enumerable.Range(1, ProjectCount).Select(i => DevelopmentSeedData.Id(2, i)).ToArray();
+
+    internal static async Task<bool> HasCompleteDatasetAsync(DbContext context, CancellationToken cancellationToken) =>
+        await context.Set<User>().CountAsync(user => DemoUserIds.Contains(user.UserId), cancellationToken) == UserCount &&
+        await context.Set<Project>().CountAsync(project => DemoProjectIds.Contains(project.ProjectId), cancellationToken) == ProjectCount;
 
     public static void Seed(DbContext context, DevelopmentSeedOptions options) =>
         SeedAsync(context, options).GetAwaiter().GetResult();
@@ -19,8 +25,8 @@ public static class DevelopmentDataSeeder
     public static async Task SeedAsync(DbContext context, DevelopmentSeedOptions options, CancellationToken cancellationToken = default)
     {
         if (!options.Enabled) return;
-        var userIds = Enumerable.Range(1, UserCount).Select(i => DevelopmentSeedData.Id(1, i)).ToArray();
-        var projectIds = Enumerable.Range(1, ProjectCount).Select(i => DevelopmentSeedData.Id(2, i)).ToArray();
+        var userIds = DemoUserIds;
+        var projectIds = DemoProjectIds;
         var existingUsers = await context.Set<User>().AsNoTracking().Where(user => userIds.Contains(user.UserId))
             .Select(user => user.UserId).ToListAsync(cancellationToken);
         var existingProjects = await context.Set<Project>().AsNoTracking().Where(project => projectIds.Contains(project.ProjectId))

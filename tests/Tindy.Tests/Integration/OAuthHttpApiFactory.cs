@@ -27,7 +27,7 @@ namespace Tindy.Tests.Integration;
 /// serialization without PostgreSQL or the internet. Application service doubles
 /// isolate HTTP contracts; database invariants have separate PostgreSQL tests.
 /// </summary>
-internal sealed class OAuthHttpApiFactory(bool oauthEnabled = true) : WebApplicationFactory<Program>
+internal sealed class OAuthHttpApiFactory(bool oauthEnabled = true, string? keyRingPath = null) : WebApplicationFactory<Program>
 {
     private readonly string _jwtKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
     public Guid UserId { get; } = Guid.NewGuid();
@@ -58,6 +58,9 @@ internal sealed class OAuthHttpApiFactory(bool oauthEnabled = true) : WebApplica
                 ["OAuth:Frontend:AllowedOrigins:0"] = "http://localhost:8443",
                 ["Cors:AllowedOrigins:0"] = "http://localhost:8443"
             };
+        if (keyRingPath is not null)
+            settings["DataProtection:KeyRingPath"] = keyRingPath;
+
         // Host settings are available before Program captures authentication settings;
         // the in-memory provider also keeps runtime IConfiguration/options consistent.
         foreach (var (key, value) in settings) builder.UseSetting(key, value);
@@ -66,7 +69,8 @@ internal sealed class OAuthHttpApiFactory(bool oauthEnabled = true) : WebApplica
             .SetMinimumLevel(LogLevel.Warning));
         builder.ConfigureTestServices(services =>
         {
-            services.AddDataProtection().UseEphemeralDataProtectionProvider();
+            if (keyRingPath is null)
+                services.AddDataProtection().UseEphemeralDataProtectionProvider();
             services.RemoveAll<IAuthService>();
             services.RemoveAll<IOAuthLoginFlowService>();
             services.RemoveAll<IAccountConnectionsService>();

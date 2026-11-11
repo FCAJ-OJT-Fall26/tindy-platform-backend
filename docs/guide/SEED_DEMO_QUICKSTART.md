@@ -13,32 +13,23 @@ GitHub chỉ lưu code seed. Mỗi người dùng database riêng cần chạy s
 
 ## 2. Chạy migrations và seed demo
 
-Đoạn lệnh dưới đây không drop/reset database:
+Cấu hình mật khẩu cho tài khoản demo một lần bằng PowerShell 7. Nếu đã có `DevelopmentSeed:Password` trong User Secrets, dùng giá trị hiện tại.
 
 ```powershell
-$env:DevelopmentSeed__Enabled = "true"
-$env:DevelopmentSeed__Password = "TindyDemo!2026"
-
-try {
-    dotnet ef database update `
-        --project .\src\Tindy.Infrastructure\Tindy.Infrastructure.csproj `
-        --startup-project .\src\Tindy.Api\Tindy.Api.csproj `
-        --context TindyDbContext `
-        -- --environment Development
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Migration/seed thất bại. Kiểm tra log phía trên."
-    }
-}
-finally {
-    Remove-Item Env:DevelopmentSeed__Enabled -ErrorAction SilentlyContinue
-    Remove-Item Env:DevelopmentSeed__Password -ErrorAction SilentlyContinue
-}
+@{ 'DevelopmentSeed:Password' = (Read-Host 'Mat khau cho tai khoan demo' -MaskInput) } |
+    ConvertTo-Json -Compress |
+    dotnet user-secrets set --project .\src\Tindy.Api\Tindy.Api.csproj
 ```
 
-`DevelopmentSeed` mặc định tắt và chỉ được bật trong môi trường `Development`. EF vẫn chạy pipeline seed khi thông báo `No migrations were applied. The database is already up to date.`; thông báo đó chỉ nói schema không cần migration mới.
+Sau đó, mỗi lần muốn cập nhật schema và nạp dữ liệu demo local, chạy từ root repo:
 
-Khối `finally` xóa hai biến môi trường trong phiên PowerShell sau khi thực hiện. Dữ liệu đã lưu trong PostgreSQL vẫn còn. Sau đó chạy Backend và Frontend bằng cách thông thường để đăng nhập và kiểm thử.
+```powershell
+.\scripts\update-local-demo.ps1
+```
+
+Script dùng `Development`, bật demo seed cho lần chạy và yêu cầu PostgreSQL ở địa chỉ loopback, ví dụ `Host=localhost;Port=5432`. Script gọi `dotnet ef database update`. Việc drop DB vẫn là thao tác riêng. EF vẫn chạy seeder khi schema đã cập nhật.
+
+Với AWS, xem [lệnh dành cho Fresh DB](DEVELOPMENT_DEMO_SEED.md#fresh-demo-database-command).
 
 ## 3. Dữ liệu được tạo
 

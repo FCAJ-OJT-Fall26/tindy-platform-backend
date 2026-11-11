@@ -16,12 +16,20 @@ public sealed class DevelopmentSeedOptions
         if (!string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("DevelopmentSeed can only be enabled in the Development environment.");
 
-        var password = configuration["DevelopmentSeed:Password"];
+        return new(true, ReadPassword(configuration, "DevelopmentSeed:Password"));
+    }
+
+    internal static DevelopmentSeedOptions ForFreshDemo(IConfiguration configuration) =>
+        new(true, ReadPassword(configuration, "DemoSeed:Password"));
+
+    private static string ReadPassword(IConfiguration configuration, string key)
+    {
+        var password = configuration[key];
         if (string.IsNullOrWhiteSpace(password) || password.Length < 12 || Encoding.UTF8.GetByteCount(password) > 72 ||
             !password.Any(char.IsUpper) || !password.Any(char.IsLower) || !password.Any(char.IsDigit) ||
             !password.Any(character => !char.IsLetterOrDigit(character) && !char.IsWhiteSpace(character)))
-            throw new InvalidOperationException("Set DevelopmentSeed:Password to a development-only password of at least 12 characters, at most 72 UTF-8 bytes, with uppercase, lowercase, digit and symbol. Use an environment variable or User Secrets.");
+            throw new InvalidOperationException($"Set {key} to a demo account password of at least 12 characters, at most 72 UTF-8 bytes, with uppercase, lowercase, digit and symbol.");
 
-        return new(true, password);
+        return password;
     }
 }

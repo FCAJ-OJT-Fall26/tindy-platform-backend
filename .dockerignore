@@ -1,0 +1,12 @@
+**
+!src
+!src/**
+
+**/bin
+**/obj
+**/appsettings.*.json
+**/.env*
+**/secrets.json
+**/*.pfx
+**/*.pem
+**/*.key
