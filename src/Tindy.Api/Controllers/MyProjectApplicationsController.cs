@@ -7,6 +7,7 @@ namespace Tindy.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/me/project-applications")]
+[Route("api/me/applications")]
 public sealed class MyProjectApplicationsController(ProjectApplicationService service) : ControllerBase
 {
     private Guid UserId => Guid.Parse(User.FindFirst("sub")!.Value);
@@ -16,4 +17,7 @@ public sealed class MyProjectApplicationsController(ProjectApplicationService se
     [HttpPost("{application_id:guid}/withdraw")]
     public async Task<IActionResult> Withdraw([FromRoute(Name = "application_id")] Guid applicationId, CancellationToken ct)
         => Ok(new { success = true, message = "Application withdrawn.", data = await service.WithdrawAsync(UserId, applicationId, ct) });
+    [HttpPost("{application_id:guid}/nudge")]
+    public async Task<IActionResult> Nudge([FromRoute(Name = "application_id")] Guid applicationId, CancellationToken ct)
+        => Ok(new { success = true, message = "Leader đã nhận được thông báo nhắc nhở của bạn.", data = await service.NudgeAsync(UserId, applicationId, ct) });
 }

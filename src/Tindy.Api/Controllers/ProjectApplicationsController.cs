@@ -29,6 +29,9 @@ public sealed class ProjectApplicationsController(ProjectApplicationService serv
     public async Task<IActionResult> Accept([FromRoute(Name = "project_id")] Guid projectId, [FromRoute(Name = "application_id")] Guid applicationId, CancellationToken ct)
         => Ok(new { success = true, message = "Application accepted.", data = await service.AcceptAsync(UserId, projectId, applicationId, ct) });
     [HttpPost("{application_id:guid}/reject")]
-    public async Task<IActionResult> Reject([FromRoute(Name = "project_id")] Guid projectId, [FromRoute(Name = "application_id")] Guid applicationId, CancellationToken ct)
-        => Ok(new { success = true, message = "Application rejected.", data = await service.RejectAsync(UserId, projectId, applicationId, ct) });
+    public async Task<IActionResult> Reject([FromRoute(Name = "project_id")] Guid projectId, [FromRoute(Name = "application_id")] Guid applicationId, [FromBody] RejectApplicationRequest? request = null, CancellationToken ct = default)
+        => Ok(new { success = true, message = "Application rejected.", data = await service.RejectAsync(UserId, projectId, applicationId, request, ct) });
+    [HttpPost("{application_id:guid}/decide")]
+    public async Task<IActionResult> Decide([FromRoute(Name = "project_id")] Guid projectId, [FromRoute(Name = "application_id")] Guid applicationId, [FromBody] DecideApplicationRequest request, CancellationToken ct = default)
+        => Ok(new { success = true, message = $"Application {request.Action.ToLowerInvariant()}ed.", data = await service.DecideAsync(UserId, projectId, applicationId, request, ct) });
 }

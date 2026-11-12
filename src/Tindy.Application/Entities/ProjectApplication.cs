@@ -12,6 +12,9 @@ public sealed class ProjectApplication
     public DateTime UpdatedAt { get; set; }
     public DateTime? ReviewedAt { get; set; }
     public Guid? ReviewedBy { get; set; }
+    public string? RejectionReason { get; set; }
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? NudgedAt { get; set; }
     public Project Project { get; set; } = null!;
     public ProjectPosition Position { get; set; } = null!;
     public User Applicant { get; set; } = null!;

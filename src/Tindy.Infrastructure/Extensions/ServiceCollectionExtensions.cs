@@ -89,6 +89,7 @@ public static class ServicesCollectionExtensions
         services.AddScoped<INotificationRepository, NotificationRepository>();
         services.AddScoped<IDiscoveryInteractionRepository, DiscoveryInteractionRepository>();
         services.AddScoped<IProjectApplicationRepository, ProjectApplicationRepository>();
+        services.AddHostedService<Tindy.Infrastructure.Services.ApplicationExpirationWorker>();
 
         services.AddScoped<IChatRepository, ChatRepository>();
         services.AddSingleton(TimeProvider.System);

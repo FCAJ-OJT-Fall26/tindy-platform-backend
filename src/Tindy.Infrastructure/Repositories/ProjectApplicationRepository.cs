@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Tindy.Application.Interfaces.Services;
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
@@ -40,7 +41,8 @@ public sealed class ProjectApplicationRepository(TindyDbContext db, TimeProvider
         var application = new ProjectApplication
         {
             ApplicationId = Guid.NewGuid(), ProjectId = projectId, PositionId = request.PositionId,
-            ApplicantId = userId, Message = request.Message, CreatedAt = now, UpdatedAt = now
+            ApplicantId = userId, Message = request.Message, CreatedAt = now, UpdatedAt = now,
+            ExpiresAt = now.AddDays(10)
         };
         db.ProjectApplications.Add(application);
         try { await db.SaveChangesAsync(ct); }
@@ -71,7 +73,7 @@ public sealed class ProjectApplicationRepository(TindyDbContext db, TimeProvider
         return Map(application);
     }
 
-    public async Task<ProjectApplicationDto> DecideAsync(Guid leaderId, Guid projectId, Guid applicationId, bool accept, CancellationToken ct = default)
+    public async Task<ProjectApplicationDto> DecideAsync(Guid leaderId, Guid projectId, Guid applicationId, bool accept, string? rejectionReason = null, CancellationToken ct = default)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await ProjectWriteLock.AcquireAsync(db, projectId, ct);
@@ -118,6 +120,10 @@ public sealed class ProjectApplicationRepository(TindyDbContext db, TimeProvider
         application.Status = accept ? "accepted" : "rejected";
         application.ReviewedAt = application.UpdatedAt = clock.GetUtcNow().UtcDateTime;
         application.ReviewedBy = leaderId;
+        if (!accept && !string.IsNullOrWhiteSpace(rejectionReason))
+        {
+            application.RejectionReason = rejectionReason;
+        }
         await db.SaveChangesAsync(ct);
         if (accept) await ProjectChatSync.SyncAsync(db, projectId, clock.GetUtcNow().UtcDateTime, ct);
         await transaction.CommitAsync(ct);
@@ -128,6 +134,11 @@ public sealed class ProjectApplicationRepository(TindyDbContext db, TimeProvider
 
     public async Task<MyApplicationsPage> GetMineAsync(Guid userId, int page, int pageSize, CancellationToken ct = default)
     {
+        var now = clock.GetUtcNow().UtcDateTime;
+        await db.ProjectApplications
+            .Where(a => a.ApplicantId == userId && a.Status == "pending" && a.ExpiresAt <= now)
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.Status, "expired").SetProperty(a => a.UpdatedAt, now), ct);
+
         page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 1, 50);
         var query = db.ProjectApplications.AsNoTracking().Where(a => a.ApplicantId == userId);
         var total = await query.CountAsync(ct);
@@ -139,6 +150,11 @@ public sealed class ProjectApplicationRepository(TindyDbContext db, TimeProvider
 
     public async Task<IReadOnlyList<ApplicationReviewData>> GetReviewAsync(Guid leaderId, Guid projectId, ApplicationReviewQuery query, CancellationToken ct = default)
     {
+        var now = clock.GetUtcNow().UtcDateTime;
+        await db.ProjectApplications
+            .Where(a => a.ProjectId == projectId && a.Status == "pending" && a.ExpiresAt <= now)
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.Status, "expired").SetProperty(a => a.UpdatedAt, now), ct);
+
         var owner = await db.Projects.AsNoTracking().Where(p => p.ProjectId == projectId).Select(p => p.LeaderId).SingleOrDefaultAsync(ct);
         if (owner == Guid.Empty) throw new ProjectException(404, "PROJECT_NOT_FOUND", "Project not found.");
         if (owner != leaderId) throw AccessDenied();
@@ -147,7 +163,7 @@ public sealed class ProjectApplicationRepository(TindyDbContext db, TimeProvider
         if (query.PositionId.HasValue) applications = applications.Where(a => a.PositionId == query.PositionId);
         return await applications.OrderBy(a => a.ApplicationId).AsSplitQuery().Select(a => new ApplicationReviewData(
             new ProjectApplicationDto(a.ApplicationId, a.ProjectId, a.PositionId, a.ApplicantId, a.Status, a.Message,
-                a.CreatedAt, a.UpdatedAt, a.ReviewedAt, a.ReviewedBy),
+                a.CreatedAt, a.UpdatedAt, a.ReviewedAt, a.ReviewedBy, a.RejectionReason, a.ExpiresAt, a.NudgedAt),
             new ApplicantPreview(a.ApplicantId,
                 a.Applicant.Profile != null ? a.Applicant.Profile.DisplayName : a.Applicant.Username ?? "Member",
                 a.Applicant.Profile != null ? a.Applicant.Profile.PreferredRoleId : null,
@@ -160,6 +176,71 @@ public sealed class ProjectApplicationRepository(TindyDbContext db, TimeProvider
                 a.Position.RequiredCount, a.Position.FilledCount, a.Position.Status,
                 a.Position.PositionSkills.OrderBy(s => s.SkillId).Select(s => new DiscoverySkill(s.SkillId, s.Skill.Name, s.IsRequired)).ToList()),
             a.Project.ExpectedCommitmentHours)).ToListAsync(ct);
+    }
+
+    public async Task<ProjectApplicationDto> NudgeAsync(Guid userId, Guid applicationId, CancellationToken ct = default)
+    {
+        var now = clock.GetUtcNow().UtcDateTime;
+        var application = await db.ProjectApplications
+            .Include(a => a.Project)
+            .Include(a => a.Position)
+            .Include(a => a.Applicant).ThenInclude(u => u.Profile)
+            .SingleOrDefaultAsync(a => a.ApplicationId == applicationId, ct);
+
+        if (application is null || application.ApplicantId != userId)
+            throw NotFound();
+
+        if (application.Status != "pending")
+            throw new ProjectException(409, "APPLICATION_NOT_PENDING", "Chỉ có thể nhắc nhở cho đơn đang chờ duyệt.");
+
+        if (now < application.CreatedAt.AddDays(3))
+            throw new ProjectException(400, "NUDGE_TOO_EARLY", "Bạn chỉ có thể gửi nhắc nhở sau 3 ngày kể từ lúc nộp đơn.");
+
+        if (application.NudgedAt != null)
+            throw new ProjectException(409, "ALREADY_NUDGED", "Bạn đã gửi nhắc nhở cho đơn này rồi.");
+
+        application.NudgedAt = now;
+        application.UpdatedAt = now;
+
+        var leaderId = application.Project.LeaderId;
+        var applicantName = application.Applicant.Profile?.DisplayName ?? application.Applicant.Username ?? "Ứng viên";
+        var projectName = application.Project.Name;
+        var positionTitle = application.Position.Title;
+
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            project_name = projectName,
+            position_title = positionTitle,
+            actor_display_name = applicantName,
+            project_id = application.ProjectId,
+            position_id = application.PositionId,
+            application_id = application.ApplicationId,
+            message = $"Ứng viên {applicantName} đang chờ phản hồi từ bạn cho vị trí {positionTitle}"
+        });
+
+        var notification = new Notification
+        {
+            NotificationId = Guid.NewGuid(),
+            RecipientUserId = leaderId,
+            ActorUserId = userId,
+            ApplicationId = applicationId,
+            Type = "application_nudged",
+            Payload = payload,
+            CreatedAt = now
+        };
+        db.Notifications.Add(notification);
+
+        await db.SaveChangesAsync(ct);
+        return Map(application);
+    }
+
+    public async Task<int> ExpireOverdueApplicationsAsync(DateTime now, CancellationToken ct = default)
+    {
+        return await db.ProjectApplications
+            .Where(a => a.Status == "pending" && a.ExpiresAt <= now)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(a => a.Status, "expired")
+                .SetProperty(a => a.UpdatedAt, now), ct);
     }
 
     private async Task<ProjectApplication> LockedApplication(Guid projectId, Guid applicationId, CancellationToken ct)
@@ -177,7 +258,7 @@ public sealed class ProjectApplicationRepository(TindyDbContext db, TimeProvider
     private static ProjectException AccessDenied() => new(403, "PROJECT_ACCESS_DENIED", "Only the project leader can review applications.");
     private static ProjectException PendingConflict() => new(409, "APPLICATION_ALREADY_PENDING", "You already have a pending application to this project.");
     private static readonly Expression<Func<ProjectApplication, ProjectApplicationDto>> Summary = a =>
-        new(a.ApplicationId, a.ProjectId, a.PositionId, a.ApplicantId, a.Status, a.Message, a.CreatedAt, a.UpdatedAt, a.ReviewedAt, a.ReviewedBy);
+        new(a.ApplicationId, a.ProjectId, a.PositionId, a.ApplicantId, a.Status, a.Message, a.CreatedAt, a.UpdatedAt, a.ReviewedAt, a.ReviewedBy, a.RejectionReason, a.ExpiresAt, a.NudgedAt);
     private static ProjectApplicationDto Map(ProjectApplication a) => new(a.ApplicationId, a.ProjectId, a.PositionId, a.ApplicantId,
-        a.Status, a.Message, a.CreatedAt, a.UpdatedAt, a.ReviewedAt, a.ReviewedBy);
+        a.Status, a.Message, a.CreatedAt, a.UpdatedAt, a.ReviewedAt, a.ReviewedBy, a.RejectionReason, a.ExpiresAt, a.NudgedAt);
 }

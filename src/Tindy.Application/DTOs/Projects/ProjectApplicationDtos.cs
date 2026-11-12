@@ -1,8 +1,11 @@
 namespace Tindy.Application.DTOs.Projects;
 
 public sealed record CreateProjectApplicationRequest(Guid PositionId, string? Message = null);
+public sealed record DecideApplicationRequest(string Action, string? ReasonTag = null, string? Note = null, string? RejectionReason = null);
+public sealed record RejectApplicationRequest(string? ReasonTag = null, string? Note = null, string? RejectionReason = null);
 public sealed record ProjectApplicationDto(Guid ApplicationId, Guid ProjectId, Guid PositionId, Guid ApplicantId,
-    string Status, string? Message, DateTime CreatedAt, DateTime UpdatedAt, DateTime? ReviewedAt, Guid? ReviewedBy);
+    string Status, string? Message, DateTime CreatedAt, DateTime UpdatedAt, DateTime? ReviewedAt, Guid? ReviewedBy,
+    string? RejectionReason = null, DateTime? ExpiresAt = null, DateTime? NudgedAt = null);
 public sealed record ApplicantSkill(Guid SkillId, string Name);
 public sealed record ApplicantPreview(Guid UserId, string DisplayName, Guid? PreferredRoleId, string? PreferredRoleName,
     int? AvailableHoursPerWeek, IReadOnlyList<ApplicantSkill> Skills, int ExperiencesCount, int CertificatesCount,

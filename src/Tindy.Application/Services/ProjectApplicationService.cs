@@ -13,9 +13,38 @@ public sealed class ProjectApplicationService(IProjectApplicationRepository repo
         return repository.CreateAsync(userId, projectId, request with { Message = request.Message?.Trim() }, ct);
     }
     public Task<ProjectApplicationDto> WithdrawAsync(Guid userId, Guid applicationId, CancellationToken ct = default) => repository.WithdrawAsync(userId, applicationId, ct);
-    public Task<ProjectApplicationDto> AcceptAsync(Guid userId, Guid projectId, Guid applicationId, CancellationToken ct = default) => repository.DecideAsync(userId, projectId, applicationId, true, ct);
-    public Task<ProjectApplicationDto> RejectAsync(Guid userId, Guid projectId, Guid applicationId, CancellationToken ct = default) => repository.DecideAsync(userId, projectId, applicationId, false, ct);
+    public Task<ProjectApplicationDto> AcceptAsync(Guid userId, Guid projectId, Guid applicationId, CancellationToken ct = default) => repository.DecideAsync(userId, projectId, applicationId, true, null, ct);
+    public Task<ProjectApplicationDto> RejectAsync(Guid userId, Guid projectId, Guid applicationId, RejectApplicationRequest? request = null, CancellationToken ct = default)
+    {
+        var reason = FormatReason(request?.ReasonTag, request?.Note, request?.RejectionReason);
+        return repository.DecideAsync(userId, projectId, applicationId, false, reason, ct);
+    }
+    public Task<ProjectApplicationDto> DecideAsync(Guid userId, Guid projectId, Guid applicationId, DecideApplicationRequest request, CancellationToken ct = default)
+    {
+        var isAccept = string.Equals(request.Action, "accept", StringComparison.OrdinalIgnoreCase);
+        var isReject = string.Equals(request.Action, "reject", StringComparison.OrdinalIgnoreCase);
+        if (!isAccept && !isReject)
+            throw new ProjectException(400, "VALIDATION_FAILED", "Action must be 'accept' or 'reject'.");
+
+        if (isAccept)
+            return repository.DecideAsync(userId, projectId, applicationId, true, null, ct);
+
+        var reason = FormatReason(request.ReasonTag, request.Note, request.RejectionReason);
+        return repository.DecideAsync(userId, projectId, applicationId, false, reason, ct);
+    }
+    public Task<ProjectApplicationDto> NudgeAsync(Guid userId, Guid applicationId, CancellationToken ct = default) => repository.NudgeAsync(userId, applicationId, ct);
     public Task<MyApplicationsPage> GetMineAsync(Guid userId, int page, int pageSize, CancellationToken ct = default) => repository.GetMineAsync(userId, page, pageSize, ct);
+
+    private static string? FormatReason(string? tag, string? note, string? directReason)
+    {
+        if (!string.IsNullOrWhiteSpace(directReason)) return directReason.Trim();
+        if (!string.IsNullOrWhiteSpace(tag))
+        {
+            var trimmedTag = tag.Trim();
+            return !string.IsNullOrWhiteSpace(note) ? $"{trimmedTag}: {note.Trim()}" : trimmedTag;
+        }
+        return string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+    }
 
     public async Task<ApplicationReviewPage> ReviewAsync(Guid leaderId, Guid projectId, ApplicationReviewQuery query, CancellationToken ct = default)
     {

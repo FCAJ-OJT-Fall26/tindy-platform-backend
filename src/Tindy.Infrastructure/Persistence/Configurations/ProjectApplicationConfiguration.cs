@@ -8,7 +8,7 @@ public sealed class ProjectApplicationConfiguration : IEntityTypeConfiguration<P
 {
     public void Configure(EntityTypeBuilder<ProjectApplication> builder)
     {
-        builder.ToTable("project_applications", t => t.HasCheckConstraint("ck_project_applications_status", "status IN ('pending','accepted','rejected','withdrawn')"));
+        builder.ToTable("project_applications", t => t.HasCheckConstraint("ck_project_applications_status", "status IN ('pending','accepted','rejected','withdrawn','expired')"));
         builder.HasKey(a => a.ApplicationId);
         builder.Property(a => a.ApplicationId).HasColumnName("application_id").ValueGeneratedNever();
         builder.Property(a => a.ProjectId).HasColumnName("project_id");
@@ -16,6 +16,9 @@ public sealed class ProjectApplicationConfiguration : IEntityTypeConfiguration<P
         builder.Property(a => a.ApplicantId).HasColumnName("applicant_id");
         builder.Property(a => a.Status).HasColumnName("status").HasMaxLength(20).IsRequired();
         builder.Property(a => a.Message).HasColumnName("message").HasMaxLength(2000);
+        builder.Property(a => a.RejectionReason).HasColumnName("rejection_reason").HasMaxLength(500);
+        builder.Property(a => a.ExpiresAt).HasColumnName("expires_at").HasColumnType("timestamp with time zone").IsRequired();
+        builder.Property(a => a.NudgedAt).HasColumnName("nudged_at").HasColumnType("timestamp with time zone");
         builder.Property(a => a.CreatedAt).HasColumnName("created_at").HasColumnType("timestamp with time zone");
         builder.Property(a => a.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamp with time zone");
         builder.Property(a => a.ReviewedAt).HasColumnName("reviewed_at").HasColumnType("timestamp with time zone");
@@ -29,5 +32,6 @@ public sealed class ProjectApplicationConfiguration : IEntityTypeConfiguration<P
             .HasDatabaseName("ux_project_applications_pending");
         builder.HasIndex(a => new { a.ProjectId, a.Status, a.CreatedAt }).HasDatabaseName("ix_project_applications_review");
         builder.HasIndex(a => new { a.ApplicantId, a.CreatedAt }).HasDatabaseName("ix_project_applications_applicant");
+        builder.HasIndex(a => a.ExpiresAt).HasFilter("status = 'pending'").HasDatabaseName("ix_project_applications_expires_at");
     }
 }

@@ -627,11 +627,15 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("actor_user_id");
 
+                    b.Property<Guid?>("ApplicationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("application_id");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<Guid>("InvitationId")
+                    b.Property<Guid?>("InvitationId")
                         .HasColumnType("uuid")
                         .HasColumnName("invitation_id");
 
@@ -662,9 +666,15 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_notifications_recipient_unread")
                         .HasFilter("read_at IS NULL");
 
+                    b.HasIndex("ApplicationId", "Type", "RecipientUserId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_notifications_application_event_recipient")
+                        .HasFilter("application_id IS NOT NULL");
+
                     b.HasIndex("InvitationId", "Type", "RecipientUserId")
                         .IsUnique()
-                        .HasDatabaseName("ux_notifications_invitation_event_recipient");
+                        .HasDatabaseName("ux_notifications_invitation_event_recipient")
+                        .HasFilter("invitation_id IS NOT NULL");
 
                     b.HasIndex("RecipientUserId", "CreatedAt", "NotificationId")
                         .IsDescending(false, true, true)
@@ -672,7 +682,7 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
                     b.ToTable("notifications", null, t =>
                         {
-                            t.HasCheckConstraint("ck_notifications_type", "type IN ('invitation_received','invitation_accepted','invitation_declined','invitation_cancelled')");
+                            t.HasCheckConstraint("ck_notifications_type", "type IN ('invitation_received','invitation_accepted','invitation_declined','invitation_cancelled','application_nudged')");
                         });
                 });
 
@@ -988,10 +998,18 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
                     b.Property<string>("Message")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)")
                         .HasColumnName("message");
+
+                    b.Property<DateTime?>("NudgedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("nudged_at");
 
                     b.Property<Guid>("PositionId")
                         .HasColumnType("uuid")
@@ -1000,6 +1018,11 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid")
                         .HasColumnName("project_id");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("rejection_reason");
 
                     b.Property<DateTime?>("ReviewedAt")
                         .HasColumnType("timestamp with time zone")
@@ -1021,6 +1044,10 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
                     b.HasKey("ApplicationId");
 
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("ix_project_applications_expires_at")
+                        .HasFilter("status = 'pending'");
+
                     b.HasIndex("ReviewedBy");
 
                     b.HasIndex("ApplicantId", "CreatedAt")
@@ -1038,7 +1065,7 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
                     b.ToTable("project_applications", null, t =>
                         {
-                            t.HasCheckConstraint("ck_project_applications_status", "status IN ('pending','accepted','rejected','withdrawn')");
+                            t.HasCheckConstraint("ck_project_applications_status", "status IN ('pending','accepted','rejected','withdrawn','expired')");
                         });
                 });
 
@@ -2201,11 +2228,15 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ActorUserId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("Tindy.Application.Entities.ProjectApplication", "Application")
+                        .WithMany()
+                        .HasForeignKey("ApplicationId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("Tindy.Application.Entities.ProjectInvitation", "Invitation")
                         .WithMany()
                         .HasForeignKey("InvitationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Tindy.Application.Entities.User", "Recipient")
                         .WithMany()
@@ -2214,6 +2245,8 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Actor");
+
+                    b.Navigation("Application");
 
                     b.Navigation("Invitation");
 
