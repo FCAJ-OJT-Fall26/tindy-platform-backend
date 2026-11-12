@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Amazon.Runtime;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Tindy.Application.DTOs.Ai;
@@ -14,10 +15,12 @@ namespace Tindy.Infrastructure.Ai;
 public sealed partial class BedrockProfileExtractionProvider(
     HttpClient httpClient,
     IOptions<BedrockOptions> options,
-    ILogger<BedrockProfileExtractionProvider> logger) : IAiListExtractionProvider, IAiExtractionBatchProvider, IDisposable
+    ILogger<BedrockProfileExtractionProvider> logger,
+    AWSCredentials? credentials = null) : IAiListExtractionProvider, IAiExtractionBatchProvider, IDisposable
 {
     private readonly SemaphoreSlim _slots = new(2, 2);
     private readonly BedrockOptions _options = options.Value;
+    private readonly AWSCredentials? _credentials = credentials;
 
     public Task<AiListModelOutput> ExtractListsAsync(AiProfileInput input,
         IReadOnlyList<AiSkillReference> skills, IReadOnlyList<AiRoleReference> roles, CancellationToken cancellationToken = default) =>
@@ -27,6 +30,8 @@ public sealed partial class BedrockProfileExtractionProvider(
         string toolName, CancellationToken cancellationToken, bool reserved = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (_options.UseSigV4 && input.Pdf is not null && !input.PdfScanVerified)
+            throw new AiException(AiFailure.DocumentScanRequired);
         ValidateConfiguration();
         if (!reserved) Reserve(1, cancellationToken);
 
@@ -37,6 +42,8 @@ public sealed partial class BedrockProfileExtractionProvider(
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
             using var request = createRequest();
+            if (_options.UseSigV4)
+                await BedrockMantleSigning.SignAsync(request, _options.Region, _credentials, timeout.Token);
             using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             if (!response.IsSuccessStatusCode)
                 throw new AiException(MapFailure(response.StatusCode, input.Pdf is not null));
@@ -88,6 +95,10 @@ public sealed partial class BedrockProfileExtractionProvider(
         {
             throw new AiException(AiFailure.Provider);
         }
+        catch (AmazonClientException)
+        {
+            throw new AiException(AiFailure.Unavailable);
+        }
         catch (IOException)
         {
             throw new AiException(AiFailure.Provider);
@@ -136,8 +147,8 @@ public sealed partial class BedrockProfileExtractionProvider(
 
     private void ValidateConfiguration()
     {
-        if (!_options.Enabled || string.IsNullOrWhiteSpace(_options.ApiKey)
-            || _options.ApiKey.Any(character => character is <= ' ' or >= '\u007f')
+        if (!_options.Enabled || (!_options.UseSigV4 && (string.IsNullOrWhiteSpace(_options.ApiKey)
+            || _options.ApiKey.Any(character => character is <= ' ' or >= '\u007f')))
             || _options.TimeoutSeconds is < 1 or > 120
             || _options.ModelId != "google.gemma-4-31b"
             || _options.Region is not ("us-east-1" or "us-east-2" or "us-west-2" or "eu-central-1"))

@@ -41,7 +41,8 @@ public sealed partial class BedrockProfileExtractionProvider
         if (bytes.Length > AiProfileLimits.MaxProviderRequestBytes) throw new AiException(AiFailure.PayloadTooLarge);
         var request = new HttpRequestMessage(HttpMethod.Post,
             $"https://bedrock-mantle.{_options.Region}.api.aws/openai/v1/responses");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
+        if (!_options.UseSigV4)
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
         request.Content = new ByteArrayContent(bytes);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         return request;

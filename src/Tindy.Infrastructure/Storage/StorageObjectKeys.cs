@@ -6,7 +6,7 @@ namespace Tindy.Infrastructure.Storage;
 internal static partial class StorageObjectKeys
 {
     // Strictly server-generated shape. Never accept a filename or path from the client.
-    [GeneratedRegex(@"\A(?:profiles/(?:avatars|covers)|certificates/(?:images|pdf))/[0-9a-f]{32}/[0-9a-f]{32}\.(?:webp|pdf)\z", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\A(?:profiles/(?:avatars|covers)|certificates/(?:images|pdf)|ai-input/pdf)/[0-9a-f]{32}/[0-9a-f]{32}\.(?:webp|pdf)\z", RegexOptions.CultureInvariant)]
     private static partial Regex GeneratedKeyPattern();
 
     public static (string Key, string ContentType, long MaxBytes) Create(Guid ownerId, MediaStorageKind kind)
@@ -19,6 +19,7 @@ internal static partial class StorageObjectKeys
             MediaStorageKind.Cover => ("profiles/covers", "webp", "image/webp", 10_000_000L),
             MediaStorageKind.CertificateImage => ("certificates/images", "webp", "image/webp", 10_000_000L),
             MediaStorageKind.CertificatePdf => ("certificates/pdf", "pdf", "application/pdf", 10_000_000L),
+            MediaStorageKind.AiInputPdf => ("ai-input/pdf", "pdf", "application/pdf", Tindy.Application.DTOs.Ai.AiProfileLimits.MaxQuarantinePdfBytes),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), "Unsupported storage kind.")
         };
         return ($"{prefix}/{ownerId:N}/{Guid.NewGuid():N}.{extension}", contentType, maxBytes);
@@ -30,7 +31,8 @@ internal static partial class StorageObjectKeys
             throw new ArgumentException("Invalid storage object key.", nameof(storageKey));
 
         // Additional cross-field checks: a PDF may only live under the PDF prefix.
-        if (storageKey.EndsWith(".pdf", StringComparison.Ordinal) != storageKey.StartsWith("certificates/pdf/", StringComparison.Ordinal))
+        if (storageKey.EndsWith(".pdf", StringComparison.Ordinal) !=
+            (storageKey.StartsWith("certificates/pdf/", StringComparison.Ordinal) || storageKey.StartsWith("ai-input/pdf/", StringComparison.Ordinal)))
             throw new ArgumentException("Invalid storage object key.", nameof(storageKey));
         return storageKey;
     }

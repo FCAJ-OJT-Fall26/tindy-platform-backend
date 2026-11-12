@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Amazon.Runtime;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Tindy.Application.DTOs.Ai;
@@ -13,6 +14,36 @@ namespace Tindy.Tests.Ai;
 public sealed class BedrockProfileExtractionProviderTests
 {
     private const string Lists = "{\"skill_ids\":{},\"experiences\":[],\"certificates\":[],\"warnings\":[]}";
+
+    [Fact]
+    public async Task MantleSignsTextWithSessionCredentialsAndBlocksUnscannedPdf()
+    {
+        using var handler = new StubHandler(async (request, token) =>
+        {
+            Assert.Equal("AWS4-HMAC-SHA256", request.Headers.Authorization?.Scheme);
+            Assert.Contains("/us-east-1/bedrock-mantle/aws4_request", request.Headers.Authorization!.Parameter);
+            Assert.Contains("SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date;x-amz-security-token",
+                request.Headers.Authorization.Parameter);
+            Assert.Equal("test-session-token", Assert.Single(request.Headers.GetValues("x-amz-security-token")));
+            var payload = await request.Content!.ReadAsByteArrayAsync(token);
+            var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(payload));
+            Assert.Equal(hash, Assert.Single(request.Headers.GetValues("x-amz-content-sha256")));
+            return Success();
+        });
+        using var provider = new BedrockProfileExtractionProvider(new HttpClient(handler),
+            Options.Create(new BedrockOptions { Enabled = true, UseSigV4 = true }),
+            NullLogger<BedrockProfileExtractionProvider>.Instance,
+            new SessionAWSCredentials("test-access-key", "test-secret-key", "test-session-token"));
+
+        Assert.Equal(Lists, (await Extract(provider)).RawJson);
+        var error = await Assert.ThrowsAsync<AiException>(() => provider.ExtractListsAsync(new(null, [1]), [], []));
+        Assert.Equal(AiFailure.DocumentScanRequired, error.Failure);
+        Assert.Equal(1, handler.Calls);
+
+        var verified = AiExtractionInput.Normalize(new(null, "%PDF-1.7\nfixture"u8.ToArray()) { PdfScanVerified = true });
+        Assert.Equal(Lists, (await provider.ExtractListsAsync(verified, [], [])).RawJson);
+        Assert.Equal(2, handler.Calls);
+    }
 
     [Theory]
     [InlineData("disabled")]

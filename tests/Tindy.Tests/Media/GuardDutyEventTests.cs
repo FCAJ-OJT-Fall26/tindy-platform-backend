@@ -106,6 +106,24 @@ public sealed class GuardDutyEventTests
 
     private static string Key() => $"certificates/pdf/{Guid.NewGuid():N}/{Guid.NewGuid():N}.pdf";
 
+    [Theory]
+    [InlineData("test-etag", "version-1", "version-1", true)]
+    [InlineData("different-etag", "version-1", "version-1", false)]
+    [InlineData("test-etag", "version-2", "version-1", false)]
+    [InlineData("test-etag", "version-1", null, false)]
+    [InlineData("test-etag", null, null, false)]
+    public void AiPdfRequiresOptInAndAnExactObjectVersion(string etag, string? uploadVersion, string? eventVersion, bool matches)
+    {
+        var key = $"ai-input/pdf/{Guid.NewGuid():N}/{Guid.NewGuid():N}.pdf";
+        var body = Event(key, version: eventVersion);
+        var options = Configuration();
+        Assert.Null(GuardDutyScanEvent.Parse(body, options));
+
+        options.AiPdfUploadsEnabled = true;
+        var result = Assert.IsType<GuardDutyScanEvent>(GuardDutyScanEvent.Parse(body, options));
+        Assert.Equal(matches, result.MatchesObject(etag, uploadVersion, requireVersion: true));
+    }
+
     private sealed class HandlerDouble(ScanEventDisposition disposition, bool fail = false) : IGuardDutyEventHandler
     {
         public Task<ScanEventDisposition> ProcessAsync(string body, CancellationToken ct) => fail

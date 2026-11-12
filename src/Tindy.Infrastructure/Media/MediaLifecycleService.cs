@@ -35,8 +35,10 @@ public sealed class MediaLifecycleService(TindyDbContext db, IFileStorageService
     public async Task RunCleanupCycleAsync(CancellationToken ct)
     {
         var now = DateTime.UtcNow;
+        var aiExpiry = now - AiPdfQuarantine.Retention;
         var cleanupIds = await db.MediaAssets.AsNoTracking().Where(a =>
             (a.Status == "pending_upload" && a.UploadExpiresAt <= now) ||
+            (a.Purpose == "ai_input" && a.CreatedAt <= aiExpiry && (a.Status == "active" || a.Status == "processing")) ||
             (a.Status == "pending_delete" && (a.NextCleanupAt == null || a.NextCleanupAt <= now)) ||
             (a.Status == "rejected" && (a.NextCleanupAt == null || a.NextCleanupAt <= now) &&
                 (a.CleanupAttempts == 0 || a.NextCleanupAt != null || a.LastCleanupError != null)))
@@ -99,6 +101,8 @@ public sealed class MediaLifecycleService(TindyDbContext db, IFileStorageService
         {
             var now = DateTime.UtcNow;
             var expired = asset.Status == "pending_upload" && asset.UploadExpiresAt <= now;
+            expired |= asset.Purpose == "ai_input" && now - asset.CreatedAt >= AiPdfQuarantine.Retention &&
+                asset.Status is "active" or "processing";
             if (!expired && asset.Status is not ("pending_delete" or "rejected")) return;
             if (asset.NextCleanupAt > now) return;
             // Rejected files may be physically purged, but their linked metadata occupies

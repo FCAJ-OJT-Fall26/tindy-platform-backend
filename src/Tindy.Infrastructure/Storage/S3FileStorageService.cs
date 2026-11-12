@@ -84,7 +84,7 @@ public sealed class S3FileStorageService : IFileStorageService, IDisposable
                 response.Dispose();
                 throw new IOException("S3 returned no content stream.");
             }
-            return new StorageReadHandle(response.ResponseStream, response, response.ETag);
+            return new StorageReadHandle(response.ResponseStream, response, response.ETag, response.VersionId);
         }
         catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
         {

@@ -28,6 +28,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 AiFailure.DocumentRejected => StatusCodes.Status422UnprocessableEntity,
                 AiFailure.PayloadTooLarge => StatusCodes.Status413PayloadTooLarge,
                 AiFailure.UnsupportedMedia => StatusCodes.Status415UnsupportedMediaType,
+                AiFailure.DocumentScanRequired => StatusCodes.Status422UnprocessableEntity,
                 _ => StatusCodes.Status502BadGateway
             },
 

@@ -10,7 +10,7 @@ public sealed class MediaAssetConfiguration : IEntityTypeConfiguration<MediaAsse
     {
         builder.ToTable("media_assets", table =>
         {
-            table.HasCheckConstraint("ck_media_assets_purpose", "purpose IN ('avatar', 'cover', 'certificate')");
+            table.HasCheckConstraint("ck_media_assets_purpose", "purpose IN ('avatar', 'cover', 'certificate', 'ai_input')");
             table.HasCheckConstraint("ck_media_assets_storage_provider", "storage_provider IN ('local', 's3')");
             table.HasCheckConstraint("ck_media_assets_storage_identity", "btrim(storage_container) <> '' AND btrim(storage_key) <> ''");
             table.HasCheckConstraint("ck_media_assets_status", "status IN ('pending_upload', 'processing', 'active', 'rejected', 'pending_delete')");

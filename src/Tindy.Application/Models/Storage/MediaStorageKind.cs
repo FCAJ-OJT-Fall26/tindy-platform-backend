@@ -5,5 +5,6 @@ public enum MediaStorageKind
     Avatar = 1,
     Cover = 2,
     CertificateImage = 3,
-    CertificatePdf = 4
+    CertificatePdf = 4,
+    AiInputPdf = 5
 }
