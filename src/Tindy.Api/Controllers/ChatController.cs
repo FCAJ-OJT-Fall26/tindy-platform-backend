@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Tindy.Application.DTOs.Chat;
 using Tindy.Application.Exceptions;
 using Tindy.Application.Interfaces.Services;
@@ -54,10 +55,11 @@ public sealed class ChatController : ControllerBase
     }
 
     [HttpGet("conversations/{conversationId:guid}/messages")]
-    public async Task<IActionResult> GetMessages(Guid conversationId, [FromQuery] DateTime? before, [FromQuery(Name = "before_message_id")] Guid? beforeMessageId, [FromQuery] int limit = 50, CancellationToken ct = default) =>
-        Ok(new { success = true, message = "Messages retrieved successfully.", data = await _chatService.GetMessagesAsync(CurrentUserId, conversationId, before, beforeMessageId, limit, ct) });
+    public async Task<IActionResult> GetMessages(Guid conversationId, [FromQuery] DateTime? before, [FromQuery(Name = "before_message_id")] Guid? beforeMessageId, [FromQuery(Name = "around_message_id")] Guid? aroundMessageId, [FromQuery] int limit = 50, CancellationToken ct = default) =>
+        Ok(new { success = true, message = "Messages retrieved successfully.", data = await _chatService.GetMessagesAsync(CurrentUserId, conversationId, before, beforeMessageId, limit, aroundMessageId, ct) });
 
     [HttpPost("conversations/{conversationId:guid}/messages")]
+    [EnableRateLimiting("chat-message-send")]
     public async Task<IActionResult> SendMessage(Guid conversationId, [FromBody] SendChatMessageRequest request, CancellationToken ct)
     {
         var data = await _chatService.SendMessageAsync(CurrentUserId, conversationId, request, ct);

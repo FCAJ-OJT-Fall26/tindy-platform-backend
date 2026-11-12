@@ -14,8 +14,11 @@ public interface IChatRepository
     Task<Conversation> GetProjectConversationAsync(Guid userId, Guid projectId, CancellationToken ct);
     Task<IReadOnlyList<Guid>> ChangeProjectMembershipAsync(Guid actorId, Guid projectId, Guid memberId, CancellationToken ct);
     Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(Guid conversationId, Guid userId, DateTime? before, Guid? beforeMessageId, int limit, CancellationToken ct = default);
+    Task<IReadOnlyList<ChatMessage>> GetMessagesAroundAsync(Guid conversationId, Guid userId, Guid aroundMessageId, int limit, CancellationToken ct = default);
     Task<int> GetUnreadCountAsync(Guid conversationId, Guid userId, CancellationToken ct = default);
     Task<ChatMessage?> GetFirstUnreadMessageAsync(Guid conversationId, Guid userId, CancellationToken ct = default);
+    Task<IReadOnlyDictionary<Guid, (int UnreadCount, DateTime? FirstUnreadAt, Guid? FirstUnreadMessageId)>> GetUnreadSummariesBatchAsync(Guid userId, IReadOnlyList<Conversation> conversations, CancellationToken ct = default);
+    Task<IReadOnlyDictionary<Guid, (bool IsBlocked, bool BlockedByMe)>> BlockStatesBatchAsync(Guid userId, IReadOnlyList<Guid> otherUserIds, CancellationToken ct = default);
     Task MarkReadAsync(ConversationParticipant participant, ChatMessage message, CancellationToken ct = default);
     Task<ChatMessage?> FindMessageAsync(Guid conversationId, Guid messageId, CancellationToken ct);
     Task<ChatMessage?> FindClientMessageAsync(Guid senderId, Guid clientMessageId, CancellationToken ct);

@@ -22,17 +22,74 @@ public sealed class ChatService : IChatService
     public async Task<IReadOnlyList<ChatConversationDto>> GetConversationsAsync(Guid userId, CancellationToken ct = default)
     {
         var conversations = await _repository.GetConversationsForUserAsync(userId, ct);
+        if (conversations.Count == 0) return Array.Empty<ChatConversationDto>();
+
+        var unreadSummaries = await _repository.GetUnreadSummariesBatchAsync(userId, conversations, ct);
+
+        var directOtherIds = conversations
+            .Where(c => c.Type != "project")
+            .Select(c => c.Participants.FirstOrDefault(p => p.UserId != userId)?.UserId)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .ToArray();
+        var blockStates = await _repository.BlockStatesBatchAsync(userId, directOtherIds, ct);
+
         var result = new List<ChatConversationDto>(conversations.Count);
         foreach (var c in conversations)
         {
-            if (c.Type == "project") { result.Add(await ProjectDto(c, userId, ct)); continue; }
+            var summary = unreadSummaries.TryGetValue(c.ConversationId, out var s) ? s : (0, null, null);
+            if (c.Type == "project")
+            {
+                var self = c.Participants.Single(p => p.UserId == userId);
+                var members = c.Participants
+                    .Where(p => self.LeftAt == null || p.JoinedAt <= self.LeftAt)
+                    .Select(p => new ChatGroupMemberDto(
+                        p.UserId,
+                        p.User.Profile?.DisplayName ?? p.User.Username ?? "Member",
+                        p.User.Profile?.AvatarUrl,
+                        p.UserId == c.Project!.LeaderId,
+                        p.LeftAt == null,
+                        p.LeftAt))
+                    .ToArray();
+                var canSend = self.LeftAt == null && c.Project != null && c.Project.Members.Any(m => m.UserId == userId && m.Status == "active");
+
+                DateTime? latestMessageAt = c.LastMessageAt;
+                if (self.LeftAt.HasValue && (latestMessageAt == null || latestMessageAt > self.LeftAt.Value))
+                {
+                    var pastLatest = await _repository.GetMessagesAsync(c.ConversationId, userId, null, null, 1, ct);
+                    latestMessageAt = pastLatest.FirstOrDefault()?.CreatedAt;
+                }
+
+                result.Add(new ChatConversationDto(
+                    c.ConversationId,
+                    null,
+                    latestMessageAt,
+                    summary.UnreadCount,
+                    summary.FirstUnreadAt,
+                    summary.FirstUnreadMessageId,
+                    Type: "project",
+                    ProjectId: c.ProjectId,
+                    Name: c.Project!.Name,
+                    Participants: members,
+                    CanSend: canSend,
+                    LeftAt: self.LeftAt));
+                continue;
+            }
+
             var otherParticipant = c.Participants.FirstOrDefault(p => p.UserId != userId);
             if (otherParticipant?.User is null) continue;
-            var unreadCount = await _repository.GetUnreadCountAsync(c.ConversationId, userId, ct);
-            var firstUnreadAt = unreadCount > 0 ? await _repository.GetFirstUnreadMessageAsync(c.ConversationId, userId, ct) : null;
-            var blocks = await _repository.BlockStateAsync(userId, otherParticipant.UserId, ct);
-            result.Add(new ChatConversationDto(c.ConversationId, ToParticipant(otherParticipant.User), c.LastMessageAt, unreadCount, firstUnreadAt?.CreatedAt, firstUnreadAt?.MessageId, blocks.IsBlocked, blocks.BlockedByMe));
+            var (isBlocked, blockedByMe) = blockStates.TryGetValue(otherParticipant.UserId, out var b) ? b : (false, false);
+            result.Add(new ChatConversationDto(
+                c.ConversationId,
+                ToParticipant(otherParticipant.User),
+                c.LastMessageAt,
+                summary.UnreadCount,
+                summary.FirstUnreadAt,
+                summary.FirstUnreadMessageId,
+                isBlocked,
+                blockedByMe));
         }
+
         return result.OrderByDescending(c => c.LastMessageAt).ThenBy(c => c.ConversationId).ToArray();
     }
 
@@ -46,11 +103,13 @@ public sealed class ChatService : IChatService
         return new ChatConversationDto(conversation.ConversationId, ToParticipant(target), conversation.LastMessageAt, unread, first?.CreatedAt, first?.MessageId);
     }
 
-    public async Task<ChatMessagesPage> GetMessagesAsync(Guid userId, Guid conversationId, DateTime? before, Guid? beforeMessageId, int limit, CancellationToken ct = default)
+    public async Task<ChatMessagesPage> GetMessagesAsync(Guid userId, Guid conversationId, DateTime? before, Guid? beforeMessageId, int limit, Guid? aroundMessageId = null, CancellationToken ct = default)
     {
         await RequireConversation(userId, conversationId, ct);
         limit = Math.Clamp(limit, 1, 100);
-        var rows = await _repository.GetMessagesAsync(conversationId, userId, before, beforeMessageId, limit, ct);
+        var rows = aroundMessageId.HasValue
+            ? await _repository.GetMessagesAroundAsync(conversationId, userId, aroundMessageId.Value, limit, ct)
+            : await _repository.GetMessagesAsync(conversationId, userId, before, beforeMessageId, limit, ct);
         var hasMore = rows.Count > limit;
         var items = rows.Take(limit).Reverse().Select(ToMessage).ToArray();
         return new ChatMessagesPage(items, hasMore, items.Length == 0 ? null : items[0].CreatedAt, items.Length == 0 ? null : items[0].MessageId);

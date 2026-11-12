@@ -286,6 +286,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IProjectPositionService, ProjectPositionService>();
 
         services.AddScoped<IChatService, ChatService>();
+        services.AddSingleton<Tindy.Api.Hubs.IChatHubRateLimiter, Tindy.Api.Hubs.ChatHubRateLimiter>();
 
         // Project management service (Group B).
         services.AddScoped<IProjectService, ProjectService>();
@@ -318,6 +319,13 @@ public static class ServiceCollectionExtensions
                 _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true
+                }));
+
+            options.AddPolicy("chat-message-send", context => RateLimitPartition.GetSlidingWindowLimiter(
+                context.User.FindFirst("sub")?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new SlidingWindowRateLimiterOptions
+                {
+                    PermitLimit = 5, Window = TimeSpan.FromSeconds(2), SegmentsPerWindow = 2, QueueLimit = 0, AutoReplenishment = true
                 }));
 
             // ===================================
@@ -424,6 +432,10 @@ public static class ServiceCollectionExtensions
                     .Metadata.GetMetadata<EnableRateLimitingAttribute>()?
                     .PolicyName == "ai-extract-profile";
 
+                var isChatMessage = httpContext.GetEndpoint()?
+                    .Metadata.GetMetadata<EnableRateLimitingAttribute>()?
+                    .PolicyName == "chat-message-send";
+
                 // Check whether the request targets media endpoints.
                 var isMediaRequest =
                     httpContext.Request.Path.StartsWithSegments("/api/media") ||
@@ -436,17 +448,21 @@ public static class ServiceCollectionExtensions
                     Title = "Too Many Requests",
                     Detail = isAiExtraction
                         ? "Too many extraction requests. Please try again later."
-                        : isMediaRequest
-                            ? "Too many media requests. Please try again later."
-                            : "Too many requests. Please try again later.",
+                        : isChatMessage
+                            ? "You are sending messages too quickly. Please slow down."
+                            : isMediaRequest
+                                ? "Too many media requests. Please try again later."
+                                : "Too many requests. Please try again later.",
                     Instance = httpContext.Request.Path.ToString()
                 };
 
                 // Assign an error code based on the request category.
                 problem.Extensions["error_code"] = isAiExtraction
                     ? "AI_RATE_LIMITED"
-                    : isMediaRequest
-                        ? "MEDIA_RATE_LIMITED"
+                    : isChatMessage
+                        ? "CHAT_RATE_LIMIT"
+                        : isMediaRequest
+                            ? "MEDIA_RATE_LIMITED"
                         : httpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName == "project-applications"
                             ? "APPLICATION_RATE_LIMITED"
                             : httpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName == "project-invitations"

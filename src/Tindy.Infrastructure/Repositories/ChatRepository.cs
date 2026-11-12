@@ -51,6 +51,30 @@ public sealed class ChatRepository : IChatRepository
         await VisibleMessages(conversationId, userId).Where(x => x.DeletedAt == null && (!before.HasValue || (x.CreatedAt < before.Value || (beforeMessageId.HasValue && x.CreatedAt == before.Value && x.MessageId.CompareTo(beforeMessageId.Value) < 0))))
             .OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.MessageId).Take(limit + 1).ToListAsync(ct);
 
+    public async Task<IReadOnlyList<ChatMessage>> GetMessagesAroundAsync(Guid conversationId, Guid userId, Guid aroundMessageId, int limit, CancellationToken ct = default)
+    {
+        var target = await VisibleMessages(conversationId, userId).FirstOrDefaultAsync(m => m.MessageId == aroundMessageId && m.DeletedAt == null, ct);
+        if (target == null)
+            return await GetMessagesAsync(conversationId, userId, null, null, limit, ct);
+
+        int half = Math.Max(1, limit / 2);
+        var newer = await VisibleMessages(conversationId, userId)
+            .Where(m => m.DeletedAt == null && (m.CreatedAt > target.CreatedAt || (m.CreatedAt == target.CreatedAt && m.MessageId.CompareTo(target.MessageId) > 0)))
+            .OrderBy(m => m.CreatedAt).ThenBy(m => m.MessageId)
+            .Take(half)
+            .ToListAsync(ct);
+
+        int olderLimit = limit - newer.Count + 1;
+        var older = await VisibleMessages(conversationId, userId)
+            .Where(m => m.DeletedAt == null && (m.CreatedAt < target.CreatedAt || (m.CreatedAt == target.CreatedAt && m.MessageId.CompareTo(target.MessageId) <= 0)))
+            .OrderByDescending(m => m.CreatedAt).ThenByDescending(m => m.MessageId)
+            .Take(olderLimit)
+            .ToListAsync(ct);
+
+        newer.Reverse();
+        return newer.Concat(older).ToList();
+    }
+
     public Task<int> GetUnreadCountAsync(Guid conversationId, Guid userId, CancellationToken ct = default) =>
         VisibleMessages(conversationId, userId).CountAsync(x => x.SenderId != userId && x.DeletedAt == null &&
             !_db.ConversationParticipants.Any(p => p.ConversationId == conversationId && p.UserId == userId && p.LastReadAt != null && (p.LastReadAt > x.CreatedAt || (p.LastReadAt == x.CreatedAt && (p.LastReadMessageId == null || p.LastReadMessageId.Value.CompareTo(x.MessageId) >= 0)))), ct);
@@ -62,6 +86,76 @@ public sealed class ChatRepository : IChatRepository
                 !_db.ConversationParticipants.Any(p => p.ConversationId == conversationId && p.UserId == userId && p.LastReadAt != null &&
                     (p.LastReadAt > x.CreatedAt || (p.LastReadAt == x.CreatedAt && (p.LastReadMessageId == null || p.LastReadMessageId.Value.CompareTo(x.MessageId) >= 0)))))
             .OrderBy(x => x.CreatedAt).ThenBy(x => x.MessageId).FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, (int UnreadCount, DateTime? FirstUnreadAt, Guid? FirstUnreadMessageId)>> GetUnreadSummariesBatchAsync(
+        Guid userId, IReadOnlyList<Conversation> conversations, CancellationToken ct = default)
+    {
+        var result = new Dictionary<Guid, (int UnreadCount, DateTime? FirstUnreadAt, Guid? FirstUnreadMessageId)>();
+        if (conversations.Count == 0) return result;
+
+        foreach (var c in conversations)
+        {
+            result[c.ConversationId] = (0, null, null);
+        }
+
+        var candidateIds = conversations.Select(c => c.ConversationId).ToArray();
+        var sql = """
+            WITH unread AS (
+                SELECT 
+                    m.conversation_id AS "ConversationId",
+                    m.message_id AS "MessageId",
+                    m.created_at AS "CreatedAt",
+                    ROW_NUMBER() OVER (PARTITION BY m.conversation_id ORDER BY m.created_at ASC, m.message_id ASC) AS rn,
+                    COUNT(*) OVER (PARTITION BY m.conversation_id) AS total_unread
+                FROM chat_messages m
+                JOIN conversation_participants p ON m.conversation_id = p.conversation_id AND p.user_id = {0}
+                WHERE m.conversation_id = ANY({1})
+                  AND m.sender_id <> {0}
+                  AND m.deleted_at IS NULL
+                  AND (p.left_at IS NULL OR m.created_at <= p.left_at)
+                  AND (p.last_read_at IS NULL OR m.created_at > p.last_read_at OR (m.created_at = p.last_read_at AND (p.last_read_message_id IS NULL OR m.message_id > p.last_read_message_id)))
+            )
+            SELECT "ConversationId", "MessageId", "CreatedAt", total_unread::int AS "TotalUnread"
+            FROM unread
+            WHERE rn = 1
+            """;
+
+        var rows = await _db.Database.SqlQueryRaw<UnreadSummaryRow>(sql, userId, candidateIds).ToListAsync(ct);
+        foreach (var row in rows)
+        {
+            result[row.ConversationId] = (row.TotalUnread, row.CreatedAt, row.MessageId);
+        }
+
+        return result;
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, (bool IsBlocked, bool BlockedByMe)>> BlockStatesBatchAsync(Guid userId, IReadOnlyList<Guid> otherUserIds, CancellationToken ct = default)
+    {
+        var result = new Dictionary<Guid, (bool IsBlocked, bool BlockedByMe)>();
+        if (otherUserIds.Count == 0) return result;
+
+        var pairKeyMap = otherUserIds.Distinct().ToDictionary(otherId => ChatRequests.Pair(userId, otherId), otherId => otherId);
+        var pairKeys = pairKeyMap.Keys.ToArray();
+
+        var rows = await _db.ChatBlocks.AsNoTracking()
+            .Where(x => pairKeys.Contains(x.PairKey))
+            .Select(x => new { x.PairKey, x.BlockerId })
+            .ToArrayAsync(ct);
+
+        var grouped = rows.GroupBy(x => x.PairKey).ToDictionary(g => g.Key, g => g.Select(x => x.BlockerId).ToArray());
+        foreach (var (pairKey, otherId) in pairKeyMap)
+        {
+            if (grouped.TryGetValue(pairKey, out var blockers))
+            {
+                result[otherId] = (blockers.Length > 0, blockers.Contains(userId));
+            }
+            else
+            {
+                result[otherId] = (false, false);
+            }
+        }
+        return result;
     }
     public Task<ChatMessage?> FindMessageAsync(Guid conversationId, Guid messageId, CancellationToken ct) =>
         _db.ChatMessages.AsNoTracking().FirstOrDefaultAsync(x => x.ConversationId == conversationId && x.MessageId == messageId && x.DeletedAt == null, ct);
@@ -193,4 +287,12 @@ public sealed class ChatRepository : IChatRepository
     }
 
     public Task SaveChangesAsync(CancellationToken ct = default) => _db.SaveChangesAsync(ct);
+}
+
+public sealed class UnreadSummaryRow
+{
+    public Guid ConversationId { get; set; }
+    public Guid MessageId { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public int TotalUnread { get; set; }
 }
