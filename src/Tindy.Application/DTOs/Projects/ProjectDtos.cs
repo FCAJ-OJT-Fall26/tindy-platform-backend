@@ -143,7 +143,8 @@ public sealed record ProjectDetailDto(
     DateOnly RecruitmentClosingDate,
     DateTime RecruitmentClosesAt,
     bool IsRecruitmentOpen,
-    string? GithubUrl = null);
+    string? GithubUrl = null,
+    IReadOnlyList<ProjectResourceLinkDto>? ResourceLinks = null);
 
 public sealed record UpdateProjectRequest(
     string Name,

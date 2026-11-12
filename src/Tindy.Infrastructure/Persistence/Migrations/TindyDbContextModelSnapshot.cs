@@ -927,6 +927,11 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasDefaultValue(14)
                         .HasColumnName("recruitment_closing_days");
 
+                    b.Property<string>("ResourceLinks")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("resource_links");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -1035,6 +1040,65 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_project_applications_status", "status IN ('pending','accepted','rejected','withdrawn')");
                         });
+                });
+
+            modelBuilder.Entity("Tindy.Application.Entities.ProjectGoal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AssigneeIds")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("assignee_ids");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DueDate")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasDefaultValue("TBD")
+                        .HasColumnName("due_date");
+
+                    b.Property<bool>("IsCompleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_completed");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("project_id");
+
+                    b.Property<string>("Tag")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasDefaultValue("Milestone")
+                        .HasColumnName("tag");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("title");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId")
+                        .HasDatabaseName("ix_project_goals_project_id");
+
+                    b.ToTable("project_goals", (string)null);
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.ProjectInvitation", b =>
@@ -2225,6 +2289,17 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("Reviewer");
                 });
 
+            modelBuilder.Entity("Tindy.Application.Entities.ProjectGoal", b =>
+                {
+                    b.HasOne("Tindy.Application.Entities.Project", "Project")
+                        .WithMany("WorkspaceGoals")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
             modelBuilder.Entity("Tindy.Application.Entities.ProjectInvitation", b =>
                 {
                     b.HasOne("Tindy.Application.Entities.User", "InvitedUser")
@@ -2577,6 +2652,8 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                     b.Navigation("Members");
 
                     b.Navigation("Positions");
+
+                    b.Navigation("WorkspaceGoals");
                 });
 
             modelBuilder.Entity("Tindy.Application.Entities.ProjectPosition", b =>

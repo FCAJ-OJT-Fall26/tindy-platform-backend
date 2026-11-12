@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Tindy.Application.Entities;
 
@@ -38,6 +40,20 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
 
         // Goals stored as jsonb in PostgreSQL
         builder.Property(x => x.Goals).HasColumnName("goals").HasColumnType("jsonb");
+
+        // Resource links stored as jsonb in PostgreSQL
+        var jsonOptions = new JsonSerializerOptions();
+        builder.Property(x => x.ResourceLinks)
+            .HasColumnName("resource_links")
+            .HasColumnType("jsonb")
+            .HasConversion(
+                v => JsonSerializer.Serialize(v, jsonOptions),
+                v => JsonSerializer.Deserialize<List<ProjectResourceLink>>(v, jsonOptions) ?? new List<ProjectResourceLink>(),
+                new ValueComparer<List<ProjectResourceLink>>(
+                    (c1, c2) => (c1 == null && c2 == null) || (c1 != null && c2 != null && c1.SequenceEqual(c2)),
+                    c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList()))
+            .IsRequired();
 
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").HasColumnType("timestamp with time zone").IsRequired();
         builder.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamp with time zone");

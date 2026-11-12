@@ -18,6 +18,7 @@ public class Project
     public string Status { get; set; } = "recruiting"; // draft, recruiting, in_progress, completed, archived
     public DateTime RecruitmentClosesAt { get; set; }
     public List<string> Goals { get; set; } = new();
+    public List<ProjectResourceLink> ResourceLinks { get; set; } = new();
 
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -28,4 +29,5 @@ public class Project
     public ICollection<ProjectPosition> Positions { get; set; } = new List<ProjectPosition>();
     public ICollection<DiscoveryProjectInteraction> DiscoveryInteractions { get; set; } = new List<DiscoveryProjectInteraction>();
     public ICollection<ProjectApplication> Applications { get; set; } = new List<ProjectApplication>();
+    public ICollection<ProjectGoal> WorkspaceGoals { get; set; } = new List<ProjectGoal>();
 }

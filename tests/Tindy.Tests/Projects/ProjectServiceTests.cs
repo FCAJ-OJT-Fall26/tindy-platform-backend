@@ -578,5 +578,20 @@ public sealed class ProjectServiceTests
             }
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<ProjectGoal>> GetGoalsByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<ProjectGoal>>(new List<ProjectGoal>());
+
+        public Task<ProjectGoal?> GetGoalByIdAsync(Guid projectId, Guid goalId, CancellationToken cancellationToken = default)
+            => Task.FromResult<ProjectGoal?>(null);
+
+        public Task<ProjectGoal> AddGoalAsync(ProjectGoal goal, CancellationToken cancellationToken = default)
+            => Task.FromResult(goal);
+
+        public Task UpdateGoalAsync(ProjectGoal goal, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task CompleteProjectAsync(Guid projectId, DateTime completedAt, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }

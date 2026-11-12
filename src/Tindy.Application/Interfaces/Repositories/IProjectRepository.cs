@@ -23,4 +23,10 @@ public interface IProjectRepository
     Task<ProjectPositionSkill?> GetPositionSkillAsync(Guid positionId, Guid skillId, CancellationToken cancellationToken = default);
     Task AddPositionSkillAsync(ProjectPositionSkill positionSkill, CancellationToken cancellationToken = default);
     Task DeletePositionSkillAsync(ProjectPositionSkill positionSkill, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ProjectGoal>> GetGoalsByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<ProjectGoal?> GetGoalByIdAsync(Guid projectId, Guid goalId, CancellationToken cancellationToken = default);
+    Task<ProjectGoal> AddGoalAsync(ProjectGoal goal, CancellationToken cancellationToken = default);
+    Task UpdateGoalAsync(ProjectGoal goal, CancellationToken cancellationToken = default);
+    Task CompleteProjectAsync(Guid projectId, DateTime completedAt, CancellationToken cancellationToken = default);
 }

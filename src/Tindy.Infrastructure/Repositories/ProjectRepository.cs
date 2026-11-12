@@ -171,7 +171,7 @@ public sealed class ProjectRepository : IProjectRepository
             .Include(m => m.Project)
                 .ThenInclude(p => p.Leader)
                     .ThenInclude(u => u.Profile)
-            .Where(m => m.UserId == userId && !m.IsLeader && m.Status == "active" && m.Project.Status != "archived")
+            .Where(m => m.UserId == userId && !m.IsLeader && (m.Status == "active" || m.Status == "completed") && m.Project.Status != "archived")
             .OrderByDescending(m => m.JoinedAt)
             .ToListAsync(cancellationToken);
     }
@@ -284,6 +284,107 @@ public sealed class ProjectRepository : IProjectRepository
     {
         _context.PositionSkills.Remove(positionSkill);
         await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ProjectGoal>> GetGoalsByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        return await _context.ProjectGoals
+            .Where(g => g.ProjectId == projectId)
+            .OrderBy(g => g.IsCompleted)
+            .ThenByDescending(g => g.CreatedAt)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<ProjectGoal?> GetGoalByIdAsync(Guid projectId, Guid goalId, CancellationToken cancellationToken = default)
+    {
+        return await _context.ProjectGoals
+            .SingleOrDefaultAsync(g => g.ProjectId == projectId && g.Id == goalId, cancellationToken);
+    }
+
+    public async Task<ProjectGoal> AddGoalAsync(ProjectGoal goal, CancellationToken cancellationToken = default)
+    {
+        _context.ProjectGoals.Add(goal);
+        await _context.SaveChangesAsync(cancellationToken);
+        return goal;
+    }
+
+    public async Task UpdateGoalAsync(ProjectGoal goal, CancellationToken cancellationToken = default)
+    {
+        _context.ProjectGoals.Update(goal);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task CompleteProjectAsync(Guid projectId, DateTime completedAt, CancellationToken cancellationToken = default)
+    {
+        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+
+        var project = await _context.Projects
+            .Include(p => p.Members)
+            .SingleOrDefaultAsync(p => p.ProjectId == projectId, cancellationToken);
+
+        if (project is null)
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", "Project not found.");
+
+        project.Status = "completed";
+        project.UpdatedAt = completedAt;
+
+        var existingUserIdsWithExp = await _context.ProfileExperiences
+            .Where(e => e.ProjectName == project.Name)
+            .Select(e => e.UserId)
+            .ToListAsync(cancellationToken);
+        var existingExpUserSet = existingUserIdsWithExp.ToHashSet();
+
+        foreach (var member in project.Members)
+        {
+            if (member.Status == "active")
+            {
+                member.Status = "completed";
+            }
+
+            if (!existingExpUserSet.Contains(member.UserId))
+            {
+                _context.ProfileExperiences.Add(new ProfileExperience
+                {
+                    ExperienceId = Guid.NewGuid(),
+                    UserId = member.UserId,
+                    ProjectName = project.Name,
+                    RoleTitle = string.IsNullOrWhiteSpace(member.RoleTitle)
+                        ? (member.IsLeader ? "Project Lead" : "Contributor")
+                        : member.RoleTitle,
+                    Description = !string.IsNullOrWhiteSpace(project.Description)
+                        ? project.Description
+                        : $"Completed project {project.Name} on Tindy.",
+                    RepoUrl = project.GithubUrl,
+                    StartDate = DateOnly.FromDateTime(member.JoinedAt),
+                    EndDate = DateOnly.FromDateTime(completedAt),
+                    IsOngoing = false,
+                    CreatedAt = completedAt
+                });
+            }
+        }
+
+        // Ensure leader has an experience entry even if not in members collection
+        if (!project.Members.Any(m => m.UserId == project.LeaderId) && !existingExpUserSet.Contains(project.LeaderId))
+        {
+            _context.ProfileExperiences.Add(new ProfileExperience
+            {
+                ExperienceId = Guid.NewGuid(),
+                UserId = project.LeaderId,
+                ProjectName = project.Name,
+                RoleTitle = "Project Lead",
+                Description = !string.IsNullOrWhiteSpace(project.Description)
+                    ? project.Description
+                    : $"Completed project {project.Name} on Tindy.",
+                RepoUrl = project.GithubUrl,
+                StartDate = DateOnly.FromDateTime(project.CreatedAt),
+                EndDate = DateOnly.FromDateTime(completedAt),
+                IsOngoing = false,
+                CreatedAt = completedAt
+            });
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 }
 

@@ -103,4 +103,81 @@ public sealed class ProjectsController : ControllerBase
             data = new { project_id = projectId, status = "archived" }
         });
     }
+
+    // GET /api/projects/{project_id}/goals - Lấy danh sách goals
+    [HttpGet("{project_id}/goals")]
+    [Authorize]
+    public async Task<IActionResult> GetGoals(
+        [FromRoute(Name = "project_id")] string projectIdStr,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(projectIdStr, out var projectId))
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", $"Project '{projectIdStr}' not found.");
+
+        var data = await _projectService.GetProjectGoalsAsync(projectId, cancellationToken);
+        return Ok(new { success = true, message = "Goals retrieved successfully.", data });
+    }
+
+    // POST /api/projects/{project_id}/goals - Thêm goal mới
+    [HttpPost("{project_id}/goals")]
+    [Authorize]
+    public async Task<IActionResult> CreateGoal(
+        [FromRoute(Name = "project_id")] string projectIdStr,
+        [FromBody] CreateProjectGoalRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(projectIdStr, out var projectId))
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", $"Project '{projectIdStr}' not found.");
+
+        var data = await _projectService.CreateProjectGoalAsync(CurrentUserId, projectId, request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created,
+            new { success = true, message = "Goal created successfully.", data });
+    }
+
+    // PATCH /api/projects/{project_id}/goals/{goal_id}/toggle - Đánh dấu hoàn thành / chưa hoàn thành
+    [HttpPatch("{project_id}/goals/{goal_id}/toggle")]
+    [Authorize]
+    public async Task<IActionResult> ToggleGoal(
+        [FromRoute(Name = "project_id")] string projectIdStr,
+        [FromRoute(Name = "goal_id")] string goalIdStr,
+        [FromBody] ToggleProjectGoalRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(projectIdStr, out var projectId))
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", $"Project '{projectIdStr}' not found.");
+        if (!Guid.TryParse(goalIdStr, out var goalId))
+            throw new ProjectException(404, "GOAL_NOT_FOUND", $"Goal '{goalIdStr}' not found.");
+
+        var data = await _projectService.ToggleProjectGoalAsync(CurrentUserId, projectId, goalId, request, cancellationToken);
+        return Ok(new { success = true, message = "Goal status updated successfully.", data });
+    }
+
+    // PUT /api/projects/{project_id}/resources - Cập nhật danh sách resource links
+    [HttpPut("{project_id}/resources")]
+    [Authorize]
+    public async Task<IActionResult> UpdateResources(
+        [FromRoute(Name = "project_id")] string projectIdStr,
+        [FromBody] UpdateProjectResourcesRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(projectIdStr, out var projectId))
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", $"Project '{projectIdStr}' not found.");
+
+        var data = await _projectService.UpdateProjectResourcesAsync(CurrentUserId, projectId, request, cancellationToken);
+        return Ok(new { success = true, message = "Resource links updated successfully.", data });
+    }
+
+    // POST /api/projects/{project_id}/complete - Leader đánh dấu dự án hoàn thành
+    [HttpPost("{project_id}/complete")]
+    [Authorize]
+    public async Task<IActionResult> CompleteProject(
+        [FromRoute(Name = "project_id")] string projectIdStr,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(projectIdStr, out var projectId))
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", $"Project '{projectIdStr}' not found.");
+
+        var data = await _projectService.CompleteProjectAsync(CurrentUserId, projectId, cancellationToken);
+        return Ok(new { success = true, message = "Project marked as completed successfully.", data });
+    }
 }

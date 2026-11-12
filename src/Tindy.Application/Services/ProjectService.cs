@@ -314,7 +314,7 @@ public sealed class ProjectService : IProjectService
             p.ProjectId,
             p.Name,
             p.Status,
-            p.Members.Count(m => m.Status == "active"),
+            p.Members.Count(m => m.Status == "active" || m.Status == "completed"),
             p.MaxTeamCapacity,
             p.Applications.Count(a => a.Status == "pending"),
             p.CreatedAt)).ToList();
@@ -338,7 +338,7 @@ public sealed class ProjectService : IProjectService
         var daysLeft = RecruitmentDeadline.DaysLeft(project.RecruitmentClosesAt, now);
 
         var teamMembers = project.Members
-            .Where(m => m.Status == "active")
+            .Where(m => m.Status == "active" || m.Status == "completed")
             .OrderByDescending(m => m.IsLeader)
             .ThenBy(m => m.JoinedAt)
             .Select(m =>
@@ -396,7 +396,9 @@ public sealed class ProjectService : IProjectService
             positions,
             RecruitmentDeadline.ClosingDate(project.RecruitmentClosesAt),
             project.RecruitmentClosesAt,
-            RecruitmentDeadline.IsOpen(project, now), project.GithubUrl);
+            RecruitmentDeadline.IsOpen(project, now),
+            project.GithubUrl,
+            project.ResourceLinks?.Select(r => new ProjectResourceLinkDto(r.Type, r.Label, r.Url)).ToList() ?? new List<ProjectResourceLinkDto>());
     }
 
     private static void ValidateCreateRequest(CreateProjectRequest request)
@@ -507,5 +509,164 @@ public sealed class ProjectService : IProjectService
         var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 1) return parts[0].Length >= 2 ? parts[0][..2].ToUpperInvariant() : parts[0].ToUpperInvariant();
         return string.Concat(parts.Take(2).Select(p => char.ToUpperInvariant(p[0])));
+    }
+
+    public async Task<IReadOnlyList<ProjectGoalDto>> GetProjectGoalsAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var project = await _projectRepository.GetByIdAsync(projectId, cancellationToken);
+        if (project is null)
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", "Project not found.");
+
+        var goals = await _projectRepository.GetGoalsByProjectIdAsync(projectId, cancellationToken);
+        return goals.Select(g => new ProjectGoalDto(
+            g.Id,
+            g.ProjectId,
+            g.Title,
+            g.Tag,
+            g.DueDate,
+            g.IsCompleted,
+            g.AssigneeIds,
+            g.CreatedAt,
+            g.UpdatedAt)).ToList();
+    }
+
+    public async Task<ProjectGoalDto> CreateProjectGoalAsync(
+        Guid currentUserId,
+        Guid projectId,
+        CreateProjectGoalRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var project = await _projectRepository.GetByIdAsync(projectId, cancellationToken);
+        if (project is null)
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", "Project not found.");
+
+        var isMemberOrLeader = project.LeaderId == currentUserId ||
+            project.Members.Any(m => m.UserId == currentUserId && (m.Status == "active" || m.Status == "completed"));
+        if (!isMemberOrLeader)
+            throw new ProjectException(403, "ACCESS_DENIED", "Only project members can manage goals.");
+
+        if (string.IsNullOrWhiteSpace(request.Title))
+            throw new ProjectException(400, "VALIDATION_FAILED", "Goal title is required.");
+
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        var goal = new ProjectGoal
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = projectId,
+            Title = request.Title.Trim(),
+            Tag = string.IsNullOrWhiteSpace(request.Tag) ? "Milestone" : request.Tag.Trim(),
+            DueDate = string.IsNullOrWhiteSpace(request.DueDate) ? "TBD" : request.DueDate.Trim(),
+            IsCompleted = false,
+            AssigneeIds = request.AssigneeIds?.ToList() ?? new List<Guid>(),
+            CreatedAt = now
+        };
+
+        var created = await _projectRepository.AddGoalAsync(goal, cancellationToken);
+        return new ProjectGoalDto(
+            created.Id,
+            created.ProjectId,
+            created.Title,
+            created.Tag,
+            created.DueDate,
+            created.IsCompleted,
+            created.AssigneeIds,
+            created.CreatedAt,
+            created.UpdatedAt);
+    }
+
+    public async Task<ProjectGoalDto> ToggleProjectGoalAsync(
+        Guid currentUserId,
+        Guid projectId,
+        Guid goalId,
+        ToggleProjectGoalRequest? request = null,
+        CancellationToken cancellationToken = default)
+    {
+        var project = await _projectRepository.GetByIdAsync(projectId, cancellationToken);
+        if (project is null)
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", "Project not found.");
+
+        var isMemberOrLeader = project.LeaderId == currentUserId ||
+            project.Members.Any(m => m.UserId == currentUserId && (m.Status == "active" || m.Status == "completed"));
+        if (!isMemberOrLeader)
+            throw new ProjectException(403, "ACCESS_DENIED", "Only project members can update goals.");
+
+        var goal = await _projectRepository.GetGoalByIdAsync(projectId, goalId, cancellationToken);
+        if (goal is null)
+            throw new ProjectException(404, "GOAL_NOT_FOUND", "Project goal not found.");
+
+        goal.IsCompleted = request?.IsCompleted ?? !goal.IsCompleted;
+        goal.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+
+        await _projectRepository.UpdateGoalAsync(goal, cancellationToken);
+        return new ProjectGoalDto(
+            goal.Id,
+            goal.ProjectId,
+            goal.Title,
+            goal.Tag,
+            goal.DueDate,
+            goal.IsCompleted,
+            goal.AssigneeIds,
+            goal.CreatedAt,
+            goal.UpdatedAt);
+    }
+
+    public async Task<IReadOnlyList<ProjectResourceLinkDto>> UpdateProjectResourcesAsync(
+        Guid currentUserId,
+        Guid projectId,
+        UpdateProjectResourcesRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var project = await _projectRepository.GetByIdAsync(projectId, cancellationToken);
+        if (project is null)
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", "Project not found.");
+
+        if (project.LeaderId != currentUserId)
+            throw new ProjectException(403, "FORBIDDEN", "Only the project leader can manage project resources.");
+
+        var links = new List<ProjectResourceLink>();
+        if (request.Resources != null)
+        {
+            foreach (var r in request.Resources)
+            {
+                if (string.IsNullOrWhiteSpace(r.Url)) continue;
+                var url = r.Url.Trim();
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != "http" && uri.Scheme != "https"))
+                    throw new ProjectException(400, "VALIDATION_FAILED", $"Invalid resource URL: '{url}'. Must be a valid HTTP or HTTPS address.");
+
+                links.Add(new ProjectResourceLink
+                {
+                    Type = string.IsNullOrWhiteSpace(r.Type) ? "other" : r.Type.Trim().ToLowerInvariant(),
+                    Label = string.IsNullOrWhiteSpace(r.Label) ? "Resource" : r.Label.Trim(),
+                    Url = url
+                });
+            }
+        }
+
+        project.ResourceLinks = links;
+        project.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+
+        await _projectRepository.UpdateAsync(project, cancellationToken);
+        return project.ResourceLinks.Select(r => new ProjectResourceLinkDto(r.Type, r.Label, r.Url)).ToList();
+    }
+
+    public async Task<ProjectDetailDto> CompleteProjectAsync(
+        Guid currentUserId,
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        var project = await _projectRepository.GetByIdAsync(projectId, cancellationToken);
+        if (project is null)
+            throw new ProjectException(404, "PROJECT_NOT_FOUND", "Project not found.");
+
+        if (project.LeaderId != currentUserId)
+            throw new ProjectException(403, "FORBIDDEN", "Only the project leader can mark the project as completed.");
+
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        await _projectRepository.CompleteProjectAsync(projectId, now, cancellationToken);
+
+        var updated = await _projectRepository.GetByIdWithDetailsAsync(projectId, cancellationToken)
+            ?? throw new ProjectException(404, "PROJECT_NOT_FOUND", "Project not found after completion.");
+
+        return MapToDetailDto(updated);
     }
 }
