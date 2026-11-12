@@ -74,20 +74,37 @@ public sealed class NotificationSchemaTests(TindyApiFactory factory) : IClassFix
         const string before = "20261103042556_Discovery_CreateTeammateRecruitmentTables";
         await migrator.MigrateAsync(before); await TindySeedRunner.SeedAsync(db);
         var leader = RecruitmentData.User(); var member = RecruitmentData.User(); db.Users.AddRange(leader, member);
+        await db.SaveChangesAsync();
         var role = await db.ProfessionalRoles.Select(r => r.ProfessionalRoleId).FirstAsync();
-        var project = RecruitmentData.Project(leader.UserId, role, "Web"); db.Projects.Add(project);
         var now = DateTime.UtcNow;
-        var invitation = new ProjectInvitation { InvitationId = Guid.NewGuid(), ProjectId = project.ProjectId,
-            PositionId = project.Positions.First().PositionId, InvitedUserId = member.UserId, InvitingLeaderId = leader.UserId,
-            CreatedAt = now, UpdatedAt = now, ExpiresAt = now.AddHours(168) };
-        db.ProjectInvitations.Add(invitation); await db.SaveChangesAsync();
+        var projectId = Guid.NewGuid();
+        var positionId = Guid.NewGuid();
+        var invitationId = Guid.NewGuid();
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO projects (project_id, leader_id, name, description, category, goals, created_at, recruitment_closes_at)
+            VALUES ({projectId}, {leader.UserId}, 'Recruitment Project', 'Migration fixture', 'Web', '[]'::jsonb, {now}, {now.AddDays(7)})
+            """);
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO project_positions (position_id, project_id, role_id, title, created_at)
+            VALUES ({positionId}, {projectId}, {role}, 'Developer', {now})
+            """);
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO project_members (project_id, user_id, role_title, is_leader, joined_at)
+            VALUES ({projectId}, {leader.UserId}, 'Project Lead', TRUE, {now})
+            """);
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO project_invitations (invitation_id, project_id, position_id, invited_user_id, inviting_leader_id, status, created_at, updated_at, expires_at)
+            VALUES ({invitationId}, {projectId}, {positionId}, {member.UserId}, {leader.UserId}, 'pending', {now}, {now}, {now.AddHours(168)})
+            """);
         await migrator.MigrateAsync();
         Assert.Empty(await db.Notifications.ToListAsync());
         Assert.False(db.Database.HasPendingModelChanges()); Assert.Empty(await db.Database.GetPendingMigrationsAsync());
-        db.Notifications.Add(NotificationHttpTests.Row(invitation.InvitationId, member.UserId, now)); await db.SaveChangesAsync();
+        db.Notifications.Add(NotificationHttpTests.Row(invitationId, member.UserId, now)); await db.SaveChangesAsync();
         await migrator.MigrateAsync(before);
         Assert.Equal(0, await db.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM information_schema.tables WHERE table_schema='public' AND table_name='notifications'").SingleAsync());
-        Assert.Equal(invitation.InvitationId, await db.ProjectInvitations.Select(i => i.InvitationId).SingleAsync());
+        Assert.Equal(invitationId, await db.Database.SqlQueryRaw<Guid>("""
+            SELECT invitation_id AS "Value" FROM project_invitations
+            """).SingleAsync());
         await migrator.MigrateAsync();
         Assert.Empty(await db.Notifications.AsNoTracking().ToListAsync());
         Assert.False(db.Database.HasPendingModelChanges());

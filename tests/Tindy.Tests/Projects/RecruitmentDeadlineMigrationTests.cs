@@ -84,7 +84,10 @@ public sealed class RecruitmentDeadlineMigrationTests
         await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE projects SET recruitment_closes_at = {cutoff} WHERE project_id = {id}");
         var error = await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync(Previous));
         Assert.Contains("Cannot downgrade recruitment deadlines", error.MessageText);
-        Assert.Equal(cutoff, (await db.Projects.SingleAsync()).RecruitmentClosesAt);
+        var savedCutoff = await db.Database.SqlQuery<DateTime>($"""
+            SELECT recruitment_closes_at AS "Value" FROM projects WHERE project_id = {id}
+            """).SingleAsync();
+        Assert.Equal(cutoff, savedCutoff);
         Assert.Contains(await db.Database.GetAppliedMigrationsAsync(), m => m.EndsWith("_Project_AddRecruitmentDeadline"));
     }
 
