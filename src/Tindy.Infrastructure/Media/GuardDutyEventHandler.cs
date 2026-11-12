@@ -27,13 +27,17 @@ public sealed class GuardDutyEventHandler(TindyDbContext db, IOptions<GuardDutyO
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM users WHERE user_id = {candidate.OwnerUserId} FOR UPDATE", ct);
         var asset = await db.MediaAssets.SingleOrDefaultAsync(a => a.MediaAssetId == candidate.MediaAssetId, ct);
-        if (asset is null || asset.Purpose != "certificate" || asset.ContentType != "application/pdf" || asset.ScanProvider != "guardduty" ||
+        if (asset is null || asset.ContentType != "application/pdf" || asset.ScanProvider != "guardduty" ||
             asset.Status is "pending_delete" or "rejected" or "active") return ScanEventDisposition.Ignored;
+        var aiInput = asset.Purpose == "ai_input" && options.Value.AiPdfUploadsEnabled &&
+            asset.StorageKey.StartsWith("ai-input/pdf/", StringComparison.Ordinal);
+        var certificate = asset.Purpose == "certificate" && asset.StorageKey.StartsWith("certificates/pdf/", StringComparison.Ordinal);
+        if (!aiInput && !certificate) return ScanEventDisposition.Ignored;
+        if (aiInput && DateTime.UtcNow - asset.CreatedAt >= AiPdfQuarantine.ScanWindow) return ScanEventDisposition.Ignored;
         if (asset.Status == "pending_upload") return ScanEventDisposition.Retry; // Event can arrive before PUT finalization commits.
-        if (asset.Status != "processing" || string.IsNullOrWhiteSpace(asset.ObjectEtag) ||
-            asset.ObjectEtag.Trim('"') != result.ETag.Trim('"') || NormalizeVersion(asset.ObjectVersionId) != NormalizeVersion(result.VersionId) ||
+        if (asset.Status != "processing" || !result.MatchesObject(asset.ObjectEtag, asset.ObjectVersionId, requireVersion: aiInput) ||
             result.Time < asset.CreatedAt.AddMinutes(-5)) return ScanEventDisposition.Ignored;
-        if (!await db.UserCertificateAttachments.AnyAsync(a => a.MediaAssetId == asset.MediaAssetId && a.OwnerUserId == asset.OwnerUserId, ct))
+        if (certificate && !await db.UserCertificateAttachments.AnyAsync(a => a.MediaAssetId == asset.MediaAssetId && a.OwnerUserId == asset.OwnerUserId, ct))
             return ScanEventDisposition.Ignored;
 
         var verdict = result.Result switch
@@ -56,6 +60,4 @@ public sealed class GuardDutyEventHandler(TindyDbContext db, IOptions<GuardDutyO
         await tx.CommitAsync(ct);
         return ScanEventDisposition.Processed;
     }
-
-    private static string? NormalizeVersion(string? version) => string.IsNullOrEmpty(version) || version == "null" ? null : version;
 }

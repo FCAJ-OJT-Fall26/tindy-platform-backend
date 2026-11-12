@@ -603,7 +603,7 @@ namespace Tindy.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_media_assets_positive_sizes", "(file_size_bytes IS NULL OR file_size_bytes > 0) AND reserved_bytes >= 0");
 
-                            t.HasCheckConstraint("ck_media_assets_purpose", "purpose IN ('avatar', 'cover', 'certificate')");
+                            t.HasCheckConstraint("ck_media_assets_purpose", "purpose IN ('avatar', 'cover', 'certificate', 'ai_input')");
 
                             t.HasCheckConstraint("ck_media_assets_scan_provider", "scan_provider IS NULL OR scan_provider IN ('clamav', 'guardduty')");
 

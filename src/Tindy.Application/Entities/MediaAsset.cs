@@ -8,7 +8,7 @@ public sealed class MediaAsset
 {
     public Guid MediaAssetId { get; set; }
     public Guid OwnerUserId { get; set; }
-    public string Purpose { get; set; } = null!; // avatar | cover | certificate
+    public string Purpose { get; set; } = null!; // avatar | cover | certificate | ai_input
 
     public string StorageProvider { get; set; } = null!; // local | s3
     public string StorageContainer { get; set; } = null!;

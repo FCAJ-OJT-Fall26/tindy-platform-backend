@@ -12,7 +12,8 @@ public enum AiFailure
     Timeout,
     DocumentRejected,
     PayloadTooLarge,
-    UnsupportedMedia
+    UnsupportedMedia,
+    DocumentScanRequired
 }
 
 // Messages remain public and fixed. Bounded invalid-output diagnostics are exposed only in Development.
@@ -23,6 +24,7 @@ public sealed class AiException(AiFailure failure) : Exception(failure switch
     AiFailure.InvalidOutput => "AI returned an incomplete or invalid profile draft. Please try again.",
     AiFailure.Timeout => "AI extraction timed out. Please try again.",
     AiFailure.DocumentRejected => "The PDF could not be processed. Use an unencrypted, supported PDF.",
+    AiFailure.DocumentScanRequired => "Use a PDF upload with a completed clean scan.",
     AiFailure.PayloadTooLarge => "The uploaded request exceeds the permitted size.",
     AiFailure.UnsupportedMedia => "Use multipart/form-data with a PDF file and/or text.",
     _ => "The AI provider could not process the request. Please try again later."
@@ -53,6 +55,7 @@ public sealed class AiException(AiFailure failure) : Exception(failure switch
         AiFailure.InvalidOutput => "AI_INVALID_OUTPUT",
         AiFailure.Timeout => "AI_TIMEOUT",
         AiFailure.DocumentRejected => "AI_DOCUMENT_REJECTED",
+        AiFailure.DocumentScanRequired => "AI_DOCUMENT_SCAN_REQUIRED",
         AiFailure.PayloadTooLarge => "AI_PAYLOAD_TOO_LARGE",
         AiFailure.UnsupportedMedia => "AI_UNSUPPORTED_MEDIA",
         _ => "AI_PROVIDER_ERROR"

@@ -155,6 +155,50 @@ public sealed class OAuthHttpContractTests
     }
 
     [Theory]
+    [InlineData("google", "Google")]
+    [InlineData("github", "GitHub")]
+    public async Task ProviderLogin_ResumesAfterApiReplacement_WhenKeyRingIsShared(string route, string provider)
+    {
+        var keyRing = Directory.CreateTempSubdirectory("tindy-oauth-key-ring-");
+        try
+        {
+            string callbackUrl;
+            string correlationCookie;
+            using (var initialApi = new OAuthHttpApiFactory(keyRingPath: keyRing.FullName))
+            using (var initialClient = initialApi.CreateHttpsClient())
+            using (var challenge = await initialClient.GetAsync($"/api/auth/{route}"))
+            {
+                Assert.Equal(HttpStatusCode.Redirect, challenge.StatusCode);
+                var state = QueryHelpers.ParseQuery(challenge.Headers.Location!.Query)["state"].ToString();
+                correlationCookie = challenge.Headers.GetValues("Set-Cookie")
+                    .Single(cookie => cookie.StartsWith(".AspNetCore.Correlation.", StringComparison.Ordinal))
+                    .Split(';', 2)[0];
+                callbackUrl = QueryHelpers.AddQueryString($"/signin-{route}",
+                    new Dictionary<string, string?> { ["code"] = "offline-provider-code", ["state"] = state });
+            }
+
+            using var replacementApi = new OAuthHttpApiFactory(keyRingPath: keyRing.FullName);
+            using var replacementClient = replacementApi.CreateHttpsClient();
+            using var callbackRequest = new HttpRequestMessage(HttpMethod.Get, callbackUrl);
+            callbackRequest.Headers.Add("Cookie", correlationCookie);
+            using var callback = await replacementClient.SendAsync(callbackRequest);
+
+            Assert.Equal(HttpStatusCode.Redirect, callback.StatusCode);
+            using var completed = await replacementClient.GetAsync(callback.Headers.Location);
+            Assert.Equal(HttpStatusCode.Redirect, completed.StatusCode);
+            Assert.Equal($"http://localhost:8443/auth/oauth/callback#ticket={HttpOAuthFlow.LoginTicket}",
+                completed.Headers.Location!.OriginalString);
+            Assert.Equal(provider, replacementApi.Flow.LastIdentity!.Provider);
+        }
+        finally
+        {
+            foreach (var file in keyRing.EnumerateFiles())
+                file.Delete();
+            keyRing.Delete();
+        }
+    }
+
+    [Theory]
     [InlineData("/onboarding")]
     [InlineData("/discover")]
     public async Task Exchange_ReturnsJwtOnlyInBody_WithNullableEmailAndNoStore(string redirectTo)

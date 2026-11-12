@@ -7,6 +7,7 @@ using Tindy.Api.Authorization;
 using Tindy.Application.DTOs.Ai;
 using Tindy.Application.Exceptions;
 using Tindy.Application.Interfaces.Services;
+using Tindy.Infrastructure.Media;
 
 namespace Tindy.Api.Controllers;
 
@@ -74,9 +75,10 @@ public sealed class AiController(IAiProfileService service) : ControllerBase
                 throw Invalid("request", "The multipart form is invalid.");
             }
 
-            if (form.Keys.Any(key => key != "text") || form["text"].Count > 1 ||
+            if (form.Keys.Any(key => key is not ("text" or "upload_id")) || form["text"].Count > 1 ||
+                form["upload_id"].Count > 1 || (form["upload_id"].Count > 0 && form.Files.Count > 0) ||
                 form.Files.Count > 1 || form.Files.Any(file => file.Name != "file"))
-                throw Invalid("request", "Only one text field and one file field are allowed.");
+                throw Invalid("request", "Use one text field and either one upload_id or one file.");
 
             var text = form["text"].ToString();
             if (text.Length > AiProfileLimits.MaxTextLength)
@@ -85,6 +87,8 @@ public sealed class AiController(IAiProfileService service) : ControllerBase
             byte[]? pdf = null;
             if (form.Files.Count == 1)
             {
+                if (!HttpContext.RequestServices.GetRequiredService<IHostEnvironment>().IsDevelopment())
+                    throw new AiException(AiFailure.DocumentScanRequired);
                 var file = form.Files[0];
                 if (file.Length > AiProfileLimits.MaxPdfBytes)
                     throw new AiException(AiFailure.PayloadTooLarge);
@@ -98,10 +102,20 @@ public sealed class AiController(IAiProfileService service) : ControllerBase
                 if (!pdf.AsSpan().StartsWith("%PDF-"u8))
                     throw new AiException(AiFailure.DocumentRejected);
             }
-            if (text.Length == 0 && pdf is null)
-                throw Invalid("request", "Provide text and/or a PDF file.");
+            var input = new AiProfileInput(text.Length == 0 ? null : text, pdf);
+            if (form["upload_id"].Count > 0)
+            {
+                if (!Guid.TryParse(form["upload_id"], out var uploadId) || uploadId == Guid.Empty)
+                    throw Invalid("upload_id", "Use a valid PDF upload ID.");
+                if (!Guid.TryParse(User.FindFirst("sub")?.Value, out var ownerId) || ownerId == Guid.Empty)
+                    throw new InvalidCredentialsException();
+                input = await HttpContext.RequestServices.GetRequiredService<AiPdfQuarantine>()
+                    .ReadCleanInputAsync(ownerId, uploadId, input.Text, cancellationToken);
+            }
+            if (input.Text is null && input.Pdf is null)
+                throw Invalid("request", "Provide text or a scanned PDF.");
 
-            var draft = await service.ExtractAsync(new AiProfileInput(text.Length == 0 ? null : text, pdf), cancellationToken);
+            var draft = await service.ExtractAsync(input, cancellationToken);
             if (HttpContext.RequestServices.GetRequiredService<IHostEnvironment>().IsDevelopment() && draft.Diagnostics is not null)
             {
                 Response.Headers["X-AI-Diagnostics"] = System.Text.Json.JsonSerializer.Serialize(draft.Diagnostics);

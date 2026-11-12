@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,16 +14,24 @@ using Tindy.Infrastructure.Ai;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Hosting;
+using Npgsql;
 
 namespace Tindy.Infrastructure.Extensions;
 
 public static class ServicesCollectionExtensions
 {
-    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddTindyDatabase(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("Connection string 'DefaultConnection' was not found.");
 
+        if (configuration.GetValue<bool>("DevelopmentSeed:RequireLoopback"))
+        {
+            var host = new NpgsqlConnectionStringBuilder(connectionString).Host;
+            if (!string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) &&
+                !(IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address)))
+                throw new InvalidOperationException("The local demo update requires a loopback PostgreSQL host. Check DefaultConnection.");
+        }
 
         services.AddDbContext<TindyDbContext>((provider, options) =>
         {
@@ -47,6 +56,12 @@ public static class ServicesCollectionExtensions
                 await TindySeedRunner.SeedAsync(context, cancellationToken, developmentSeed);
             });
         });
+        return services;
+    }
+
+    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddTindyDatabase(configuration);
 
         // ===================================
         // PASSWORD HASHING

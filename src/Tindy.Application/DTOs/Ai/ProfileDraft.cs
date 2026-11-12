@@ -5,6 +5,8 @@ namespace Tindy.Application.DTOs.Ai;
 public static class AiProfileLimits
 {
     public const int MaxPdfBytes = 4 * 1024 * 1024;
+    public const int MaxQuarantinePdfBytes = 2 * 1024 * 1024;
+    public const int MaxQuarantinePdfPages = 10;
     public const int MaxRequestBytes = 5 * 1024 * 1024;
     public const int MaxTextLength = 20_000;
     public const int MaxCollectionItems = 20;
@@ -17,7 +19,10 @@ public static class AiProfileLimits
     public const int MaxProviderResponseBytes = 1024 * 1024;
 }
 
-public sealed record AiProfileInput(string? Text, byte[]? Pdf);
+public sealed record AiProfileInput(string? Text, byte[]? Pdf)
+{
+    [JsonIgnore] public bool PdfScanVerified { get; init; }
+}
 public sealed record AiCatalogItem(Guid Id, string Name);
 
 // Suggestions deliberately allow missing fields required by the existing save APIs.

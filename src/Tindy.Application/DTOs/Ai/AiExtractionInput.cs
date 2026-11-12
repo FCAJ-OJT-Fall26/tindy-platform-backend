@@ -13,7 +13,7 @@ public static class AiExtractionInput
         if (input.Pdf is not null && !input.Pdf.AsSpan().StartsWith("%PDF-"u8))
             throw new AiException(AiFailure.DocumentRejected);
         if (text is null && input.Pdf is null) throw Invalid("input", "Provide a PDF file and/or non-empty text.");
-        return new(text, input.Pdf);
+        return input with { Text = text };
     }
 
     private static ProfileValidationException Invalid(string field, string message) =>

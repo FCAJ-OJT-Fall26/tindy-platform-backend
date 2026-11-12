@@ -5,6 +5,15 @@ namespace Tindy.Infrastructure.Media;
 public sealed record GuardDutyScanEvent(string EventId, DateTime Time, string Bucket, string Key, string ETag, string? VersionId,
     string ScanStatus, string Result)
 {
+    public bool MatchesObject(string? etag, string? versionId, bool requireVersion)
+    {
+        var expectedVersion = NormalizeVersion(versionId);
+        return !string.IsNullOrWhiteSpace(etag) && (!requireVersion || expectedVersion is not null) &&
+            etag.Trim('"') == ETag.Trim('"') && expectedVersion == NormalizeVersion(VersionId);
+    }
+
+    private static string? NormalizeVersion(string? version) => string.IsNullOrEmpty(version) || version == "null" ? null : version;
+
     public static GuardDutyScanEvent? Parse(string body, GuardDutyOptions options)
     {
         if (body.Length > 65_536) return null;
@@ -26,7 +35,8 @@ public sealed record GuardDutyScanEvent(string EventId, DateTime Time, string Bu
             var key = Text(obj, "objectKey");
             var tag = Text(obj, "eTag");
             if (bucket != options.BucketName || string.IsNullOrWhiteSpace(tag) || key is null ||
-                !key.StartsWith("certificates/pdf/", StringComparison.Ordinal)) return null;
+                !(key.StartsWith("certificates/pdf/", StringComparison.Ordinal) ||
+                    (options.AiPdfUploadsEnabled && key.StartsWith("ai-input/pdf/", StringComparison.Ordinal)))) return null;
             Storage.StorageObjectKeys.Validate(key);
             var status = Text(detail, "scanStatus");
             var result = Text(detail.GetProperty("scanResultDetails"), "scanResultStatus");

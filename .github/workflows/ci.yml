@@ -1,0 +1,38 @@
+name: Backend CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore Tindy.slnx
+
+      - name: Build
+        run: dotnet build Tindy.slnx --configuration Release --no-restore
+
+      - name: Run tests with PostgreSQL Testcontainers
+        run: dotnet test Tindy.slnx --configuration Release --no-build --no-restore --filter 'Category!=ClamAvLive'
+
+      - name: Report vulnerable NuGet dependencies
+        run: dotnet list Tindy.slnx package --include-transitive --vulnerable
+
+      - name: Build the API container
+        run: docker build --platform linux/amd64 --tag tindy-api:ci .

@@ -25,7 +25,10 @@ public static class MediaProcessingRegistration
 
         services.AddOptions<GuardDutyOptions>().Bind(configuration.GetSection("GuardDuty"))
             .Validate(o => !o.Enabled || ValidGuardDuty(o, configuration), "GuardDuty requires matching S3 storage, region, account, protection plan ARN and an HTTPS SQS queue URL.")
+            .Validate(o => !o.AiPdfUploadsEnabled || (o.Enabled && configuration.GetValue("MediaLifecycle:Enabled", true)),
+                "AI PDF uploads require GuardDuty and media cleanup.")
             .ValidateOnStart();
+        services.AddScoped<AiPdfQuarantine>();
         services.AddScoped<IGuardDutyEventHandler, GuardDutyEventHandler>();
         if (configuration.GetValue<bool>("GuardDuty:Enabled"))
         {

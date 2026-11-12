@@ -18,6 +18,7 @@ public sealed class MediaLifecycleOptions
 public sealed class GuardDutyOptions
 {
     public bool Enabled { get; set; }
+    public bool AiPdfUploadsEnabled { get; set; }
     public string Region { get; set; } = "";
     public string AccountId { get; set; } = "";
     public string BucketName { get; set; } = "";

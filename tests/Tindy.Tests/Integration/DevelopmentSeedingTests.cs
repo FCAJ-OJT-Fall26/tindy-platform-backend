@@ -36,6 +36,36 @@ public sealed class DevelopmentSeedOptionsTests
     }
 }
 
+public sealed class FreshDemoSeedingTests
+{
+    [Fact]
+    public async Task FreshSeed_RequiresCurrentSchema_AndRunsOnlyOnceWithConcurrentCalls()
+    {
+        await using var postgres = new TestPostgres();
+        await postgres.StartAsync();
+        var dbOptions = new DbContextOptionsBuilder<TindyDbContext>()
+            .UseNpgsql(postgres.GetConnectionString()).Options;
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["DemoSeed:Password"] = "FreshSeedTest!2026"
+        }).Build();
+
+        await using var first = new TindyDbContext(dbOptions);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => TindySeedRunner.SeedFreshDemoAsync(first, configuration));
+        await first.Database.MigrateAsync();
+
+        await using var second = new TindyDbContext(dbOptions);
+        var results = await Task.WhenAll(
+            TindySeedRunner.SeedFreshDemoAsync(first, configuration),
+            TindySeedRunner.SeedFreshDemoAsync(second, configuration));
+
+        Assert.Contains(true, results);
+        Assert.Contains(false, results);
+        Assert.Equal(DevelopmentDataSeeder.UserCount, await first.Users.CountAsync());
+        Assert.Equal(DevelopmentDataSeeder.ProjectCount, await first.Projects.CountAsync());
+    }
+}
+
 public sealed class DevelopmentSeedingTests : IClassFixture<TindyApiFactory>
 {
     private const string Password = "SeedTestOnly!2026";

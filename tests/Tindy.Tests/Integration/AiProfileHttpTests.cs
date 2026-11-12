@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -62,6 +63,18 @@ public sealed class AiProfileHttpTests
     }
 
     [Fact]
+    public async Task ProductionRawPdfCannotReachExtraction()
+    {
+        using var app = new Fixture(production: true);
+        using var client = app.Client();
+        using var form = Form();
+        AddPdf(form);
+        using var response = await client.PostAsync(Endpoint, form);
+        await AssertProblem(response, HttpStatusCode.UnprocessableEntity, "AI_DOCUMENT_SCAN_REQUIRED");
+        Assert.Equal(0, app.Service.Calls);
+    }
+
+    [Fact]
     public async Task MissingOrInvalidJwt_Returns401_BeforeExtraction()
     {
         using var app = new Fixture();
@@ -99,6 +112,8 @@ public sealed class AiProfileHttpTests
     [InlineData("text_as_file")]
     [InlineData("empty_pdf")]
     [InlineData("long_text")]
+    [InlineData("invalid_upload_id")]
+    [InlineData("upload_and_raw_file")]
     public async Task InvalidForms_Return400_WithoutCallingService(string kind)
     {
         using var app = new Fixture();
@@ -114,6 +129,8 @@ public sealed class AiProfileHttpTests
             case "text_as_file": AddPdf(form, name: "text"); break;
             case "empty_pdf": AddPdf(form, []); break;
             case "long_text": form.Add(new StringContent(new string('x', AiProfileLimits.MaxTextLength + 1)), "text"); break;
+            case "invalid_upload_id": form.Add(new StringContent("not-a-guid"), "upload_id"); break;
+            case "upload_and_raw_file": form.Add(new StringContent(Guid.NewGuid().ToString()), "upload_id"); AddPdf(form); break;
         }
         using var response = await client.PostAsync(Endpoint, form);
         await AssertProblem(response, HttpStatusCode.BadRequest, "VALIDATION_FAILED");
@@ -337,27 +354,31 @@ public sealed class AiProfileHttpTests
         public ExtractionProvider Provider { get; } = new();
         public CatalogRepository Catalog { get; } = new();
         private readonly WebApplicationFactory<Program> _app;
-        public Fixture(bool realService = false, bool realDisabledProvider = false) =>
-            _app = Base.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        public Fixture(bool realService = false, bool realDisabledProvider = false, bool production = false) =>
+            _app = Base.WithWebHostBuilder(builder =>
         {
-            if (!realService)
+            if (production) builder.UseEnvironment("Production");
+            builder.ConfigureTestServices(services =>
             {
-                services.RemoveAll<IAiProfileService>();
-                services.AddSingleton<IAiProfileService>(Service);
-            }
-            else
-            {
-                services.RemoveAll<ICatalogRepository>();
-                services.AddSingleton<ICatalogRepository>(Catalog);
-                if (realDisabledProvider)
-                    services.PostConfigure<BedrockOptions>(options => options.Enabled = false);
+                if (!realService)
+                {
+                    services.RemoveAll<IAiProfileService>();
+                    services.AddSingleton<IAiProfileService>(Service);
+                }
                 else
                 {
-                    services.RemoveAll<IAiExtractionBatchProvider>();
-                    services.AddSingleton<IAiExtractionBatchProvider>(Provider);
+                    services.RemoveAll<ICatalogRepository>();
+                    services.AddSingleton<ICatalogRepository>(Catalog);
+                    if (realDisabledProvider)
+                        services.PostConfigure<BedrockOptions>(options => options.Enabled = false);
+                    else
+                    {
+                        services.RemoveAll<IAiExtractionBatchProvider>();
+                        services.AddSingleton<IAiExtractionBatchProvider>(Provider);
+                    }
                 }
-            }
-        }));
+            });
+        });
 
         public HttpClient Client(bool authenticated = true, Guid? userId = null)
         {
