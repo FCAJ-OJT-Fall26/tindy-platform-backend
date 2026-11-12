@@ -20,7 +20,7 @@ public sealed class DiscoveryService(IDiscoveryRepository repository, DiscoveryF
             candidates = await repository.GetCandidatesAsync(userId, now, now, filters, ct);
             var member = await repository.GetMemberAsync(userId, ct);
             var cards = candidates.Select(p => (Project: p, Match: PositionMatchScorer.Best(member, p.Positions, p.ExpectedCommitmentHours)))
-                .Where(p => p.Match != null).Select(p => Card(p.Project, p.Match!, now)).ToArray();
+                .Where(p => p.Match != null).Select(p => Card(p.Project, p.Match!, member, now)).ToArray();
             session = sessions.Create(userId, now, limit, filters, Mix(cards, limit, now));
         }
         else
@@ -89,10 +89,38 @@ public sealed class DiscoveryService(IDiscoveryRepository repository, DiscoveryF
         return output;
     }
 
-    private static DiscoveryCard Card(DiscoveryProject p, PositionMatch m, DateTime now) => new(
-        p.ProjectId, p.Name, p.Tagline, p.Description, p.Category, p.DifficultyLevel, p.ExpectedCommitmentHours, p.Duration,
-        p.ColorTheme, p.CurrentTeamSize, p.MaxTeamCapacity, p.Leader, p.CreatedAt,
-        RecruitmentDeadline.ClosingDate(p.RecruitmentClosesAt), p.RecruitmentClosesAt, true,
-        RecruitmentDeadline.DaysLeft(p.RecruitmentClosesAt, now), m.MatchScore, m.AlgorithmVersion, m.BestPosition,
-        m.MatchFactors, m.MatchedSkills, m.MissingSkills, m.DataIncomplete, m.Explanation, "best_match", p.IsSaved);
+    private static DiscoveryCard Card(DiscoveryProject p, PositionMatch m, DiscoveryMemberProfile member, DateTime now)
+    {
+        var openPositions = p.Positions
+            .Where(pos => pos.Status == "open" && pos.FilledCount < pos.RequiredCount)
+            .Select(pos =>
+            {
+                var posMatch = PositionMatchScorer.Score(member, pos, p.ExpectedCommitmentHours);
+                var reqSkills = pos.Skills.Where(s => s.IsRequired).Select(s => s.Name).ToArray();
+                return new DiscoveryCardOpenPosition(
+                    pos.PositionId,
+                    pos.Title,
+                    posMatch.MatchScore,
+                    reqSkills,
+                    pos.PositionId == m.BestPosition.PositionId,
+                    posMatch.MatchFactors,
+                    posMatch.MatchedSkills,
+                    posMatch.MissingSkills,
+                    posMatch.Explanation,
+                    Math.Max(0, pos.RequiredCount - pos.FilledCount),
+                    pos.ExperienceLevel,
+                    pos.RoleName);
+            })
+            .OrderByDescending(op => op.IsBestMatch)
+            .ThenByDescending(op => op.MatchScore)
+            .ToArray();
+
+        return new(
+            p.ProjectId, p.Name, p.Tagline, p.Description, p.Category, p.DifficultyLevel, p.ExpectedCommitmentHours, p.Duration,
+            p.ColorTheme, p.CurrentTeamSize, p.MaxTeamCapacity, p.Leader, p.CreatedAt,
+            RecruitmentDeadline.ClosingDate(p.RecruitmentClosesAt), p.RecruitmentClosesAt, true,
+            RecruitmentDeadline.DaysLeft(p.RecruitmentClosesAt, now), m.MatchScore, m.AlgorithmVersion, m.BestPosition,
+            m.MatchFactors, m.MatchedSkills, m.MissingSkills, m.DataIncomplete, m.Explanation, "best_match", p.IsSaved,
+            openPositions);
+    }
 }

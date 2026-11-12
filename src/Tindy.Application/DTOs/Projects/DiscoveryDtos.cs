@@ -19,13 +19,28 @@ public sealed record PositionMatch(int MatchScore, string AlgorithmVersion, Matc
     IReadOnlyList<MatchFactor> MatchFactors, IReadOnlyList<DiscoverySkill> MatchedSkills,
     IReadOnlyList<DiscoverySkill> MissingSkills, bool DataIncomplete, string Explanation);
 
+public sealed record DiscoveryCardOpenPosition(
+    Guid PositionId,
+    string Title,
+    int MatchScore,
+    IReadOnlyList<string> RequiredSkills,
+    bool IsBestMatch = false,
+    IReadOnlyList<MatchFactor>? MatchFactors = null,
+    IReadOnlyList<DiscoverySkill>? MatchedSkills = null,
+    IReadOnlyList<DiscoverySkill>? MissingSkills = null,
+    string? Explanation = null,
+    int RemainingSlots = 0,
+    string? ExperienceLevel = null,
+    string? RoleName = null);
+
 public sealed record DiscoveryCard(Guid ProjectId, string Name, string? Tagline, string Description, string Category,
     string DifficultyLevel, int ExpectedCommitmentHours, string Duration, string? ColorTheme,
     int CurrentTeamSize, int MaxTeamCapacity, ProjectLeaderSummaryDto Leader, DateTime CreatedAt,
     DateOnly RecruitmentClosingDate, DateTime RecruitmentClosesAt, bool IsRecruitmentOpen, int ClosingDaysLeft,
     int MatchScore, string AlgorithmVersion, MatchPositionSummary BestPosition, IReadOnlyList<MatchFactor> MatchFactors,
     IReadOnlyList<DiscoverySkill> MatchedSkills, IReadOnlyList<DiscoverySkill> MissingSkills, bool DataIncomplete,
-    string Explanation, string FeedBucket, bool IsSaved);
+    string Explanation, string FeedBucket, bool IsSaved,
+    IReadOnlyList<DiscoveryCardOpenPosition>? OpenPositions = null);
 public sealed record DiscoveryPage(IReadOnlyList<DiscoveryCard> Items, string? NextCursor, bool HasMore, string FeedVersion = "feed-v1");
 public sealed record SavedDiscoveryProject(Guid ProjectId, string Name, string? Tagline, string Category, string Status,
     DateTime RecruitmentClosesAt, bool IsRecruitmentOpen, bool IsSkipped, DateTime UpdatedAt);
