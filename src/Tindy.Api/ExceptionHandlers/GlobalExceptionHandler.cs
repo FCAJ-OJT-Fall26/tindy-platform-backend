@@ -62,10 +62,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         // 2. Logging
         if (statusCode >= 500)
         {
-            // Provider/HTTP/database exceptions can include credentials or token payloads.
-            // Keep an operational identifier without serializing exception text or inner exceptions.
-            _logger.LogError("Unhandled exception occurred. Exception: {ExceptionType}, TraceId: {TraceId}",
-                exception.GetType().Name, httpContext.TraceIdentifier);
+            _logger.LogError(exception, "Unhandled exception occurred. TraceId: {TraceId}", httpContext.TraceIdentifier);
         }
         else
         {
