@@ -26,6 +26,8 @@ public sealed class OnboardingStep2Request : IValidatableObject
     [MaxLength(30)]
     public List<Guid>? SkillIds { get; set; }
 
+    public List<string>? CustomSkills { get; set; }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (SkillIds is null) yield break;

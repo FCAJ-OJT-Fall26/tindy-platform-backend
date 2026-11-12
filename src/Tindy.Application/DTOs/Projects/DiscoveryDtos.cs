@@ -3,7 +3,7 @@ namespace Tindy.Application.DTOs.Projects;
 public sealed record DiscoveryFilters(string? Category = null, Guid? RoleId = null, Guid? SkillId = null);
 
 // Read projections whitelist only the data needed by discovery and scoring.
-public sealed record DiscoveryMemberProfile(Guid? PreferredRoleId, int? AvailableHoursPerWeek, IReadOnlyList<Guid> SkillIds);
+public sealed record DiscoveryMemberProfile(Guid? PreferredRoleId, int? AvailableHoursPerWeek, IReadOnlyList<Guid> SkillIds, IReadOnlyList<string>? CustomSkills = null);
 public sealed record DiscoverySkill(Guid SkillId, string Name, bool IsRequired);
 public sealed record DiscoveryPosition(Guid PositionId, string Title, Guid RoleId, string RoleName,
     string ExperienceLevel, int RequiredCount, int FilledCount, string Status, IReadOnlyList<DiscoverySkill> Skills);

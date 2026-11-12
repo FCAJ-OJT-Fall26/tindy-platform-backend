@@ -211,6 +211,25 @@ public sealed class ProfilePartialUpdateTests
         Assert.True(parsed.RootElement.GetProperty("errors").TryGetProperty("username", out _));
     }
 
+    [Fact]
+    public void Parser_HandlesCustomSkills_ValidatesAndDedupes()
+    {
+        var req = Parse("""{"custom_skills":["LangChain","Supabase","langchain","Next.js 15"]}""");
+        Assert.True(req.CustomSkills.IsSpecified);
+        Assert.NotNull(req.CustomSkills.Value);
+        Assert.Equal(["LangChain", "Supabase", "Next.js 15"], req.CustomSkills.Value);
+    }
+
+    [Fact]
+    public async Task Update_SavesCustomSkills()
+    {
+        var repo = new FakeRepository();
+        var service = new ProfileService(repo);
+        var req = Parse("""{"custom_skills":["FastAPI","Docker"]}""");
+        await service.UpdateMyProfileAsync(UserId, req);
+        Assert.Equal(["FastAPI", "Docker"], repo.User.Profile!.CustomSkills);
+    }
+
     private static UpdateProfileRequest Parse(string json)
     {
         using var document = JsonDocument.Parse(json);

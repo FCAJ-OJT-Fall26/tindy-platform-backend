@@ -71,4 +71,18 @@ public sealed class PositionMatchScorerTests
         Assert.Equal(result.MatchScore, PositionMatchScorer.Score(member, changed, 7).MatchScore);
         Assert.Equal(50, PositionMatchScorer.Score(new(Role, 10, [Guid.NewGuid()]), position, 10).MatchScore);
     }
+
+    [Fact]
+    public void CustomSkills_MatchingPositionSkill_AwardsBonusPoints()
+    {
+        var position = Position(); // Position has C#, SQL (required), Docker (optional)
+        var memberWithoutCustom = new DiscoveryMemberProfile(Role, 10, [Required1]); // Only C#
+        var scoreWithout = PositionMatchScorer.Score(memberWithoutCustom, position, 10).MatchScore;
+
+        var memberWithCustom = new DiscoveryMemberProfile(Role, 10, [Required1], ["Docker"]);
+        var resultWithCustom = PositionMatchScorer.Score(memberWithCustom, position, 10);
+
+        Assert.Equal(scoreWithout + 5, resultWithCustom.MatchScore);
+        Assert.Contains("Includes +5% custom skills bonus", resultWithCustom.Explanation);
+    }
 }

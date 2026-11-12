@@ -1837,6 +1837,13 @@ namespace Tindy.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("current_role");
 
+                    b.Property<string>("CustomSkills")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("custom_skills")
+                        .HasDefaultValueSql("'[]'::jsonb");
+
                     b.Property<string>("DisplayName")
                         .IsRequired()
                         .HasMaxLength(100)

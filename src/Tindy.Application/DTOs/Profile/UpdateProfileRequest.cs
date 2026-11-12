@@ -33,6 +33,7 @@ public sealed record UpdateProfileRequest
     public OptionalField<string?> ResumeUrl { get; init; }
     public OptionalField<string?> PublicEmail { get; init; }
     public OptionalField<IReadOnlyList<Guid>?> SkillIds { get; init; }
+    public OptionalField<IReadOnlyList<string>?> CustomSkills { get; init; }
 }
 
 // Strict, presence-aware JSON parser. Kept in Application so it can be unit-tested
@@ -45,7 +46,7 @@ public static class ProfilePatchParser
         "location", "current_role", "preferred_role_id", "available_hours_per_week",
         "professional_interests", "learning_goals", "previous_projects_and_contribution",
         "technologies_to_learn", "github_url", "linkedin_url", "personal_website_url",
-        "resume_url", "public_email", "skill_ids", "open_to_team_invitations"
+        "resume_url", "public_email", "skill_ids", "custom_skills", "open_to_team_invitations"
     };
 
     public static UpdateProfileRequest Parse(JsonElement json)
@@ -142,6 +143,47 @@ public static class ProfilePatchParser
             return OptionalField<IReadOnlyList<Guid>?>.Specified(ids);
         }
 
+        OptionalField<IReadOnlyList<string>?> CustomSkillsParser()
+        {
+            const string name = "custom_skills";
+            if (!properties.TryGetValue(name, out var value)) return default;
+            if (value.ValueKind == JsonValueKind.Null)
+                return OptionalField<IReadOnlyList<string>?>.Specified(Array.Empty<string>());
+            if (value.ValueKind != JsonValueKind.Array)
+            {
+                errors[name] = ["Custom skills must be an array of strings."];
+                return default;
+            }
+            var list = new List<string>();
+            foreach (var element in value.EnumerateArray())
+            {
+                if (element.ValueKind != JsonValueKind.String)
+                {
+                    errors[name] = ["Every custom skill tag must be a string."];
+                    return default;
+                }
+                var tag = element.GetString()?.Trim();
+                if (!string.IsNullOrWhiteSpace(tag))
+                {
+                    if (tag.Length > 50)
+                    {
+                        errors[name] = ["Custom skill tag must not exceed 50 characters."];
+                        return default;
+                    }
+                    if (!list.Any(s => string.Equals(s, tag, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        list.Add(tag);
+                    }
+                }
+            }
+            if (list.Count > 30)
+            {
+                errors[name] = ["A maximum of 30 custom skills is allowed."];
+                return default;
+            }
+            return OptionalField<IReadOnlyList<string>?>.Specified(list);
+        }
+
         OptionalField<bool> InvitationOptIn()
         {
             const string name = "open_to_team_invitations";
@@ -175,7 +217,8 @@ public static class ProfilePatchParser
             PersonalWebsiteUrl = Text("personal_website_url", 1000, webUrl: true),
             ResumeUrl = Text("resume_url", 1000, webUrl: true),
             PublicEmail = Text("public_email", 255, email: true),
-            SkillIds = Skills()
+            SkillIds = Skills(),
+            CustomSkills = CustomSkillsParser()
         };
 
         if (errors.Count != 0) throw new ProfileValidationException(errors);

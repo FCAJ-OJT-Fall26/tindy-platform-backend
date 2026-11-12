@@ -28,4 +28,5 @@ public sealed record MemberProfileResponse(
     int CertificatesCount,
     string? AvatarSource = null,
     Guid? AvatarMediaAssetId = null,
-    Guid? CoverMediaAssetId = null);
+    Guid? CoverMediaAssetId = null,
+    IReadOnlyList<string>? CustomSkills = null);

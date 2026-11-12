@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Tindy.Application.Entities;
 
@@ -145,6 +147,19 @@ public class UserProfileConfiguration
             .HasColumnName("technologies_to_learn")
             .HasColumnType("text");
 
+        var jsonOptions = new JsonSerializerOptions();
+        builder.Property(x => x.CustomSkills)
+            .HasColumnName("custom_skills")
+            .HasColumnType("jsonb")
+            .HasConversion(
+                v => JsonSerializer.Serialize(v, jsonOptions),
+                v => JsonSerializer.Deserialize<List<string>>(v, jsonOptions) ?? new List<string>(),
+                new ValueComparer<List<string>>(
+                    (c1, c2) => (c1 == null && c2 == null) || (c1 != null && c2 != null && c1.SequenceEqual(c2)),
+                    c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList()))
+            .HasDefaultValueSql("'[]'::jsonb")
+            .IsRequired();
 
         builder.HasOne(x => x.User)
             .WithOne(x => x.Profile)

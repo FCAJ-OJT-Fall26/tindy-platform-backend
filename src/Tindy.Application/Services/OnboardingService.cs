@@ -58,7 +58,8 @@ public sealed class OnboardingService : IOnboardingService
             ["2"] = new
             {
                 SkillIds = selectedSkills.Select(x => x.SkillId).ToArray(),
-                Skills = selectedSkills
+                Skills = selectedSkills,
+                CustomSkills = profile.CustomSkills ?? new List<string>()
             },
             ["3"] = new
             {
@@ -130,6 +131,15 @@ public sealed class OnboardingService : IOnboardingService
             }
 
             _repository.SyncUserSkills(profile, skills);
+            if (request.CustomSkills != null)
+            {
+                profile.CustomSkills = request.CustomSkills
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Select(s => s.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(30)
+                    .ToList();
+            }
             profile.UpdatedAt = DateTime.UtcNow;
             MarkStep(user, 2);
             await _repository.SaveChangesAsync(token);

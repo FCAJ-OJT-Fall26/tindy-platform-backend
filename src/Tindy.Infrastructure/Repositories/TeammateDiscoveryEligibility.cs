@@ -26,7 +26,8 @@ internal static class TeammateDiscoveryEligibility
         u.Profile.PreferredProfessionalRole == null ? null : u.Profile.PreferredProfessionalRole.Name,
         u.Profile.AvailableHoursPerWeek, u.Profile.UserSkills.OrderBy(s => s.SkillId).Select(s => new ApplicantSkill(s.SkillId, s.Skill.Name)).ToList(),
         u.ProfileExperiences.Count, u.Certificates.Count, "/api/users/" + u.UserId + "/profile",
-        "/api/users/" + u.UserId + "/profile/experiences", "/api/users/" + u.UserId + "/profile/certificates");
+        "/api/users/" + u.UserId + "/profile/experiences", "/api/users/" + u.UserId + "/profile/certificates",
+        u.Profile.CustomSkills);
 
     internal static async Task<(Project Project, ProjectPosition Position)> ContextAsync(TindyDbContext db, Guid leaderId,
         Guid projectId, Guid positionId, DateTime now, bool requireAdmission, CancellationToken ct)

@@ -39,6 +39,7 @@ public class UserProfile
     public string? LearningGoals { get; set; }
     public string? PreviousProjectsAndContribution { get; set; }
     public string? TechnologiesToLearn { get; set; }
+    public List<string> CustomSkills { get; set; } = new();
     public ICollection<UserSkill> UserSkills { get; set; }
         = new List<UserSkill>();
 }

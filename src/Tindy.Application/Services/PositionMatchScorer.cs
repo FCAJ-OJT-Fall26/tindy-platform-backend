@@ -33,13 +33,28 @@ public static class PositionMatchScorer
         var breakdown = factors.Select(f => new MatchFactor(f.Name, f.Value,
             f.Value.HasValue ? 100m * f.Weight / totalWeight : 0m,
             f.Value.HasValue ? 100m * f.Weight * f.Value.Value / totalWeight : 0m)).ToArray();
-        var score = (int)Math.Round(breakdown.Sum(f => f.Contribution), MidpointRounding.AwayFromZero);
+        var rawScore = (int)Math.Round(breakdown.Sum(f => f.Contribution), MidpointRounding.AwayFromZero);
+
+        var customSkills = member.CustomSkills ?? Array.Empty<string>();
+        var customBonus = 0;
+        if (customSkills.Count > 0 && position.Skills.Count > 0)
+        {
+            var matchedCustomCount = position.Skills.Count(s =>
+                customSkills.Any(cs => string.Equals(cs.Trim(), s.Name.Trim(), StringComparison.OrdinalIgnoreCase)));
+            if (matchedCustomCount > 0)
+            {
+                customBonus = Math.Min(15, matchedCustomCount * 5);
+            }
+        }
+        var score = Math.Clamp(rawScore + customBonus, 0, 100);
+
         var all = required.Concat(optional).OrderBy(s => s.SkillId).ToArray();
         var explanation = $"Required skills: {requiredMatched}/{required.Length}; optional skills: {optionalMatched}/{optional.Length}. " +
             (member.PreferredRoleId.HasValue ? (role == 1 ? "Preferred role matches. " : "Preferred role differs. ") : "Preferred role is unknown. ") +
             (availability.HasValue
                 ? $"Availability: {member.AvailableHoursPerWeek} hours/week; project expects {expectedHours}."
-                : "Availability is unknown and excluded from scoring.");
+                : "Availability is unknown and excluded from scoring.") +
+            (customBonus > 0 ? $" Includes +{customBonus}% custom skills bonus." : "");
         return new PositionMatch(Math.Clamp(score, 0, 100), "rule-v1",
             new(position.PositionId, position.Title, position.RoleId, position.RoleName, position.ExperienceLevel,
                 position.RequiredCount, position.FilledCount, Math.Max(0, position.RequiredCount - position.FilledCount)),

@@ -11,7 +11,7 @@ public sealed class DiscoveryRepository(TindyDbContext db) : IDiscoveryRepositor
     public async Task<DiscoveryMemberProfile> GetMemberAsync(Guid userId, CancellationToken ct = default) =>
         await db.UserProfiles.AsNoTracking().Where(p => p.UserId == userId)
             .Select(p => new DiscoveryMemberProfile(p.PreferredRoleId, p.AvailableHoursPerWeek,
-                p.UserSkills.Select(s => s.SkillId).ToList())).SingleOrDefaultAsync(ct)
+                p.UserSkills.Select(s => s.SkillId).ToList(), p.CustomSkills)).SingleOrDefaultAsync(ct)
         ?? new DiscoveryMemberProfile(null, null, []);
 
     public async Task<IReadOnlyList<DiscoveryProject>> GetCandidatesAsync(Guid userId, DateTime now, DateTime snapshot,

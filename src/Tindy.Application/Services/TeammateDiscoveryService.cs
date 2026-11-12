@@ -20,7 +20,7 @@ public sealed class TeammateDiscoveryService(ITeammateDiscoveryRepository reposi
         {
             var candidates = await repository.GetCandidatesAsync(projectId, positionId, now, filters, ct);
             var cards = candidates.Select(c => new TeammateCandidateCard(c.Candidate, c.InteractionAction,
-                PositionMatchScorer.Score(new(c.Candidate.PreferredRoleId, c.Candidate.AvailableHoursPerWeek, c.Candidate.Skills.Select(s => s.SkillId).ToArray()),
+                PositionMatchScorer.Score(new(c.Candidate.PreferredRoleId, c.Candidate.AvailableHoursPerWeek, c.Candidate.Skills.Select(s => s.SkillId).ToArray(), c.Candidate.CustomSkills),
                     context.Position, context.ExpectedCommitmentHours)))
                 .OrderByDescending(c => c.Matching.MatchScore).ThenBy(c => c.Candidate.UserId).ToArray();
             session = sessions.Create(leaderId, projectId, positionId, now, limit, filters, cards);

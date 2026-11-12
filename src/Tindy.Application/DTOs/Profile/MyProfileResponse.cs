@@ -34,4 +34,5 @@ public sealed record MyProfileResponse(
     string? AvatarSource = null,
     Guid? AvatarMediaAssetId = null,
     Guid? CoverMediaAssetId = null,
-    bool OpenToTeamInvitations = false);
+    bool OpenToTeamInvitations = false,
+    IReadOnlyList<string>? CustomSkills = null);

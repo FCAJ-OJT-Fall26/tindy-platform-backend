@@ -99,6 +99,8 @@ public sealed class ProfileService : IProfileService
             if (request.PersonalWebsiteUrl.IsSpecified) profile.PersonalWebsiteUrl = request.PersonalWebsiteUrl.Value;
             if (request.ResumeUrl.IsSpecified) profile.ResumeUrl = request.ResumeUrl.Value;
             if (request.PublicEmail.IsSpecified) profile.PublicEmail = request.PublicEmail.Value;
+            if (request.CustomSkills.IsSpecified)
+                profile.CustomSkills = request.CustomSkills.Value?.ToList() ?? new List<string>();
 
             if (selectedSkills is not null)
                 _profileRepository.SyncUserSkills(profile, selectedSkills);

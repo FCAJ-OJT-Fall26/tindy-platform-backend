@@ -71,7 +71,8 @@ public sealed class ProfileRepository : IProfileRepository
                 _context.ProfileExperiences.Count(experience => experience.UserId == user.UserId),
                 _context.UserCertificates.Count(certificate => certificate.UserId == user.UserId),
                 user.Profile.AvatarSource, user.Profile.AvatarAssetId, user.Profile.CoverAssetId,
-                user.Profile.OpenToTeamInvitations))
+                user.Profile.OpenToTeamInvitations,
+                user.Profile.CustomSkills))
             .SingleOrDefaultAsync(cancellationToken);
     }
 
@@ -117,7 +118,8 @@ public sealed class ProfileRepository : IProfileRepository
                     .ToList(),
                 _context.ProfileExperiences.Count(experience => experience.UserId == user.UserId),
                 _context.UserCertificates.Count(certificate => certificate.UserId == user.UserId),
-                user.Profile.AvatarSource, user.Profile.AvatarAssetId, user.Profile.CoverAssetId))
+                user.Profile.AvatarSource, user.Profile.AvatarAssetId, user.Profile.CoverAssetId,
+                user.Profile.CustomSkills))
             .SingleOrDefaultAsync(cancellationToken);
     }
 
