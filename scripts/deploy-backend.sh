@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+case "${RELEASE_MODE:-}" in
+  deploy|rehearse-rollback) ;;
+  *) echo "::error::Unsupported backend release mode."; exit 1 ;;
+esac
+
 repository_uri="$ECR_REGISTRY/$ECR_REPOSITORY"
 known_image="$repository_uri@sha256:48be282d692341e1eb9acb68750321d8e6861b4227e0e505edb8095ee9ffa33d"
 # Schema applied to RDS before the currently deployed PDF extraction image.
@@ -66,26 +71,30 @@ if [[ "$previous_image" != "$known_image" ]]; then
 fi
 check_ready
 
-tag="release-$RELEASE_SHA-$release_migrations"
-if ! digest=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
-  --image-ids "imageTag=$tag" --query 'imageDetails[0].imageDigest' --output text \
-  2>"$RUNNER_TEMP/ecr-describe-error"); then
-  if ! grep -q 'ImageNotFoundException' "$RUNNER_TEMP/ecr-describe-error"; then
-    cat "$RUNNER_TEMP/ecr-describe-error" >&2
-    exit 1
+image="$previous_image"
+if [[ "$RELEASE_MODE" == deploy ]]; then
+  tag="release-$RELEASE_SHA-$release_migrations"
+  if ! digest=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+    --image-ids "imageTag=$tag" --query 'imageDetails[0].imageDigest' --output text \
+    2>"$RUNNER_TEMP/ecr-describe-error"); then
+    if ! grep -q 'ImageNotFoundException' "$RUNNER_TEMP/ecr-describe-error"; then
+      cat "$RUNNER_TEMP/ecr-describe-error" >&2
+      exit 1
+    fi
+    aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+    docker tag "tindy-api:$RELEASE_SHA" "$repository_uri:$tag"
+    docker push "$repository_uri:$tag"
+    digest=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+      --image-ids "imageTag=$tag" --query 'imageDetails[0].imageDigest' --output text)
   fi
-  aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY"
-  docker tag "tindy-api:$RELEASE_SHA" "$repository_uri:$tag"
-  docker push "$repository_uri:$tag"
-  digest=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
-    --image-ids "imageTag=$tag" --query 'imageDetails[0].imageDigest' --output text)
+  [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+  image="$repository_uri@$digest"
+  printf 'Release commit: `%s`\n\n' "$RELEASE_SHA" >> "$GITHUB_STEP_SUMMARY"
 fi
-[[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-image="$repository_uri@$digest"
-printf 'Release commit: `%s`\n\nECR image: `%s`\n\nPrevious ECS revision: `%s`\n' \
-  "$RELEASE_SHA" "$image" "$previous_revision" >> "$GITHUB_STEP_SUMMARY"
+printf 'Mode: `%s`\n\nECR image: `%s`\n\nPrevious ECS revision: `%s`\n' \
+  "$RELEASE_MODE" "$image" "$previous_revision" >> "$GITHUB_STEP_SUMMARY"
 
-if [[ "$previous_image" == "$image" ]]; then
+if [[ "$RELEASE_MODE" == deploy && "$previous_image" == "$image" ]]; then
   echo 'This image is already deployed and ready.' >> "$GITHUB_STEP_SUMMARY"
   exit 0
 fi
@@ -104,14 +113,20 @@ if [[ "$current_revision" != "$previous_revision" ]]; then
   exit 1
 fi
 
+rehearsal_ready=false
 if aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
      --task-definition "$new_revision" --query service.taskDefinition --output text &&
    wait_for_revision "$new_revision"; then
   printf '\nVerified ECS revision: `%s`\n' "$new_revision" >> "$GITHUB_STEP_SUMMARY"
-  exit 0
+  if [[ "$RELEASE_MODE" == deploy ]]; then
+    exit 0
+  fi
+  rehearsal_ready=true
+  echo "Rehearsal revision is ready. Triggering the rollback procedure."
+else
+  echo "::error::Backend rollout failed. Checking whether the previous revision needs to be restored."
 fi
 
-echo "::error::Backend rollout failed. Checking whether the previous revision needs to be restored."
 current_revision=$(describe_service | jq -er '.services[0].taskDefinition')
 if [[ "$current_revision" == "$new_revision" ]]; then
   aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
@@ -122,6 +137,9 @@ elif [[ "$current_revision" != "$previous_revision" ]]; then
 fi
 if wait_for_revision "$previous_revision"; then
   printf '\nRollback verified: `%s`\n' "$previous_revision" >> "$GITHUB_STEP_SUMMARY"
+  if [[ "$rehearsal_ready" == true ]]; then
+    exit 0
+  fi
 else
   echo "::error::Could not verify rollback. Inspect the ECS service."
 fi
