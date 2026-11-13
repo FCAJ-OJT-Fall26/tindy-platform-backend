@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Deploy a release or rehearse rollback on the running API image.
+        description: Deploy a release, prepare a schema release image, or rehearse rollback.
         type: choice
-        options: [deploy, rehearse-rollback]
+        options: [deploy, prepare-schema, rehearse-rollback]
         default: deploy
         required: true
       release_sha:
-        description: Deploy mode only. Leave blank to deploy this run's main commit.
+        description: Deploy or prepare-schema. Leave blank to use this run's main commit.
         type: string
         required: false
 
@@ -60,7 +60,7 @@ jobs:
           git checkout --detach "$RELEASE_SHA"
 
       - name: Build API image
-        if: inputs.mode == 'deploy'
+        if: inputs.mode == 'deploy' || inputs.mode == 'prepare-schema'
         run: docker build --platform linux/amd64 --tag "tindy-api:$RELEASE_SHA" .
 
       - name: Assume AWS role through GitHub OIDC
@@ -72,5 +72,5 @@ jobs:
           role-duration-seconds: 2700
           role-session-name: tindy-backend-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Run ECS release or rollback rehearsal
+      - name: Run backend release workflow
         run: bash "$RUNNER_TEMP/deploy-backend.sh"

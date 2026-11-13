@@ -2,21 +2,48 @@
 set -euo pipefail
 
 case "${RELEASE_MODE:-}" in
-  deploy|rehearse-rollback) ;;
+  deploy|prepare-schema|rehearse-rollback) ;;
   *) echo "::error::Unsupported backend release mode."; exit 1 ;;
 esac
 
 repository_uri="$ECR_REGISTRY/$ECR_REPOSITORY"
-known_image="$repository_uri@sha256:48be282d692341e1eb9acb68750321d8e6861b4227e0e505edb8095ee9ffa33d"
-# Schema applied to RDS before the currently deployed PDF extraction image.
+baseline_fallback_image="$repository_uri@sha256:48be282d692341e1eb9acb68750321d8e6861b4227e0e505edb8095ee9ffa33d"
+# Verified RDS schema. See docs/guide/SCHEMA_RELEASE.md before changing this baseline.
 known_migrations=c7ab83950f0b26e82099c83a62eafd5a0f58c3c9
 migrations_path=src/Tindy.Infrastructure/Persistence/Migrations
 release_migrations=$(git rev-parse "$RELEASE_SHA:$migrations_path")
 
-if [[ "$release_migrations" != "$known_migrations" ]]; then
+if [[ "$RELEASE_MODE" == prepare-schema ]]; then
+  if [[ "$release_migrations" == "$known_migrations" ]]; then
+    echo "::error::This release matches the verified RDS schema. Use deploy."
+    exit 1
+  fi
+elif [[ "$release_migrations" != "$known_migrations" ]]; then
   echo "::error::Migration files differ from the verified RDS baseline. Complete the backup and migration procedure before enabling this schema in CD."
   exit 1
 fi
+
+publish_release_image() {
+  local tag="release-$RELEASE_SHA-$release_migrations" digest
+  if ! digest=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+    --image-ids "imageTag=$tag" --query 'imageDetails[0].imageDigest' --output text \
+    2>"$RUNNER_TEMP/ecr-describe-error"); then
+    if ! grep -q 'ImageNotFoundException' "$RUNNER_TEMP/ecr-describe-error"; then
+      cat "$RUNNER_TEMP/ecr-describe-error" >&2
+      return 1
+    fi
+    aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY" >&2 || return 1
+    docker tag "tindy-api:$RELEASE_SHA" "$repository_uri:$tag" || return 1
+    docker push "$repository_uri:$tag" >&2 || return 1
+    digest=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+      --image-ids "imageTag=$tag" --query 'imageDetails[0].imageDigest' --output text) || return 1
+  fi
+  if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+    echo "::error::Could not verify the ECR image digest." >&2
+    return 1
+  fi
+  printf '%s@%s\n' "$repository_uri" "$digest"
+}
 
 describe_service() {
   aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --output json
@@ -50,11 +77,19 @@ if ! jq -e '
   exit 1
 fi
 
+if [[ "$RELEASE_MODE" == prepare-schema ]]; then
+  check_ready
+  image=$(publish_release_image)
+  printf 'Mode: `prepare-schema`\n\nRelease commit: `%s`\n\nMigration tree: `%s`\n\nECR image: `%s`\n\nNext: follow the backup and migration procedure.\n' \
+    "$RELEASE_SHA" "$release_migrations" "$image" >> "$GITHUB_STEP_SUMMARY"
+  exit 0
+fi
+
 previous_revision=$(jq -er '.services[0].taskDefinition' <<< "$service")
 definition=$(aws ecs describe-task-definition --task-definition "$previous_revision" \
   --query taskDefinition --output json)
 previous_image=$(jq -er '.containerDefinitions[] | select(.name == "api").image' <<< "$definition")
-if [[ "$previous_image" != "$known_image" ]]; then
+if [[ "$previous_image" != "$baseline_fallback_image" ]]; then
   previous_digest=${previous_image#"$repository_uri@"}
   if [[ ! "$previous_digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
     echo "::error::The running API image is not pinned to a digest in the Tindy ECR repository."
@@ -73,22 +108,7 @@ check_ready
 
 image="$previous_image"
 if [[ "$RELEASE_MODE" == deploy ]]; then
-  tag="release-$RELEASE_SHA-$release_migrations"
-  if ! digest=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
-    --image-ids "imageTag=$tag" --query 'imageDetails[0].imageDigest' --output text \
-    2>"$RUNNER_TEMP/ecr-describe-error"); then
-    if ! grep -q 'ImageNotFoundException' "$RUNNER_TEMP/ecr-describe-error"; then
-      cat "$RUNNER_TEMP/ecr-describe-error" >&2
-      exit 1
-    fi
-    aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY"
-    docker tag "tindy-api:$RELEASE_SHA" "$repository_uri:$tag"
-    docker push "$repository_uri:$tag"
-    digest=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
-      --image-ids "imageTag=$tag" --query 'imageDetails[0].imageDigest' --output text)
-  fi
-  [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-  image="$repository_uri@$digest"
+  image=$(publish_release_image)
   printf 'Release commit: `%s`\n\n' "$RELEASE_SHA" >> "$GITHUB_STEP_SUMMARY"
 fi
 printf 'Mode: `%s`\n\nECR image: `%s`\n\nPrevious ECS revision: `%s`\n' \
