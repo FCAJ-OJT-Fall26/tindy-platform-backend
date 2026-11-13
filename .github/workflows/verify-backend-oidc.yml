@@ -1,0 +1,43 @@
+name: Verify backend OIDC
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  verify-oidc:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+    env:
+      ROLE_ARN: ${{ vars.TINDY_BACKEND_DEPLOY_ROLE_ARN }}
+      SESSION_NAME: tindy-backend-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check repository configuration
+        run: |
+          if [[ ! "$ROLE_ARN" =~ ^arn:aws:iam::572454213668:role/tindy-foundation-BackendDeployRole-[[:alnum:]]+$ ]]; then
+            echo "::error::Set TINDY_BACKEND_DEPLOY_ROLE_ARN in Repository variables using the tindy-foundation output."
+            exit 1
+          fi
+
+      - name: Assume AWS role through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-region: us-east-1
+          role-to-assume: ${{ env.ROLE_ARN }}
+          allowed-account-ids: '572454213668'
+          role-duration-seconds: 900
+          role-session-name: ${{ env.SESSION_NAME }}
+
+      - name: Verify AWS identity
+        run: |
+          caller=$(aws sts get-caller-identity --query Arn --output text)
+          expected="arn:aws:sts::572454213668:assumed-role/${ROLE_ARN##*/}/$SESSION_NAME"
+          if [[ "$caller" != "$expected" ]]; then
+            echo "::error::STS returned an unexpected role or session."
+            exit 1
+          fi
+          printf 'Verified AWS identity: %s\n' "$caller"
