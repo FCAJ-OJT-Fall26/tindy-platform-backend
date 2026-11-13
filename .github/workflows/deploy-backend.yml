@@ -1,0 +1,68 @@
+name: Deploy backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Full commit SHA from main. Leave blank to deploy this run's main commit.
+        type: string
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: tindy-backend-release
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: us-east-1
+      AWS_PAGER: ''
+      ROLE_ARN: ${{ vars.TINDY_BACKEND_DEPLOY_ROLE_ARN }}
+      RELEASE_SHA: ${{ inputs.release_sha || github.sha }}
+      ECS_CLUSTER: tindy-runtime
+      ECS_SERVICE: tindy-api
+      ECR_REPOSITORY: tindy-api
+      ECR_REGISTRY: 572454213668.dkr.ecr.us-east-1.amazonaws.com
+      READY_URL: https://d3aaob529jaggi.cloudfront.net/api/health/ready
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select release from main
+        run: |
+          if [[ ! "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+             ! git merge-base --is-ancestor "$RELEASE_SHA" "$GITHUB_SHA"; then
+            echo "::error::Select a full commit SHA from the history of this run's main commit."
+            exit 1
+          fi
+          if [[ ! "$ROLE_ARN" =~ ^arn:aws:iam::572454213668:role/tindy-foundation-BackendDeployRole-[[:alnum:]]+$ ]]; then
+            echo "::error::Set TINDY_BACKEND_DEPLOY_ROLE_ARN from the tindy-foundation output."
+            exit 1
+          fi
+          git show "$GITHUB_SHA:scripts/deploy-backend.sh" > "$RUNNER_TEMP/deploy-backend.sh"
+          git checkout --detach "$RELEASE_SHA"
+
+      - name: Build API image
+        run: docker build --platform linux/amd64 --tag "tindy-api:$RELEASE_SHA" .
+
+      - name: Assume AWS role through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-region: us-east-1
+          role-to-assume: ${{ env.ROLE_ARN }}
+          allowed-account-ids: '572454213668'
+          role-duration-seconds: 2700
+          role-session-name: tindy-backend-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Push image and roll out ECS
+        run: bash "$RUNNER_TEMP/deploy-backend.sh"
